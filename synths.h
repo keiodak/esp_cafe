@@ -1,0 +1,504 @@
+#include "stuff.h"
+
+int myNumbers[] = {32000, 31578, 22444, 25111};
+//you need to make a table that is 0,3000,5578
+int myPlacers[] = {0, 0, 0, 0};
+
+
+//int myNumbers[] = {12000, 11578, 14444, 15111,8900, 10278, 12004, 12111};
+//you need to make a table that is 0,3000,5578
+//int myPlacers[] = {0, 0, 0, 0,0,0,0,0};
+
+int tapsz=sizeof(myPlacers)>>2;
+
+void IRAM_ATTR coco() {
+ INTABRUPT
+ DACWRITER(pout)
+ gyo=ADCREADER
+ pout=dellius(t,gyo,lamp);
+ if (FLIPPERAT) t++;
+ else t--; 
+ t=t&0x1FFFF;//
+ if (SKIPPERAT)  {
+  if (lastskp==0) delayskp = t;
+  lastskp = 1;
+ } else {
+  if (lastskp) t=delayskp;
+  lastskp = 0;
+ } 
+ REG(I2S_CONF_REG)[0] &= ~(BIT(5)); 
+ adc_read = EARTHREAD;
+ int16_t scaled = pout / 2;
+    ASHWRITER(scaled);
+ REG(I2S_INT_CLR_REG)[0]=0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= (BIT(5)); //start rx
+ YELLOWERS(t)
+}
+
+void IRAM_ATTR amosc() {
+    INTABRUPT;
+
+    DACWRITER(pout);
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, lamp);
+
+    // ---- tの増減 ----
+    if (FLIPPERAT) t++;
+    else t--;
+
+    // ---- skipp押下でwrap範囲を順送り切替（4パターン + wrapなし）----
+    static uint8_t last_skp = 0;
+    static uint8_t wrap_index = 0;
+    static const uint32_t wrap_table[5] = {
+        0x0FFF,   // 4096
+        0x1FFF,   // 8192
+        0x3FFF,   // 16384
+        0x7FFF,   // 32768
+        0xFFFFFFFF // wrapなし（マスクせず）
+    };
+
+    if (SKIPPERAT && !last_skp) {
+        wrap_index = (wrap_index + 1) % 5; // 0〜4ループ
+    }
+    last_skp = SKIPPERAT;
+
+    uint32_t wrap_mask = wrap_table[wrap_index];
+
+    // ---- wrap処理 or wrapなし ----
+    if (wrap_mask != 0xFFFFFFFF) {
+        t &= wrap_mask;  // wrapあり
+    } else {
+        if (t > 0xFFFFF) t = 0; // wrapなしでも暴走防止
+    }
+
+    // ---- CV制御 ----
+    int16_t brown_cv = EARTHREAD;
+    int32_t t_extended = t;
+    int32_t scaled = (t_extended * (brown_cv + 32768)) >> 16;
+    if (scaled > 32767) scaled = 32767;
+    if (scaled < -32768) scaled = -32768;
+
+    // ---- スムージング ----
+    static int16_t y_last = 0;
+    static int16_t g_last = 0;
+    int16_t yellow_val = (scaled + y_last) >> 1;
+    int16_t gray_val   = (scaled + g_last) >> 1;
+    y_last = yellow_val;
+    g_last = gray_val;
+
+    // ---- 出力 ----
+    YELLOWERS(yellow_val);
+    ASHWRITER(gray_val);
+
+    // ---- I2S制御 ----
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+}
+
+void IRAM_ATTR echo() {
+ INTABRUPT
+ DACWRITER(pout)
+ gyo=ADCREADER
+ pout =0;
+ for (int i=0; i<tapsz; i++) 
+  pout+=dellius((myPlacers[i]<<2)+i,gyo,lamp);
+ pout = pout>>2;
+ if (FLIPPERAT)
+  for (int i=0; i<tapsz; i++)  //sizeof(myPlacers)
+   myPlacers[i]++;
+ else 
+  for (int i=0; i<tapsz; i++) 
+   myPlacers[i]--;
+ for (int i=0; i<tapsz; i++) {
+  myPlacers[i] %= myNumbers[i];
+  if (myPlacers[i]<0) myPlacers[i] += myNumbers[i];
+ }
+ if (SKIPPERAT)  {} else {} 
+ REG(I2S_CONF_REG)[0] &= ~(BIT(5)); 
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read); //rand()
+ REG(I2S_INT_CLR_REG)[0]=0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= (BIT(5)); //start rx
+ YELLOWERS(myPlacers[0]+myPlacers[1]+myPlacers[2]+myPlacers[3]);
+}
+
+void IRAM_ATTR ssd() {
+ INTABRUPT;
+ DACWRITER(pout);
+ gyo = ADCREADER;
+ pout = dellius(t, gyo, lamp);
+ if (FLIPPERAT) t++;
+ else t--;
+ t &= 0xFF;
+ if (SKIPPERAT) {} else {}
+ REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read);
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= (BIT(5));
+ YELLOWERS(t);
+}
+
+void IRAM_ATTR bbd() {
+ INTABRUPT;
+ DACWRITER(pout);
+ gyo = ADCREADER;
+
+ static int16_t last_mix = 0;
+ int32_t mix = gyo;
+ mix = (mix + last_mix * 7) / 8;
+ last_mix = mix;
+ mix &= 0xFFF0;
+ pout = dellius(t, (int16_t)mix, lamp);
+ if (FLIPPERAT) t++; else t--;
+ t &= 0x1FFF;
+ if (SKIPPERAT) {
+  if (!lastskp) delayskp = t;
+  lastskp = 1;
+ } else {
+  if (lastskp) t = delayskp;
+  lastskp = 0;
+ }
+
+ REG(I2S_CONF_REG)[0] &= ~BIT(5);
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read);
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= BIT(5);
+
+ YELLOWERS(t);
+}
+
+void IRAM_ATTR cococo() {
+ INTABRUPT;
+ DACWRITER(pout);
+ gyo = ADCREADER;
+
+ static int t1 = 0;
+ static int t2 = 1024;
+ static int t3 = 2048;
+ static int c2 = 0;
+ static int c3 = 0;
+
+ int16_t out1 = dellius(t1, gyo, lamp);
+ int16_t out2 = dellius(t2, gyo, lamp);
+ int16_t out3 = dellius(t3, gyo, lamp);
+
+ pout = (out1 + out2 + out3) / 3;
+
+ if (FLIPPERAT) {
+  t1++;
+  if (c2++ % 2 == 0) t2 += 3; // 五度上
+  if (c3++ % 3 == 0) t3--;   // 五度下
+ } else {
+  t1--;
+  if (c2++ % 2 == 0) t2 -= 3;
+  if (c3++ % 3 == 0) t3++;
+ }
+
+ t1 = t1 & 0x1FFFF;
+ t2 = t2 & 0x1FFFF;
+ t3 = t3 & 0x1FFFF;
+
+ if (SKIPPERAT) {
+  if (lastskp == 0) delayskp = t1;
+  lastskp = 1;
+ } else {
+  if (lastskp) t1 = delayskp;
+  lastskp = 0;
+ }
+
+ REG(I2S_CONF_REG)[0] &= ~BIT(5);
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read);
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= BIT(5);
+ YELLOWERS(t1);
+}
+
+void IRAM_ATTR cocooct() {
+ INTABRUPT;
+ DACWRITER(pout);
+ gyo = ADCREADER;
+
+ static int t1 = 0;
+ static int t2 = 0;
+ static int t3 = 0;
+ static int flip_count = 0;
+ static int skip_count = 0;
+
+ int16_t out1 = dellius(t1, gyo, lamp);
+ int16_t out2 = dellius(t2, gyo, lamp);
+ int16_t out3 = dellius(t3, gyo, lamp);
+
+ pout = (out1 + out2 + out3) / 3;
+
+ if(FLIPPERAT) {
+   flip_count++;
+   t2 += 4; // レイヤー2の音階変化
+ } 
+
+ if(SKIPPERAT) {
+   skip_count++;
+   t3 -= 3; // レイヤー3の音階変化
+ }
+
+ t1 = (t1 + 1) & 0x1FFFF;
+ t2 = (t2 + 1) & 0x1FFFF;
+ t3 = (t3 + 1) & 0x1FFFF;
+
+ REG(I2S_CONF_REG)[0] &= ~BIT(5);
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read);
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= BIT(5);
+ YELLOWERS(t1);
+}
+
+void IRAM_ATTR he() {
+  INTABRUPT;
+  DACWRITER(pout);
+  gyo = ADCREADER;
+
+  static int t1 = -512;
+  static int t2 = 1024;
+  static int t3 = 2048 + 512;
+
+  static int c2 = 0;
+  static int c3 = 0;
+
+  static int flip_state = 0;
+  static int skip_state = 0;
+
+  static int scale2[] = {-4, 2, 5};  // t2用 Ionian
+  static int scale3[] = {-2, 4, -5}; // t3用 Ionian
+  static int scale_index2 = 0;
+  static int scale_index3 = 0;
+
+  // flip/skip で interval 切替
+  if (FLIPPERAT && !flip_state) {
+    flip_state = 1;
+    scale_index2 = (scale_index2 + 1) % 3;
+  } else if (!FLIPPERAT) flip_state = 0;
+
+  if (SKIPPERAT && !skip_state) {
+    skip_state = 1;
+    scale_index3 = (scale_index3 + 1) % 3;
+  } else if (!SKIPPERAT) skip_state = 0;
+
+  int interval2 = scale2[scale_index2];
+  int interval3 = scale3[scale_index3];
+
+  // ループバッファ wrap
+  t1 &= 0x1FFFF;
+  t2 &= 0x1FFFF;
+  t3 &= 0x1FFFF;
+
+  // 出力取得（t1を少し下げ）
+  int16_t out1 = dellius(t1, gyo, lamp) >> 1;
+  int16_t out2 = dellius(t2, gyo, lamp);
+  int16_t out3 = dellius(t3, gyo, lamp);
+
+  pout = (out1 + out2 + out3) / 3;
+
+  // t2/t3 は常に interval 分だけ進める
+  if (c2++ % 2 == 0) t2 = (t2 + interval2) & 0x1FFFF;
+  if (c3++ % 3 == 0) t3 = (t3 + interval3) & 0x1FFFF;
+
+  t1 = (t1 + 1) & 0x1FFFF;
+
+  REG(I2S_CONF_REG)[0] &= ~BIT(5);
+  adc_read = EARTHREAD;
+  ASHWRITER(adc_read);
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= BIT(5);
+
+  YELLOWERS(t1);
+}
+
+void IRAM_ATTR hn() {
+  INTABRUPT
+  static uint32_t t = 0;
+  static uint16_t s = 1;
+  static int layerCount = 1;
+
+  // 各レイヤー用シフト量
+  static uint8_t shiftA[3] = {8, 6, 5};
+  static uint8_t shiftB[3] = {7, 9, 10};
+
+  if (FLIPPERAT && SKIPPERAT) {
+    layerCount++;
+    if (layerCount > 3) layerCount = 1;
+
+    // skippでシフト量を変調
+    for (int i = 0; i < 3; i++) {
+      shiftA[i] = (shiftA[i] + (s & 7)) % 12 + 3; // 3〜14でランダム変化
+      shiftB[i] = (shiftB[i] + ((s >> 3) & 7)) % 12 + 3;
+    }
+
+    s ^= (s << 3) ^ (s >> 1);
+  }
+
+  int32_t mix = 0;
+  for (int i = 0; i < layerCount; i++) {
+    uint32_t tt = t + ((s >> (i * 3)) & 0xFF);
+    uint16_t v;
+    switch (i) {
+      case 0: v = ((tt * ((tt >> shiftA[0]) | (tt >> shiftB[0]))) >> 4) & 0xFF; break;
+      case 1: v = ((tt * ((tt >> shiftA[1]) | (tt >> shiftB[1]))) >> 4) & 0xFF; break;
+      case 2: v = ((tt * ((tt >> shiftA[2]) ^ (tt >> shiftB[2]))) >> 4) & 0xFF; break;
+      default: v = 0; break;
+    }
+    mix += (v ^ (s << (i + 1)));
+  }
+
+  mix &= 0xFF;
+  DACWRITER(mix);
+  YELLOWERS(mix);
+
+  t += 1;
+}
+
+void IRAM_ATTR disc() {
+    INTABRUPT;
+
+    int16_t gyo = ADCREADER;       // グリーン入力
+    int16_t lamp = EARTHREAD;      // ブラウンCV入力
+    static uint32_t phase = 0;     // ベース用位相
+    static uint8_t last_skp = 0;
+
+    int32_t sample = gyo;
+
+    // ---- SKIPPERATホワイトノイズ ----
+    if (SKIPPERAT) {
+        uint32_t rnd = REG(RNG_REG)[0];
+        int16_t noise = (int16_t)((rnd & 0xFFFF) - 0x8000) >> 2; // ノイズ強め
+        sample += noise;
+        last_skp = 1;
+    } else {
+        last_skp = 0;
+    }
+
+    // ---- FLIPPERAT低音ぶつぶつベース（押してる時だけ） ----
+    int32_t bass = 0;
+    if (FLIPPERAT) {
+        const int16_t bass_amp = 1000;  // 小さめで低音
+        const uint32_t freq_step = 5;   // ゆっくり進む位相
+        phase = (phase + freq_step) & 0xFFFFF;
+        bass = (int16_t)((phase & 0xFFFF) - 0x8000) / 16; // さらに低音化
+        sample += bass_amp * bass / 32768;
+    } else {
+        bass = 0;
+        phase = 0; // 押してない時はベース止める
+    }
+
+    // ---- 強歪み ----
+    const int16_t hard_threshold = 5000;
+    if (sample > hard_threshold) sample = hard_threshold;
+    if (sample < -hard_threshold) sample = -hard_threshold;
+
+    // ---- ソフトクリップ ----
+    sample = sample - (sample * sample * sample) / 1073741824;
+
+    // ---- グリーン入力にEARTHREADでAM ----
+    sample = (sample * (lamp + 32768) * 4) >> 16;
+    if (sample > 32767) sample = 32767;
+    if (sample < -32768) sample = -32768;
+
+    // ---- DAC出力（ベース+ノイズ+AM） ----
+    DACWRITER((int16_t)sample);
+
+    // ---- ASHWRITER（灰色）クリーン音のみ、AMなし ----
+    ASHWRITER(gyo);
+
+    // ---- I2S制御 ----
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+}
+
+void IRAM_ATTR pbb() {
+    INTABRUPT
+
+    DACWRITER(pout);
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, lamp);
+
+    // --- t 増減のみ（wrap無し） ---
+    if (FLIPPERAT) t++;
+    else t--;
+
+    // --- skipp/flipp 同時押し判定 ---
+    bool simult = SKIPPERAT && FLIPPERAT;
+
+    int16_t brown_cv = EARTHREAD;
+    int32_t t_extended = t;
+
+    int32_t yellow_val;
+    int32_t gray_val;
+
+    if (simult) {
+        // 同時押し中ずっとランダム変調
+        uint32_t rnd = REG(RNG_REG)[0]; // 0..0xFFFFFFFF
+        yellow_val = ((t_extended ^ rnd) & 0x7FFF);
+        gray_val   = ((t_extended * 3 ^ (rnd >> 8)) & 0x7FFF);
+    } else {
+        // 通常 VCA
+        yellow_val = (t_extended * (brown_cv + 32768)) >> 16;
+        gray_val   = (t_extended * (brown_cv + 32768)) >> 16;
+    }
+
+    // --- 出力 ---
+    YELLOWERS((int16_t)yellow_val);
+    ASHWRITER((int16_t)gray_val);
+
+    // --- I2S 制御 ---
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+}
+
+static uint16_t pattern1(uint32_t t){ return (t*(t>>8)) & 0xFFF; }
+static uint16_t pattern2(uint32_t t){ return (t*(t>>6 | t>>9)) & 0xFFF; }
+static uint16_t pattern3(uint32_t t){ return (t*(t>>5 | t>>7)) & 0xFFF; }
+static uint16_t pattern4(uint32_t t){ return (t*((t>>4)|(t>>10))) & 0xFFF; }
+static uint16_t pattern5(uint32_t t){ return (t*(t>>3 | t>>11)) & 0xFFF; }
+static uint16_t pattern6(uint32_t t){ return (t*(t>>2 | t>>9)) & 0xFFF; }
+static uint16_t pattern7(uint32_t t){ return (t*(t>>7 ^ t>>10)) & 0xFFF; }
+static uint16_t pattern8(uint32_t t){ return (t*((t>>5)|(t>>12))) & 0xFFF; }
+typedef uint16_t (*BytebeatFunc)(uint32_t);
+void IRAM_ATTR bytebeats() {
+    INTABRUPT;
+
+    if (FLIPPERAT) t++;
+    else t--;
+
+    if (SKIPPERAT) t += 2;
+
+    bool both_pressed = (FLIPPERAT && SKIPPERAT);
+
+    static BytebeatFunc patterns[] = { pattern1, pattern2, pattern3, pattern4, pattern5, pattern6, pattern7, pattern8 };
+    static const int num_patterns = sizeof(patterns)/sizeof(patterns[0]);
+    static int current_pattern = 0;
+
+    static bool prev_both_pressed = false;
+    if (both_pressed && !prev_both_pressed) {
+        current_pattern = (current_pattern + 1) % num_patterns;
+    }
+    prev_both_pressed = both_pressed;
+
+    pout = patterns[current_pattern](t);
+
+    DACWRITER(pout & 0xFFF); 
+
+    gyo = ADCREADER;
+    adc_read = EARTHREAD;
+    ASHWRITER(adc_read);
+
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+
+    YELLOWERS(pout);
+}
