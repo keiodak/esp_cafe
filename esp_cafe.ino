@@ -13,14 +13,14 @@ void setup() {
  lamp=true;
  LAMPLIGHT
  presets[0]=coco;
- presets[1]=amosc;
- presets[2]=echo;
+ presets[1]=echo;
+ presets[2]=amosc;
  presets[3]=ssd;
  presets[4]=bbd;
  presets[5]=cococo;
  presets[6]=cocooct;
  presets[7]=disc;
- presets[8]=pbb;
+ presets[8]=dist;
  presets[9]=he;
  presets[10]=bytebeats;
 
