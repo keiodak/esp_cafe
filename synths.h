@@ -426,16 +426,13 @@ void IRAM_ATTR dist() {
 void IRAM_ATTR prun() {
     INTABRUPT;
 
-    // ---- 単一オシレーター位相 ----
     static uint32_t phase = 0;
 
-    // ---- FLIPPERAT / SKIPPERAT状態 ----
     static uint8_t last_flipp = 0;
     static uint8_t last_skipp = 0;
     static uint8_t step_idx = 0;
     static uint8_t config_idx = 0;
 
-    // ---- 8ステップピッチ構成（初期値はランダム） ----
     static uint32_t pitch_configs[2][8];
     static uint8_t initialized = 0;
     if (!initialized) {
@@ -446,14 +443,12 @@ void IRAM_ATTR prun() {
     }
     uint32_t* pitch_steps = pitch_configs[config_idx];
 
-    // ---- FLIPPERATでランダム的にシフトレジスタ更新 ----
     if (FLIPPERAT && !last_flipp) {
         step_idx = (step_idx + 1) % 8;
         pitch_steps[step_idx] = 50 + (rand() & 31);
     }
     last_flipp = FLIPPERAT;
 
-    // ---- SKIPPERATで構成を切り替え ----
     if (SKIPPERAT && !last_skipp) {
         config_idx = (config_idx + 1) % 2;
         step_idx = 0;
@@ -461,21 +456,17 @@ void IRAM_ATTR prun() {
     last_skipp = SKIPPERAT;
 
     // ---- 単一オシレーター（triangle）----
-    phase = (phase + pitch_steps[step_idx]) & 0xFFFFFF; // 位相幅を広げる
+    phase = (phase + pitch_steps[step_idx]) & 0xFFFFFF;
     int32_t tri = (int32_t)(phase & 0xFFFFFF);
-    tri = (tri >> 4);         // 20bit -> 16bit相当に圧縮
-    if (tri & 0x8000) tri = 0xFFFF - tri;  // triangle波
-    tri -= 0x4000;            // 中心を0に
+    tri = (tri >> 4); 
+    if (tri & 0x8000) tri = 0xFFFF - tri; 
+    tri -= 0x4000; 
 
-    // ---- AM（EARTHREAD）----
     int16_t amp_cv = EARTHREAD;
-    int16_t sample = (int16_t)((tri * (amp_cv + 32768)) >> 15); // 振幅しっかり
+    int16_t sample = (int16_t)((tri * (amp_cv + 32768)) >> 15); 
 
-    // ---- 出力 ----
     ASHWRITER(sample);
     DACWRITER(sample);
-
-    // ---- I2S制御 ----
     REG(I2S_CONF_REG)[0] &= ~(BIT(5));
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
     REG(I2S_CONF_REG)[0] |= BIT(5);
