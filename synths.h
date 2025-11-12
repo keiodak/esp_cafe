@@ -6,6 +6,7 @@ int myPlacers[] = {0, 0, 0, 0};
 //int myNumbers[] = {12000, 11578, 14444, 15111,8900, 10278, 12004, 12111};
 //you need to make a table that is 0,3000,5578
 //int myPlacers[] = {0, 0, 0, 0,0,0,0,0};
+
 int tapsz=sizeof(myPlacers)>>2;
 
 void IRAM_ATTR coco() {
@@ -91,6 +92,7 @@ void IRAM_ATTR amosc() {
         t &= wrap_mask; 
     } else {
         if (t > 0xFFFFF) t = 0; 
+    }
 
     int16_t brown_cv = EARTHREAD;
     int32_t t_extended = t;
@@ -306,46 +308,56 @@ void IRAM_ATTR he() {
   YELLOWERS(t1);
 }
 
-// ?
-void IRAM_ATTR hn() {
-  INTABRUPT
-  static uint32_t t = 0;
-  static uint16_t s = 1;
-  static int layerCount = 1;
+// WMP
+void IRAM_ATTR wmp() {
+    INTABRUPT;
 
-  static uint8_t shiftA[3] = {8, 6, 5};
-  static uint8_t shiftB[3] = {7, 9, 10};
+    int16_t gyo = ADCREADER;        // Green入力
+    static int16_t pout = 0;        // 歪み WMP 出力バッファ
 
-  if (FLIPPERAT && SKIPPERAT) {
-    layerCount++;
-    if (layerCount > 3) layerCount = 1;
+    int32_t sample = gyo;
 
-    for (int i = 0; i < 3; i++) {
-      shiftA[i] = (shiftA[i] + (s & 7)) % 12 + 3; 
-      shiftB[i] = (shiftB[i] + ((s >> 3) & 7)) % 12 + 3;
+    // ---- SKIPPERAT: WMP パターン切替 ----
+    static uint8_t wmp_pattern = 0;
+    static uint8_t last_skipp = 0;
+    if (SKIPPERAT && !last_skipp) wmp_pattern = (wmp_pattern + 1) % 3;
+    last_skipp = SKIPPERAT;
+
+    // ---- クリーン WMP（ASH用） ----
+    int32_t wmp_sample;
+    switch (wmp_pattern) {
+        case 0: wmp_sample = (sample + sample*2 + sample*3/2)/3; break;
+        case 1: wmp_sample = (sample + sample*3/2 + sample*4/3)/3; break;
+        case 2: wmp_sample = (sample + sample*4/3 + sample*5/4)/3; break;
     }
+    ASHWRITER((int16_t)wmp_sample);
 
-    s ^= (s << 3) ^ (s >> 1);
-  }
+    // ---- 歪み WMP（pout用） ----
+    int32_t distorted = wmp_sample;
 
-  int32_t mix = 0;
-  for (int i = 0; i < layerCount; i++) {
-    uint32_t tt = t + ((s >> (i * 3)) & 0xFF);
-    uint16_t v;
-    switch (i) {
-      case 0: v = ((tt * ((tt >> shiftA[0]) | (tt >> shiftB[0]))) >> 4) & 0xFF; break;
-      case 1: v = ((tt * ((tt >> shiftA[1]) | (tt >> shiftB[1]))) >> 4) & 0xFF; break;
-      case 2: v = ((tt * ((tt >> shiftA[2]) ^ (tt >> shiftB[2]))) >> 4) & 0xFF; break;
-      default: v = 0; break;
-    }
-    mix += (v ^ (s << (i + 1)));
-  }
+    // ---- FLIPPERAT: 歪みパターン切替 ----
+    static uint8_t dist_pattern = 0;
+    static uint8_t last_flipp = 0;
+    if (FLIPPERAT && !last_flipp) dist_pattern = (dist_pattern + 1) % 3;
+    last_flipp = FLIPPERAT;
 
-  mix &= 0xFF;
-  DACWRITER(mix);
-  YELLOWERS(mix);
+    int32_t hard_threshold = (dist_pattern==0 ? 6000 : (dist_pattern==1 ? 4000 : 3000));
 
-  t += 1;
+    if (distorted > hard_threshold) distorted = hard_threshold;
+    if (distorted < -hard_threshold) distorted = -hard_threshold;
+
+    distorted = distorted - (distorted*distorted*distorted)/134217728;  // 強めのソフトクリップ
+
+    // ---- フィードバック合成 ----
+    pout = (distorted + pout)/2;
+
+    // ---- DAC 出力（歪み WMP）----
+    DACWRITER((int16_t)pout);
+
+    // ---- I2S制御 ----
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
 // distortion test
@@ -410,6 +422,65 @@ void IRAM_ATTR dist() {
     REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
+//phase osc + shiftregister
+void IRAM_ATTR prun() {
+    INTABRUPT;
+
+    // ---- 単一オシレーター位相 ----
+    static uint32_t phase = 0;
+
+    // ---- FLIPPERAT / SKIPPERAT状態 ----
+    static uint8_t last_flipp = 0;
+    static uint8_t last_skipp = 0;
+    static uint8_t step_idx = 0;
+    static uint8_t config_idx = 0;
+
+    // ---- 8ステップピッチ構成（初期値はランダム） ----
+    static uint32_t pitch_configs[2][8];
+    static uint8_t initialized = 0;
+    if (!initialized) {
+        for (int i=0;i<2;i++)
+            for (int j=0;j<8;j++)
+                pitch_configs[i][j] = 50 + (rand() & 31); // 50~81程度のランダム
+        initialized = 1;
+    }
+    uint32_t* pitch_steps = pitch_configs[config_idx];
+
+    // ---- FLIPPERATでランダム的にシフトレジスタ更新 ----
+    if (FLIPPERAT && !last_flipp) {
+        step_idx = (step_idx + 1) % 8;
+        pitch_steps[step_idx] = 50 + (rand() & 31);
+    }
+    last_flipp = FLIPPERAT;
+
+    // ---- SKIPPERATで構成を切り替え ----
+    if (SKIPPERAT && !last_skipp) {
+        config_idx = (config_idx + 1) % 2;
+        step_idx = 0;
+    }
+    last_skipp = SKIPPERAT;
+
+    // ---- 単一オシレーター（triangle）----
+    phase = (phase + pitch_steps[step_idx]) & 0xFFFFFF; // 位相幅を広げる
+    int32_t tri = (int32_t)(phase & 0xFFFFFF);
+    tri = (tri >> 4);         // 20bit -> 16bit相当に圧縮
+    if (tri & 0x8000) tri = 0xFFFF - tri;  // triangle波
+    tri -= 0x4000;            // 中心を0に
+
+    // ---- AM（EARTHREAD）----
+    int16_t amp_cv = EARTHREAD;
+    int16_t sample = (int16_t)((tri * (amp_cv + 32768)) >> 15); // 振幅しっかり
+
+    // ---- 出力 ----
+    ASHWRITER(sample);
+    DACWRITER(sample);
+
+    // ---- I2S制御 ----
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+}
+
 //complex bytebeats
 static uint16_t pattern1(uint32_t t){ return (t*(t>>8)) & 0xFFF; }
 static uint16_t pattern2(uint32_t t){ return (t*(t>>6 | t>>9)) & 0xFFF; }
@@ -419,7 +490,9 @@ static uint16_t pattern5(uint32_t t){ return (t*(t>>3 | t>>11)) & 0xFFF; }
 static uint16_t pattern6(uint32_t t){ return (t*(t>>2 | t>>9)) & 0xFFF; }
 static uint16_t pattern7(uint32_t t){ return (t*(t>>7 ^ t>>10)) & 0xFFF; }
 static uint16_t pattern8(uint32_t t){ return (t*((t>>5)|(t>>12))) & 0xFFF; }
+
 typedef uint16_t (*BytebeatFunc)(uint32_t);
+
 void IRAM_ATTR bytebeats() {
     INTABRUPT;
 

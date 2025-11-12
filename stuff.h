@@ -2,7 +2,7 @@
 
 #define ENNEAGRAM simpleHelpers
 
-#define PRESETAMT 11
+#define PRESETAMT 12
 
 #define SETUPPERS initDEL();
 #define BUTTONEST REG(GPIO_IN1_REG)[0]&0x1
@@ -40,7 +40,7 @@ bool lamp;
 int tima;
 int timahi;
 int preset;
-void (*presets[11]) ();
+void (*presets[12]) ();
 
 void IRAM_ATTR doubleclicker() {
  INTABRUPT
