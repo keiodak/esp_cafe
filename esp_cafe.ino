@@ -14,16 +14,16 @@ void setup() {
  LAMPLIGHT
  presets[0]=coco;
  presets[1]=echo;
- presets[2]=amosc;
- presets[3]=ssd;
- presets[4]=bbd;
- presets[5]=cococo;
- presets[6]=cocooct;
- presets[7]=he;
- presets[8]=disc;
- presets[9]=dist;
- presets[10]=wmp;
- presets[11]=prun;
+ presets[2]=amosc; //earth=AM yellow+gray=OSC
+ presets[3]=ssd; //simple short delay
+ presets[4]=bbd; //bbd style delay
+ presets[5]=cococo;  //3layer coco +-5th
+ presets[6]=cocooct; //3layer coco +-OCT
+ presets[7]=he; //hermonic echo
+ presets[8]=disc; //flipp=basee skipp=noise ash=feedback-source
+ presets[9]=dist; //simple distortion ash=feedback-source
+ presets[10]=wmp; //serge-style wmp green-in > wmp > ash-out +distortion
+ presets[11]=prun; //ash=OSC flipp=shiftregister skipp=sr-mod earth=AM 
  presets[12]=bytebeats;
 
  FILLNOISE
