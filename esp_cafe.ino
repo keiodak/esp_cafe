@@ -14,7 +14,7 @@ void setup() {
  LAMPLIGHT
  presets[0]=coco;
  presets[1]=echo;
- presets[2]=amosc; //earth=AM yellow+gray=OSC
+ presets[2]=amosc; //earth=AM yellow+ash=OSC
  presets[3]=ssd; //simple short delay
  presets[4]=bbd; //bbd style delay
  presets[5]=cococo;  //3layer coco +-5th
