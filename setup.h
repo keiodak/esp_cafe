@@ -289,5 +289,5 @@ dmall[0]=0xC0|BIT(bufflough+12)|BIT(bufflough);
   REG(I2S_CONF_REG)[0]=BIT(17)|BIT(9)|BIT(5); //start rx
   //  REG(I2S_CONF_REG)[0]=BIT(9)|BIT(5); //start rx
   
-  #define PRESETAMT 12
+  #define PRESETAMT 8
 }

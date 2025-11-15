@@ -4,7 +4,7 @@
 //if arduino was bought by a printer company is this stable?
 
 #define BYTECODES t*(t&16384?7:5)*(3-(3&t>>9)+(3&t>>8))>>(3&-t>>(t&4096?2:16))|t>>3; 
-#define PRESETAMT 12
+#define PRESETAMT 8
 
 #include "synths.h"
 
@@ -14,6 +14,7 @@ void setup() {
  LAMPLIGHT
  presets[0]=coco;
  presets[1]=echo;
+<<<<<<< HEAD
  presets[2]=amosc; //earth=AM yellow+ash=OSC
  presets[3]=ssd; //simple short delay
  presets[4]=bbd; //bbd style delay
@@ -25,6 +26,14 @@ void setup() {
  presets[10]=wmp; //serge-style wmp green-in > wmp > ash-out +distortion
  presets[11]=prun; //ash=OSC flipp=shiftregister skipp=sr-mod earth=AM 
  presets[12]=bytebeats;
+=======
+ presets[2]=ssd; //simple short delay
+ presets[3]=bbd; //bbd style delay
+ presets[4]=cococo;  //3layer coco +-5th
+ presets[5]=wmp; //flipp=basee skipp=noise ash=feedback-source
+ presets[6]=dist; //serge-style wmp green-in > wmp > ash-out +distortion
+ presets[7]=bytebeats;
+>>>>>>> 72d8936 (tire)
 
  FILLNOISE
  DOUBLECLK
