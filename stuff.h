@@ -2,8 +2,6 @@
 
 #define ENNEAGRAM simpleHelpers
 
-#define PRESETAMT 5
-
 #define SETUPPERS initDEL();
 #define BUTTONEST REG(GPIO_IN1_REG)[0]&0x1
 #define CLICKETTE(c) attachInterrupt(32,c,CHANGE);
@@ -40,7 +38,7 @@ bool lamp;
 int tima;
 int timahi;
 int preset;
-void (*presets[5]) ();
+void (*presets[8]) ();
 
 void IRAM_ATTR doubleclicker() {
  INTABRUPT
@@ -62,6 +60,45 @@ void IRAM_ATTR doubleclicker() {
    //attachInterrupt(2,presets[0],FALLING);
   }
 }
+
+//flickerclicker
+//holder
+//tripleclicker
+
+//trinary memory access delay
+//uint8* BUFFERERS[2]
+//uint8* NOWBUFFER
+//       BUFSELECT (t&0x10000)>>16
+//       NOWPRIMER (t&0xFFFF)
+//       NOWTRICER (NOWPRIMER*3)
+//       NOWDICERS (NOWTRICER&1)
+//       NOWFORCER (NOWDICERS<<2)
+//NOWBUFFER=BUFFERERS[BUFSELECT];
+//int inputters was already ADCREADER
+//persistor is the accumulator
+//PRE: persistor = 0
+//TWIWRITER
+//NOWBUFFER+=NOWTRICER>>1
+//persistor+=&(NOWBUFFER+NOWDICER<<4)|(NOWBUFFER+1-NOWDICER<<4)
+//currently gave up on macro inlining but you can try
+//best is with registrs
+//r1 nowbuffer=bufferrers[t>>16&1]
+//r2 nowtricer (t&0xFFFF)*3
+//r1 add r1, r2>>1
+//r2 and r2, 1
+//r3 load [r1, r2]
+//r2 not r2
+//r4 load [r1, r2+2]
+//r2 not r2
+//
+//r3 lsl r3, 4
+//r4 lsr r3, [r2, lsl 4]
+//r4 and r4, 0xF
+// r3 add r3, r4
+
+//if(!but)
+//r4=adcread
+//storebyte
 
 uint8_t *delaybuffa;
 uint8_t *delaybuffb;
@@ -88,7 +125,7 @@ int dellius(int ptr, int val, bool but) {
  if (!but) {
   delptr[(ptr>>1)+biz]=(uint8_t)(val>>4);
   delptr[(ptr>>1)+1-biz]&=(uint8_t)(0xF<<(4-forsh));
-  delptr[(ptr>>1)+1-biz]|=(uint8_t)(val&(0xF<<forsh));
+  delptr[(ptr>>1)+1-biz]|=(uint8_t)((val&0xF)<<forsh);
  }
  return zut;
 }
@@ -99,7 +136,7 @@ void initDEL() {
  delptr=delaybuffa;
  t=0;
 
- esp_task_wdt_init(30, false);
+ //esp_task_wdt_init(30, false);
  
  REG(ESP32_SENS_SAR_DAC_CTRL1)[0] = 0x0; 
  REG(ESP32_SENS_SAR_DAC_CTRL2)[0] = 0x0; 
@@ -175,4 +212,5 @@ void initDEL() {
   REG(IO_MUX_GPIO34_REG)[1]=BIT(9)|BIT(8); //input enable
   REG(IO_MUX_GPIO34_REG)[0]=BIT(9)|BIT(8); //input enable
   REG(IO_MUX_GPIO2_REG)[0]=BIT(9)|BIT(8); //input enable
-}
+ 
+ }

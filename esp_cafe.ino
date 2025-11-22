@@ -4,7 +4,7 @@
 //if arduino was bought by a printer company is this stable?
 
 #define BYTECODES t*(t&16384?7:5)*(3-(3&t>>9)+(3&t>>8))>>(3&-t>>(t&4096?2:16))|t>>3; 
-#define PRESETAMT 5
+#define PRESETAMT 8
 
 #include "synths.h"
 
@@ -14,13 +14,16 @@ void setup() {
  LAMPLIGHT
  presets[0]=coco;
  presets[1]=echo;
- presets[2]=swp; //slicebuffer + WMP
- presets[3]=dist; //slicebuffer + distortion
- presets[4]=bytebeats;
+ presets[2]=bbd;
+ presets[3]=wmp;
+ presets[4]=dico;
+ presets[5]=disj;
+ presets[5]=crackle;
+ presets[6]=bytebeats;
 
  FILLNOISE
  DOUBLECLK
- PRESETTER(presets[0])  
+ PRESETTER(coco)  
 }
 
 void loop() {

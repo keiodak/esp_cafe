@@ -160,8 +160,6 @@ void IRAM_ATTR dico() {
   REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
 
-
-//simple short delay
 void IRAM_ATTR ssd() {
  INTABRUPT;
  DACWRITER(pout);
@@ -179,7 +177,6 @@ void IRAM_ATTR ssd() {
  YELLOWERS(t);
 }
 
-// BBD delay
 void IRAM_ATTR bbd() {
  INTABRUPT;
  DACWRITER(pout);
@@ -209,7 +206,6 @@ void IRAM_ATTR bbd() {
  YELLOWERS(t);
 }
 
-// 3-layer coco 5th
 void IRAM_ATTR cococo() {
  INTABRUPT;
  DACWRITER(pout);
@@ -257,7 +253,6 @@ void IRAM_ATTR cococo() {
  YELLOWERS(t1);
 }
 
-//simple distortion
 void IRAM_ATTR dist() {
     INTABRUPT;
 
@@ -284,7 +279,6 @@ void IRAM_ATTR dist() {
     REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
-// WMP
 void IRAM_ATTR wmp() {
     INTABRUPT;
 
@@ -336,7 +330,6 @@ void IRAM_ATTR wmp() {
     REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
-//phase osc + shiftregister
 void IRAM_ATTR prun() {
     INTABRUPT;
 
@@ -427,7 +420,6 @@ void IRAM_ATTR hn() {
   t += 1;
 }
 
-// 3-layer coco oct
 void IRAM_ATTR cocooct() {
  INTABRUPT;
  DACWRITER(pout);
@@ -467,7 +459,6 @@ void IRAM_ATTR cocooct() {
  YELLOWERS(t1);
 }
 
-// harmonic echo
 void IRAM_ATTR he() {
   INTABRUPT;
   DACWRITER(pout);
@@ -525,7 +516,6 @@ void IRAM_ATTR he() {
   YELLOWERS(t1);
 }
 
-// distortion test
 void IRAM_ATTR disc() {
     INTABRUPT;
 
@@ -560,7 +550,6 @@ void IRAM_ATTR disc() {
     REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
-//AM-OSC
 void IRAM_ATTR amosc() {
     INTABRUPT;
 
@@ -673,6 +662,83 @@ void IRAM_ATTR tentmap() {
     // -------------------------
     ASHWRITER(smooth >> 3);
 }
+
+///crackle proto///
+static int16_t fb = 0;
+static int32_t chaos = 0;
+static int16_t last_cr = 0;
+static int16_t last_dac = 0;
+static int low_speed_counter = 0;
+static int32_t tri_phase = 0;
+
+int16_t IRAM_ATTR crackle_on_ear(int16_t ear, bool flipp, bool skipp, bool lamp){
+    int32_t chaos_delta = 0;
+    int32_t fb_delta    = 0;
+    int32_t touch;
+
+    if(!lamp){
+        touch = (int32_t)ear - 2048;  
+        if(++low_speed_counter >= 20){
+            int16_t lfo = ((tri_phase >> 6) & 0xFF) - 128;
+            chaos_delta = lfo;
+            fb_delta    = (lfo >> 2);
+            low_speed_counter = 0;
+            tri_phase += 2;
+        }
+    } else {
+        touch = (ear >> 3) - 64;  
+        chaos_delta = 3000 + ((tri_phase & 0xFF) - 128);
+        fb_delta    = 800 + (((tri_phase >> 1) & 0xFF) - 128);
+        tri_phase += 20;
+    }
+
+    if(flipp) chaos_delta += 500;
+    if(skipp) fb_delta    += 200;
+
+    int32_t x = chaos + fb + touch + chaos_delta;
+    if(x > 30000) x = 30000 - (x - 30000);
+    if(x < -30000) x = -30000 - (x + 30000);
+    chaos = x;
+
+    int32_t y = chaos * 2 + fb_delta;
+    if(y > 32767) y = 32767;
+    if(y < -32768) y = -32768;
+    fb = y >> 3;
+
+    int16_t out = (last_cr + (int16_t)y) >> 1;
+    last_cr = out;
+
+    return out;
+}
+
+void IRAM_ATTR crackle(){
+    INTABRUPT;
+    int16_t gyo = ADCREADER;
+    int16_t cr  = crackle_on_ear(EARTHREAD, FLIPPERAT, SKIPPERAT, lamp);
+
+    int16_t cr_out;
+    if(!lamp){
+        int32_t gain = EARTHREAD;          
+        cr_out = (cr * gain) >> 12;
+    } else {
+        int32_t gain = (EARTHREAD >> 3);  
+        cr_out = (cr * gain) >> 8;
+    }
+
+    int32_t temp = gyo * 2;
+    if(temp > 32767) temp = 32767;
+    if(temp < -32768) temp = -32768;
+    int16_t out_dac = (last_dac + (int16_t)temp) >> 1;
+    last_dac = out_dac;
+
+    DACWRITER(out_dac);
+    ASHWRITER(cr_out);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+}
+///
+
+
+
 
 typedef uint16_t (*BytebeatFunc2)(uint32_t, uint16_t, uint16_t);
 uint16_t wallflower_mod(uint32_t t, uint16_t m1, uint16_t m2) {
