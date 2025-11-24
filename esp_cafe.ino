@@ -15,9 +15,9 @@ void setup() {
  presets[0]=coco;
  presets[1]=echo;
  presets[2]=bbd;
- presets[3]=wmp;
- presets[4]=dico;
- presets[5]=disj;
+ presets[3]=ssg;
+ presets[4]=wmp;
+ presets[5]=dico;
  presets[5]=crackle;
  presets[6]=bytebeats;
 

@@ -28,7 +28,7 @@ void IRAM_ATTR bbd() {
  YELLOWERS(t);
 }
 
-/// simple short delay
+///simple short delay
 void IRAM_ATTR ssd() {
  INTABRUPT;
  DACWRITER(pout);
@@ -44,6 +44,124 @@ void IRAM_ATTR ssd() {
  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
  REG(I2S_CONF_REG)[0] |= (BIT(5));
  YELLOWERS(t);
+}
+
+///3-layer coco
+void IRAM_ATTR cococo() {
+ INTABRUPT;
+ DACWRITER(pout);
+ gyo = ADCREADER;
+
+ static int t1 = 0;
+ static int t2 = 1024;
+ static int t3 = 2048;
+ static int c2 = 0;
+ static int c3 = 0;
+
+ int16_t out1 = dellius(t1, gyo, lamp);
+ int16_t out2 = dellius(t2, gyo, lamp);
+ int16_t out3 = dellius(t3, gyo, lamp);
+
+ pout = (out1 + out2 + out3) / 3;
+
+ if (FLIPPERAT) {
+  t1++;
+  if (c2++ % 2 == 0) t2 += 3; 
+  if (c3++ % 3 == 0) t3--;  
+ } else {
+  t1--;
+  if (c2++ % 2 == 0) t2 -= 3;
+  if (c3++ % 3 == 0) t3++;
+ }
+
+ t1 = t1 & 0x1FFFF;
+ t2 = t2 & 0x1FFFF;
+ t3 = t3 & 0x1FFFF;
+
+ if (SKIPPERAT) {
+  if (lastskp == 0) delayskp = t1;
+  lastskp = 1;
+ } else {
+  if (lastskp) t1 = delayskp;
+  lastskp = 0;
+ }
+
+ REG(I2S_CONF_REG)[0] &= ~BIT(5);
+ adc_read = EARTHREAD;
+ ASHWRITER(adc_read);
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= BIT(5);
+ YELLOWERS(t1);
+}
+
+///SSG/single slope genelator/Lamp-on(cycle) Lamp-off(triger-flipp mode)
+void IRAM_ATTR ssg() {
+    INTABRUPT;
+
+    int16_t gyo = ADCREADER;
+    int16_t ear = EARTHREAD & 0x7FF;
+    static int32_t phase = 0;
+    static bool rising = true; 
+    static bool active = false; 
+    static bool prev_skipp = false; 
+    int16_t env = 0;
+    if (!lamp) {
+        if (SKIPPERAT && !prev_skipp && !active) {
+            active = true;
+            phase = 0;
+            rising = true;
+        }
+        prev_skipp = SKIPPERAT;
+
+        if (active) {
+            int32_t step_up = 60;              
+            int32_t step_down = 30 + ((ear * 1200) >> 11);
+            if (rising) {
+                env = (phase >> 8); 
+                phase += step_up;
+                if (phase >= 255 << 8) { 
+                    phase = 255 << 8; 
+                    rising = false; 
+                }
+            } else {
+                env = (phase >> 8);
+                phase -= step_down;
+                if (phase <= 0) { 
+                    phase = 0; 
+                    active = false; 
+                }
+            }
+        } 
+        if (!active) {
+            env = 0;
+            phase = 0;
+            rising = true;
+        }
+        ASHWRITER(env);
+    }
+
+    else {
+        static int32_t cyc_phase = 0;
+        static bool cyc_rising = true;
+        int16_t cyc;
+        int32_t step_up = 150 + ((ear * 200) >> 11); 
+        int32_t step_down = 100 + ((ear * 10000) >> 11);
+        if (cyc_rising) {
+            cyc = (cyc_phase >> 8); // 最大255
+            cyc_phase += step_up;
+            if (cyc_phase >= 255 << 8) { cyc_phase = 255 << 8; cyc_rising = false; }
+        } else {
+            cyc = (cyc_phase >> 8);
+            cyc_phase -= step_down;
+            if (cyc_phase <= 0) { cyc_phase = 0; cyc_rising = true; }
+        }
+        ASHWRITER(cyc);
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    YELLOWERS(0);
 }
 
 ///digital crackle 
@@ -145,3 +263,4 @@ void IRAM_ATTR crackle() {
 
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
 }
+

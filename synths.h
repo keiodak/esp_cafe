@@ -88,6 +88,75 @@ void IRAM_ATTR bbd() {
  YELLOWERS(t);
 }
 
+void IRAM_ATTR ssg() {
+    INTABRUPT;
+
+    int16_t gyo = ADCREADER;
+    int16_t ear = EARTHREAD & 0x7FF;
+    static int32_t phase = 0;
+    static bool rising = true; 
+    static bool active = false; 
+    static bool prev_skipp = false; 
+    int16_t env = 0;
+    if (!lamp) {
+        if (SKIPPERAT && !prev_skipp && !active) {
+            active = true;
+            phase = 0;
+            rising = true;
+        }
+        prev_skipp = SKIPPERAT;
+
+        if (active) {
+            int32_t step_up = 60;              
+            int32_t step_down = 30 + ((ear * 1200) >> 11); // fall を EARTHREAD で変化
+            if (rising) {
+                env = (phase >> 8); 
+                phase += step_up;
+                if (phase >= 255 << 8) { 
+                    phase = 255 << 8; 
+                    rising = false; 
+                }
+            } else {
+                env = (phase >> 8);
+                phase -= step_down;
+                if (phase <= 0) { 
+                    phase = 0; 
+                    active = false; 
+                }
+            }
+        } 
+        if (!active) {
+            env = 0;
+            phase = 0;
+            rising = true;
+        }
+        ASHWRITER(env);
+    }
+
+    else {
+        static int32_t cyc_phase = 0;
+        static bool cyc_rising = true;
+        int16_t cyc;
+        int32_t step_up = 150 + ((ear * 200) >> 11);   // 150〜350
+        int32_t step_down = 100 + ((ear * 10000) >> 11); // 100〜250
+        if (cyc_rising) {
+            cyc = (cyc_phase >> 8); // 最大255
+            cyc_phase += step_up;
+            if (cyc_phase >= 255 << 8) { cyc_phase = 255 << 8; cyc_rising = false; }
+        } else {
+            cyc = (cyc_phase >> 8);
+            cyc_phase -= step_down;
+            if (cyc_phase <= 0) { cyc_phase = 0; cyc_rising = true; }
+        }
+        ASHWRITER(cyc);
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    YELLOWERS(0);
+}
+
 void IRAM_ATTR wmp() {
     INTABRUPT
 
@@ -178,48 +247,6 @@ void IRAM_ATTR dico() {
   ASHWRITER(gray_sig); 
   REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
   REG(I2S_CONF_REG)[0] |= (BIT(5));
-}
-
-#define DISJ_BUF_SIZE 512
-static int16_t disj_buf[DISJ_BUF_SIZE];
-static uint16_t disj_idx = 0;
-void IRAM_ATTR disj() {
-    INTABRUPT;
-    gyo = ADCREADER;
-    int32_t temp = gyo;
-    const int32_t HARD_THRESHOLD = 5000;
-    if(temp > HARD_THRESHOLD) temp = HARD_THRESHOLD;
-    if(temp < -HARD_THRESHOLD) temp = -HARD_THRESHOLD;
-    temp -= (temp * temp * temp) / 1073741824;
-    temp -= (temp * temp * temp * temp) / 1073741824;
-    int16_t distorted = (int16_t)temp;
-    pout = dellius(t, distorted, lamp);
-
-    static uint8_t last_flipp = 0;
-    static uint8_t last_skipp = 0;
-    static uint32_t delayskp = 0;
-    if(FLIPPERAT && !last_flipp) t += 0x10000;
-    last_flipp = FLIPPERAT ? 1 : 0;
-    if(SKIPPERAT && !last_skipp) t += 0x08000;
-    if(SKIPPERAT) {
-        if(last_skipp == 0) delayskp = t;
-    } else {
-        if(last_skipp) t = delayskp;
-        delayskp = 0;
-    }
-    last_skipp = SKIPPERAT ? 1 : 0;
-    t &= 0x1FFFF;
-
-    disj_buf[disj_idx] = distorted;
-    disj_idx = (disj_idx + 1) & (DISJ_BUF_SIZE - 1);
-
-    DACWRITER(pout);
-    adc_read = distorted;
-    ASHWRITER(adc_read);
-    REG(I2S_CONF_REG)[0] &= ~BIT(5);
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-    t++; 
 }
 
 void IRAM_ATTR crackle() {

@@ -67,192 +67,6 @@ void IRAM_ATTR square3co() {
     YELLOWERS(t1);
 }
 
-void IRAM_ATTR osc() {
-    INTABRUPT;
-
-    static uint32_t t = 0;
-    static uint32_t c_mask = 1023;
-    static uint32_t e_mask = 819;
-    static uint32_t g_mask = 683;
-    static bool last_skip = false;
-    static bool last_flipp = false;
-
-    bool both = SKIPPERAT && FLIPPERAT;
-
-    // --- 同時押しで波形リセット/変更 ---
-    if(both){
-        c_mask = 512 + (rand() & 1023);
-        e_mask = 400 + (rand() & 819);
-        g_mask = 341 + (rand() & 683);
-    }
-    // --- SKIP押下でパターン変更 ---
-    else if(SKIPPERAT && !last_skip){
-        c_mask = 512 + (rand() & 1023);
-        e_mask = 400 + (rand() & 819);
-        g_mask = 341 + (rand() & 683);
-    }
-    // --- FLIPP押下で周期変化（倍速/半速） ---
-    else if(FLIPPERAT && !last_flipp){
-        c_mask ^= 0x3FF;  // ちょっとフェーズ/周期変化
-        e_mask ^= 0x2FF;
-        g_mask ^= 0x1FF;
-    }
-
-    last_skip = SKIPPERAT;
-    last_flipp = FLIPPERAT;
-
-    // --- 時間進行 ---
-    t++;
-
-    // --- Bytebeat出力 ---
-    uint16_t pout = drone_pattern(t, c_mask, e_mask, g_mask);
-
-    // --- DAC / グレーアウト出力 ---
-    DACWRITER(pout);
-    YELLOWERS(pout);
-
-    // --- ADC処理 ---
-    int gyo = ADCREADER;
-    int adc_read = EARTHREAD;
-    ASHWRITER(adc_read);
-
-    // --- I2Sフラッシュ ---
-    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-}
-
-void IRAM_ATTR dico() {
-  INTABRUPT
-  DACWRITER(pout)
-
-  gyo = ADCREADER;
-  pout = dellius(t, gyo, lamp);
-
-  if (FLIPPERAT) t++;
-  else t--;
-  t &= 0x1FFFF;
-
-  if (SKIPPERAT) {
-    if (lastskp == 0) delayskp = t;
-    lastskp = 1;
-  } else {
-    if (lastskp) t = delayskp;
-    lastskp = 0;
-  }
-
-  int16_t abc_in = EARTHREAD;
-
-  int32_t ytmp = abc_in * (lamp ? 3 : 2);
-  if (ytmp > 32767) ytmp = 32767;
-  if (ytmp < -32768) ytmp = -32768;
-  int16_t yellow_sig = (int16_t)ytmp;
-
-  int32_t gtmp = (yellow_sig ^ (yellow_sig >> 3)) * (lamp ? 2 : 1);
-  if (gtmp > 32767) gtmp = 32767;
-  if (gtmp < -32768) gtmp = -32768;
-  int16_t gray_sig = (int16_t)gtmp;
-
-  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-  YELLOWERS(yellow_sig);
-  ASHWRITER(gray_sig); 
-  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-  REG(I2S_CONF_REG)[0] |= (BIT(5));
-}
-
-void IRAM_ATTR ssd() {
- INTABRUPT;
- DACWRITER(pout);
- gyo = ADCREADER;
- pout = dellius(t, gyo, lamp);
- if (FLIPPERAT) t++;
- else t--;
- t &= 0xFF;
- if (SKIPPERAT) {} else {}
- REG(I2S_CONF_REG)[0] &= ~(BIT(5));
- adc_read = EARTHREAD;
- ASHWRITER(adc_read);
- REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= (BIT(5));
- YELLOWERS(t);
-}
-
-void IRAM_ATTR bbd() {
- INTABRUPT;
- DACWRITER(pout);
- gyo = ADCREADER;
-
- static int16_t last_mix = 0;
- int32_t mix = gyo;
- mix = (mix + last_mix * 7) / 8;
- last_mix = mix;
- mix &= 0xFFF0;
- pout = dellius(t, (int16_t)mix, lamp);
- if (FLIPPERAT) t++; else t--;
- t &= 0x1FFF;
- if (SKIPPERAT) {
-  if (!lastskp) delayskp = t;
-  lastskp = 1;
- } else {
-  if (lastskp) t = delayskp;
-  lastskp = 0;
- }
-
- REG(I2S_CONF_REG)[0] &= ~BIT(5);
- adc_read = EARTHREAD;
- ASHWRITER(adc_read);
- REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= BIT(5);
- YELLOWERS(t);
-}
-
-void IRAM_ATTR cococo() {
- INTABRUPT;
- DACWRITER(pout);
- gyo = ADCREADER;
-
- static int t1 = 0;
- static int t2 = 1024;
- static int t3 = 2048;
- static int c2 = 0;
- static int c3 = 0;
-
- int16_t out1 = dellius(t1, gyo, lamp);
- int16_t out2 = dellius(t2, gyo, lamp);
- int16_t out3 = dellius(t3, gyo, lamp);
-
- pout = (out1 + out2 + out3) / 3;
-
- if (FLIPPERAT) {
-  t1++;
-  if (c2++ % 2 == 0) t2 += 3; 
-  if (c3++ % 3 == 0) t3--;  
- } else {
-  t1--;
-  if (c2++ % 2 == 0) t2 -= 3;
-  if (c3++ % 3 == 0) t3++;
- }
-
- t1 = t1 & 0x1FFFF;
- t2 = t2 & 0x1FFFF;
- t3 = t3 & 0x1FFFF;
-
- if (SKIPPERAT) {
-  if (lastskp == 0) delayskp = t1;
-  lastskp = 1;
- } else {
-  if (lastskp) t1 = delayskp;
-  lastskp = 0;
- }
-
- REG(I2S_CONF_REG)[0] &= ~BIT(5);
- adc_read = EARTHREAD;
- ASHWRITER(adc_read);
- REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= BIT(5);
- YELLOWERS(t1);
-}
-
 void IRAM_ATTR dist() {
     INTABRUPT;
 
@@ -274,57 +88,6 @@ void IRAM_ATTR dist() {
 
     DACWRITER((int16_t)sample);
     ASHWRITER(gyo);
-    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-}
-
-void IRAM_ATTR wmp() {
-    INTABRUPT;
-
-    int16_t gyo = ADCREADER;        // Green入力
-    static int16_t pout = 0;        // 歪み WMP 出力バッファ
-
-    int32_t sample = gyo;
-
-    // ---- SKIPPERAT: WMP パターン切替 ----
-    static uint8_t wmp_pattern = 0;
-    static uint8_t last_skipp = 0;
-    if (SKIPPERAT && !last_skipp) wmp_pattern = (wmp_pattern + 1) % 3;
-    last_skipp = SKIPPERAT;
-
-    // ---- クリーン WMP（ASH用） ----
-    int32_t wmp_sample;
-    switch (wmp_pattern) {
-        case 0: wmp_sample = (sample + sample*2 + sample*3/2)/3; break;
-        case 1: wmp_sample = (sample + sample*3/2 + sample*4/3)/3; break;
-        case 2: wmp_sample = (sample + sample*4/3 + sample*5/4)/3; break;
-    }
-    ASHWRITER((int16_t)wmp_sample);
-
-    // ---- 歪み WMP（pout用） ----
-    int32_t distorted = wmp_sample;
-
-    // ---- FLIPPERAT: 歪みパターン切替 ----
-    static uint8_t dist_pattern = 0;
-    static uint8_t last_flipp = 0;
-    if (FLIPPERAT && !last_flipp) dist_pattern = (dist_pattern + 1) % 3;
-    last_flipp = FLIPPERAT;
-
-    int32_t hard_threshold = (dist_pattern==0 ? 6000 : (dist_pattern==1 ? 4000 : 3000));
-
-    if (distorted > hard_threshold) distorted = hard_threshold;
-    if (distorted < -hard_threshold) distorted = -hard_threshold;
-
-    distorted = distorted - (distorted*distorted*distorted)/134217728;  // 強めのソフトクリップ
-
-    // ---- フィードバック合成 ----
-    pout = (distorted + pout)/2;
-
-    // ---- DAC 出力（歪み WMP）----
-    DACWRITER((int16_t)pout);
-
-    // ---- I2S制御 ----
     REG(I2S_CONF_REG)[0] &= ~(BIT(5));
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
     REG(I2S_CONF_REG)[0] |= BIT(5);
@@ -711,7 +474,7 @@ int16_t IRAM_ATTR crackle_on_ear(int16_t ear, bool flipp, bool skipp, bool lamp)
     return out;
 }
 
-void IRAM_ATTR crackle(){
+void IRAM_ATTR crackleprot(){
     INTABRUPT;
     int16_t gyo = ADCREADER;
     int16_t cr  = crackle_on_ear(EARTHREAD, FLIPPERAT, SKIPPERAT, lamp);
@@ -737,7 +500,47 @@ void IRAM_ATTR crackle(){
 }
 ///
 
+#define DISJ_BUF_SIZE 512
+static int16_t disj_buf[DISJ_BUF_SIZE];
+static uint16_t disj_idx = 0;
+void IRAM_ATTR disj() {
+    INTABRUPT;
+    gyo = ADCREADER;
+    int32_t temp = gyo;
+    const int32_t HARD_THRESHOLD = 5000;
+    if(temp > HARD_THRESHOLD) temp = HARD_THRESHOLD;
+    if(temp < -HARD_THRESHOLD) temp = -HARD_THRESHOLD;
+    temp -= (temp * temp * temp) / 1073741824;
+    temp -= (temp * temp * temp * temp) / 1073741824;
+    int16_t distorted = (int16_t)temp;
+    pout = dellius(t, distorted, lamp);
 
+    static uint8_t last_flipp = 0;
+    static uint8_t last_skipp = 0;
+    static uint32_t delayskp = 0;
+    if(FLIPPERAT && !last_flipp) t += 0x10000;
+    last_flipp = FLIPPERAT ? 1 : 0;
+    if(SKIPPERAT && !last_skipp) t += 0x08000;
+    if(SKIPPERAT) {
+        if(last_skipp == 0) delayskp = t;
+    } else {
+        if(last_skipp) t = delayskp;
+        delayskp = 0;
+    }
+    last_skipp = SKIPPERAT ? 1 : 0;
+    t &= 0x1FFFF;
+
+    disj_buf[disj_idx] = distorted;
+    disj_idx = (disj_idx + 1) & (DISJ_BUF_SIZE - 1);
+
+    DACWRITER(pout);
+    adc_read = distorted;
+    ASHWRITER(adc_read);
+    REG(I2S_CONF_REG)[0] &= ~BIT(5);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    t++; 
+}
 
 
 typedef uint16_t (*BytebeatFunc2)(uint32_t, uint16_t, uint16_t);
