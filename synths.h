@@ -9,31 +9,35 @@ int myPlacers[] = {0, 0, 0, 0};
 int tapsz=sizeof(myPlacers)>>2;
 
 void IRAM_ATTR coco() {
- INTABRUPT
- DACWRITER(pout)
- gyo=ADCREADER
- pout=dellius(t,gyo,lamp);
- if (FLIPPERAT) t++;
- else t--; 
- t=t&0x1FFFF;//
- if (SKIPPERAT)  {
-  if (lastskp==0) delayskp = t;
-  lastskp = 1;
- } else {
-  if (lastskp) t=delayskp;
-  lastskp = 0;
- } 
- REG(I2S_CONF_REG)[0] &= ~(BIT(5)); 
- adc_read = EARTHREAD;
- int16_t scaled = pout / 2;
-    ASHWRITER(scaled);
- REG(I2S_INT_CLR_REG)[0]=0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= (BIT(5)); //start rx
- YELLOWERS(t)
+    DACWRITER(pout)
+    gyo = ADCREADER;
+
+    pout = dellius(t, gyo, lamp);
+
+    if (FLIPPERAT) t++;
+    else t--;
+    t = t & 0x1FFFF;
+
+    if (SKIPPERAT)  {
+        if (lastskp == 0) delayskp = t;
+        lastskp = 1;
+    } else {
+        if (lastskp) t = delayskp;
+        lastskp = 0;
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    adc_read = EARTHREAD;
+    int16_t ash = pout >> 4;
+    ASHWRITER(ash);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= (BIT(5));
+    YELLOWERS(t)
 }
 
 void IRAM_ATTR echo() {
- INTABRUPT
+ //INTABRUPT
+ //REG(GPIO_STATUS_W1TC_REG)[0]=0xFFFFFFFF; 
  DACWRITER(pout)
  gyo=ADCREADER
  pout =0;
@@ -59,35 +63,45 @@ void IRAM_ATTR echo() {
  YELLOWERS(myPlacers[0]+myPlacers[1]+myPlacers[2]+myPlacers[3]);
 }
 
+///bbd delay
 void IRAM_ATTR bbd() {
- INTABRUPT;
- DACWRITER(pout);
- gyo = ADCREADER;
+    INTABRUPT;
+    DACWRITER(pout);
+    gyo = ADCREADER;
 
- static int16_t last_mix = 0;
- int32_t mix = gyo;
- mix = (mix + last_mix * 7) / 8;
- last_mix = mix;
- mix &= 0xFFF0;
- pout = dellius(t, (int16_t)mix, lamp);
- if (FLIPPERAT) t++; else t--;
- t &= 0x1FFF;
- if (SKIPPERAT) {
-  if (!lastskp) delayskp = t;
-  lastskp = 1;
- } else {
-  if (lastskp) t = delayskp;
-  lastskp = 0;
- }
+    static int16_t last_mix = 0;
+    int32_t mix = (gyo + last_mix * 7) >> 3;
+    last_mix = mix;
 
- REG(I2S_CONF_REG)[0] &= ~BIT(5);
- adc_read = EARTHREAD;
- ASHWRITER(adc_read);
- REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= BIT(5);
- YELLOWERS(t);
+    pout = dellius(t, (int16_t)mix, lamp);
+
+    if (FLIPPERAT) t++; else t--;
+    t &= 0x1FFF;
+
+    if (SKIPPERAT) {
+        if (!lastskp) delayskp = t;
+        lastskp = 1;
+    } else {
+        if (lastskp) t = delayskp;
+        lastskp = 0;
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~BIT(5);
+
+    adc_read = EARTHREAD;
+
+    static int16_t ash_s = 0;
+    ash_s = (ash_s * 7 + adc_read) >> 3;
+
+    ASHWRITER(ash_s);
+
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+
+    YELLOWERS(t);
 }
 
+///single slope genelator
 void IRAM_ATTR ssg() {
     INTABRUPT;
 
@@ -157,6 +171,7 @@ void IRAM_ATTR ssg() {
     YELLOWERS(0);
 }
 
+///earth>wave multiplier>ash + coco
 void IRAM_ATTR wmp() {
     INTABRUPT
 
@@ -215,6 +230,7 @@ void IRAM_ATTR wmp() {
     ASHWRITER((int16_t)fold3);
 }
 
+///distortion coco
 void IRAM_ATTR dico() {
   INTABRUPT
   DACWRITER(pout)
@@ -249,6 +265,88 @@ void IRAM_ATTR dico() {
   REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
 
+///3layer grain coco
+void IRAM_ATTR ccc() {
+    INTABRUPT;
+    DACWRITER(pout);
+    gyo = ADCREADER;
+    static int t1 = 0;
+    static int t2 = 1024;
+    static int t3 = 2048;
+    static bool toggle23 = false;
+    static int last_flip = 0;
+    static int delayskp = 0;
+    static int lastskp = 0;
+    int spd1 = 1;   // layer1 speed
+    int spd2 = 1;   // layer2 speed
+    int spd3 = 1;   // layer3 speed
+
+    if (SKIPPERAT) {
+        static int mode = 0;
+        if (!lastskp) {
+            mode = (mode + 1) & 3;
+        }
+        lastskp = 1;
+
+        switch (mode) {
+            case 0: // normal
+                spd1 = spd2 = spd3 = 1;
+                break;
+            case 1: // octave +
+                spd1 = spd2 = spd3 = 2;
+                break;
+            case 2: // fifth +
+                spd1 = spd2 = spd3 = 3; 
+                break;
+            case 3: // octave -
+                spd1 = spd2 = spd3 = -1;
+                break;
+        }
+    } else {
+        lastskp = 0;
+    }
+
+    if (FLIPPERAT) {
+        if (!last_flip) toggle23 = !toggle23;
+        last_flip = 1;
+    } else {
+        last_flip = 0;
+    }
+
+    int16_t o1 = dellius(t1, gyo, lamp);
+    int16_t o2 = 0;
+    int16_t o3 = 0;
+
+    if (toggle23) {
+        o2 = dellius(t2, gyo, lamp);  // 再生
+    } else {
+        o3 = dellius(t3, gyo, lamp);  // 再生
+    }
+
+    pout = (o1 + o2 + o3) / 3;
+    int dir = FLIPPERAT ? 1 : -1;
+    t1 += dir * spd1;
+    t2 += dir * spd2;
+    t3 += dir * spd3;
+    t1 &= 0x1FFFF;
+    t2 &= 0x1FFFF;
+    t3 &= 0x1FFFF;
+    if (SKIPPERAT) {
+        if (lastskp == 1) { /* already stored */ }
+        else delayskp = t1;
+    } else {
+        if (lastskp) t1 = delayskp;
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~BIT(5);
+    adc_read = EARTHREAD;
+    ASHWRITER(adc_read);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    YELLOWERS(t1);
+}
+
+///degital crackle
 void IRAM_ATTR crackle() {
     static int16_t fb = 0;
     static int32_t chaos = 0;
@@ -341,6 +439,53 @@ void IRAM_ATTR crackle() {
     last_cr_out = cr_out;
 
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+}
+
+///xor noise beat
+void IRAM_ATTR nc() {
+    INTABRUPT;
+
+    static uint32_t t = 0;
+    static int16_t last = 0;
+    const uint8_t L1 = 3; 
+    const uint8_t L2 = 5;
+    static uint8_t M1 = 9;
+    static uint8_t M2 = 11;
+    const uint8_t H1 = 15;
+    const uint8_t H2 = 17;
+
+    if (FLIPPERAT) {
+        M1 = 9 + ((t >> 9) % 4);
+    }
+    if (SKIPPERAT) {
+        M2 = 11 + ((t >> 7) % 4);
+    }
+
+    uint32_t s = t;
+    uint8_t beat =
+        ((s >> L1) ^
+         (s >> L2) ^
+         (s >> M1) ^
+         (s >> H1)) & 0xFF;
+    int16_t base =
+        ((s >> L2) ^
+         (s >> M2) ^
+         (s >> H2)) & 0x7FF;
+    base -= 1024;
+    if (beat < 64) base >>= 1; 
+    if (beat > 192) base <<= 1; 
+    int16_t out = (last + base) >> 1;
+    last = out;
+    int16_t dac_out = out >> 1;
+
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, lamp);
+    DACWRITER(pout);
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    ASHWRITER(out);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    t++;
 }
 
 static uint16_t pattern1(uint32_t t){ return (t*(t>>8)) & 0xFFF; }

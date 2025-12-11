@@ -264,3 +264,62 @@ void IRAM_ATTR crackle() {
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
 }
 
+
+//serge WMP - earth>wmp>ashout-
+void IRAM_ATTR wmp() {
+    INTABRUPT
+
+    DACWRITER(pout)
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, lamp);
+
+    if (FLIPPERAT) t++;
+    else t--;
+    t = t & 0x1FFFF;
+
+    if (SKIPPERAT)  {
+        static int delayskp = 0, lastskp = 0;
+        if (lastskp == 0) delayskp = t;
+        lastskp = 1;
+    } else {
+        static int delayskp = 0, lastskp = 0;
+        if (lastskp) t = delayskp;
+        lastskp = 0;
+    }
+
+    static uint8_t play_order[8] = {0,1,2,3,4,5,6,7};
+    static uint8_t pstep = 0;
+    static uint8_t lastflp = 0;
+    const int SPLITS = 8;
+    const int SPLIT_SIZE = 512 / SPLITS;
+
+    if (FLIPPERAT && lastflp == 0) {
+        for (int i = 0; i < SPLITS; i++) {
+            int j = rand() & (SPLITS - 1);
+            uint8_t tmp = play_order[i];
+            play_order[i] = play_order[j];
+            play_order[j] = tmp;
+        }
+        pstep = 0;
+    }
+    lastflp = FLIPPERAT;
+
+    uint32_t split_pos = t & (SPLIT_SIZE - 1);
+    uint32_t base = play_order[pstep] * SPLIT_SIZE;
+    uint32_t idx = base + split_pos;
+    if (split_pos == SPLIT_SIZE - 1) pstep = (pstep + 1) & (SPLITS - 1);
+
+    int32_t cv = EARTHREAD;
+    int32_t cv_amt = (cv >> 3);
+    int32_t s1 = gyo;
+    int32_t fold1 = (s1 * (abs(s1) + 12000 + cv_amt)) >> 15;
+    int32_t s2 = fold1;
+    int32_t rect2 = abs(s2);
+    int32_t fold2 = (rect2 * (8000 + (cv_amt >> 1))) >> 14;
+    int32_t s3 = fold2;
+    int32_t fold3 = (s3 * (abs(s3) + 16000 + (cv_amt >> 2))) >> 15;
+
+    if (fold3 > 32767) fold3 = 32767;
+    if (fold3 < -32768) fold3 = -32768;
+    ASHWRITER((int16_t)fold3);
+}

@@ -67,6 +67,78 @@ void IRAM_ATTR square3co() {
     YELLOWERS(t1);
 }
 
+#define tapsz 4
+void IRAM_ATTR cd() {
+    static int32_t chaos = 0;
+    static int16_t last_cr = 0;
+    static int16_t last_dac = 0;
+    static int low_speed_counter = 0;
+    static int32_t tri_phase = 0;
+
+    INTABRUPT;
+    int16_t gyo = ADCREADER;
+    int16_t ear = EARTHREAD;
+
+    // crackle 基本ノイズ
+    int32_t touch = ear - 2048;
+    int32_t x = chaos + touch;
+    if(x>30000) x = 30000-(x-30000);
+    if(x<-30000) x = -30000-(x+30000);
+    chaos = x;
+
+    int32_t y = chaos*2;
+    if(y>32767) y=32767;
+    if(y<-32768) y=-32768;
+    int16_t crk = (last_cr + (int16_t)y)>>1;
+    last_cr = crk;
+
+    // tri_phase 高音変調
+    tri_phase += 8;
+    int16_t hi_mod = ((tri_phase >> 4) & 0xFF) - 128;
+    crk += hi_mod;
+
+    // flipp/skipp 変則変調
+    if(FLIPPERAT) crk = -crk + ((tri_phase & 0x1FF)-256);
+    if(SKIPPERAT){
+        if(crk>2000) crk = 15000-crk;
+        if(crk<-2000) crk = -15000-crk;
+    }
+
+    // --- crackle に EARTHREAD を CV とした歪み ---
+    int32_t cv = ear - 2048;
+    crk = crk + ((crk * cv) >> 12); // 簡易 saturation
+    if(crk>32767) crk=32767;
+    if(crk<-32768) crk=-32768;
+
+    // 可変長ポリリズム（echo）
+    int16_t pout = 0;
+    for(int i=0;i<tapsz;i++){
+        int32_t idx = myPlacers[i];
+        pout += dellius((idx<<2)+i, gyo, lamp);
+    }
+    pout = pout>>2; // echo 音量下げ
+
+    for(int i=0;i<tapsz;i++){
+        if(FLIPPERAT) myPlacers[i]++;
+        else myPlacers[i]--;
+        myPlacers[i] %= myNumbers[i];
+        if(myPlacers[i]<0) myPlacers[i]+=myNumbers[i];
+    }
+
+    // DAC & ASH 出力
+    int32_t temp = gyo*2 + pout;
+    if(temp>32767) temp=32767;
+    if(temp<-32768) temp=-32768;
+    int16_t out_dac = (last_dac + (int16_t)temp)>>1;
+    last_dac = out_dac;
+
+    DACWRITER(out_dac);
+    ASHWRITER(crk);
+
+    REG(I2S_INT_CLR_REG)[0]=0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+}
+
 void IRAM_ATTR dist() {
     INTABRUPT;
 

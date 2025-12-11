@@ -38,10 +38,11 @@ bool lamp;
 int tima;
 int timahi;
 int preset;
-void (*presets[8]) ();
+void (*presets[9]) ();
 
 void IRAM_ATTR doubleclicker() {
- INTABRUPT
+ //INTABRUPT
+ //REG(GPIO_STATUS1_W1TC_REG)[0]=0xFFFFFFFF;
  int buttnow = BUTTONEST;
  if (buttnow) lamp=!lamp;
  LAMPLIGHT
@@ -59,6 +60,7 @@ void IRAM_ATTR doubleclicker() {
    PRESETTER(presets[preset])
    //attachInterrupt(2,presets[0],FALLING);
   }
+  
 }
 
 //flickerclicker
