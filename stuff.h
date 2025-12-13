@@ -38,7 +38,7 @@ bool lamp;
 int tima;
 int timahi;
 int preset;
-void (*presets[9]) ();
+void (*presets[10]) ();
 
 void IRAM_ATTR doubleclicker() {
  //INTABRUPT

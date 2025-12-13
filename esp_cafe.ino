@@ -2,7 +2,7 @@
 //a coffee cup as big as your head.
 //if arduino was bought by a printer company is this stable?
 #define BYTECODES t*(t&16384?7:5)*(3-(3&t>>9)+(3&t>>8))>>(3&-t>>(t&4096?2:16))|t>>3; 
-#define PRESETAMT 9
+#define PRESETAMT 10
 
 #include "synths.h"
 
@@ -18,9 +18,9 @@ void setup() {
  presets[4]=wmp;
  presets[5]=dico;
  presets[6]=ccc;
- presets[6]=crackle;
- presets[7]=nc;
- presets[8]=bytebeats;
+ presets[7]=crackle;
+ presets[8]=nc;
+ presets[9]=bytebeats;
 
  FILLNOISE
  DOUBLECLK

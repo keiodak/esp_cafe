@@ -240,6 +240,7 @@ void IRAM_ATTR dico() {
   if (FLIPPERAT) t++;
   else t--;
   t &= 0x1FFFF;
+
   if (SKIPPERAT) {
     if (lastskp == 0) delayskp = t;
     lastskp = 1;
@@ -253,14 +254,52 @@ void IRAM_ATTR dico() {
   if (ytmp > 32767) ytmp = 32767;
   if (ytmp < -32768) ytmp = -32768;
   int16_t yellow_sig = (int16_t)ytmp;
-  int32_t gtmp = (yellow_sig ^ (yellow_sig >> 3)) * (lamp ? 2 : 1);
+
+  // ---- 歪みタイプ（FLIPPERAT）----
+  static uint8_t dist_mode = 0;
+  if (FLIPPERAT) dist_mode = (dist_mode + 1) % 3;
+
+  int32_t gtmp;
+  if (dist_mode == 0) {
+    gtmp = (yellow_sig ^ (yellow_sig >> 3));
+  } else if (dist_mode == 1) {
+    gtmp = yellow_sig - (yellow_sig >> 2);
+  } else {
+    gtmp = (yellow_sig ^ (yellow_sig >> 1) ^ (yellow_sig >> 4));
+  }
+
+  // ---- フィルター種類（SKIPPERAT）----
+  static uint8_t filt_mode = 0;
+  if (SKIPPERAT) filt_mode = (filt_mode + 1) % 3;
+
+  static int16_t fz1 = 0;
+  static int16_t fz2 = 0;
+
+  if (filt_mode == 0) {
+    // lowpass
+    fz1 += (gtmp - fz1) >> 3;
+    gtmp = fz1;
+  }
+  else if (filt_mode == 1) {
+    // highpass
+    fz1 += (gtmp - fz1) >> 3;
+    gtmp = gtmp - fz1;
+  }
+  else {
+    // band-ish
+    fz1 += (gtmp - fz1) >> 4;
+    fz2 += (fz1 - fz2) >> 3;
+    gtmp = fz2;
+  }
+
+  gtmp *= (lamp ? 2 : 1);
   if (gtmp > 32767) gtmp = 32767;
   if (gtmp < -32768) gtmp = -32768;
   int16_t gray_sig = (int16_t)gtmp;
 
   REG(I2S_CONF_REG)[0] &= ~(BIT(5));
   YELLOWERS(yellow_sig);
-  ASHWRITER(gray_sig); 
+  ASHWRITER(gray_sig);
   REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
   REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
@@ -340,8 +379,8 @@ void IRAM_ATTR ccc() {
 
     REG(I2S_CONF_REG)[0] &= ~BIT(5);
     adc_read = EARTHREAD;
-    ASHWRITER(adc_read);
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    int16_t ash = pout >> 4;
+    ASHWRITER(ash);    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
     REG(I2S_CONF_REG)[0] |= BIT(5);
     YELLOWERS(t1);
 }

@@ -1,31 +1,39 @@
-///BBD-type delay
+//bbd delay
 void IRAM_ATTR bbd() {
- INTABRUPT;
- DACWRITER(pout);
- gyo = ADCREADER;
+    INTABRUPT;
+    DACWRITER(pout);
+    gyo = ADCREADER;
 
- static int16_t last_mix = 0;
- int32_t mix = gyo;
- mix = (mix + last_mix * 7) / 8;
- last_mix = mix;
- mix &= 0xFFF0;
- pout = dellius(t, (int16_t)mix, lamp);
- if (FLIPPERAT) t++; else t--;
- t &= 0x1FFF;
- if (SKIPPERAT) {
-  if (!lastskp) delayskp = t;
-  lastskp = 1;
- } else {
-  if (lastskp) t = delayskp;
-  lastskp = 0;
- }
+    static int16_t last_mix = 0;
+    int32_t mix = (gyo + last_mix * 7) >> 3;
+    last_mix = mix;
 
- REG(I2S_CONF_REG)[0] &= ~BIT(5);
- adc_read = EARTHREAD;
- ASHWRITER(adc_read);
- REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
- REG(I2S_CONF_REG)[0] |= BIT(5);
- YELLOWERS(t);
+    pout = dellius(t, (int16_t)mix, lamp);
+
+    if (FLIPPERAT) t++; else t--;
+    t &= 0x1FFF;
+
+    if (SKIPPERAT) {
+        if (!lastskp) delayskp = t;
+        lastskp = 1;
+    } else {
+        if (lastskp) t = delayskp;
+        lastskp = 0;
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~BIT(5);
+
+    adc_read = EARTHREAD;
+
+    static int16_t ash_s = 0;
+    ash_s = (ash_s * 7 + adc_read) >> 3;
+
+    ASHWRITER(ash_s);
+
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+
+    YELLOWERS(t);
 }
 
 ///simple short delay
