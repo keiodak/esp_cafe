@@ -67,6 +67,127 @@ void IRAM_ATTR square3co() {
     YELLOWERS(t1);
 }
 
+///distortion coco
+void IRAM_ATTR dico() {
+  INTABRUPT
+  DACWRITER(pout)
+  gyo = ADCREADER;
+  pout = dellius(t, gyo, lamp);
+
+  if (FLIPPERAT) t++;
+  else t--;
+  t &= 0x1FFFF;
+
+  if (SKIPPERAT) {
+    if (lastskp == 0) delayskp = t;
+    lastskp = 1;
+  } else {
+    if (lastskp) t = delayskp;
+    lastskp = 0;
+  }
+
+  int16_t abc_in = EARTHREAD;
+  int32_t ytmp = abc_in * (lamp ? 3 : 2);
+  if (ytmp > 32767) ytmp = 32767;
+  if (ytmp < -32768) ytmp = -32768;
+  int16_t yellow_sig = (int16_t)ytmp;
+
+  // ---- 歪みタイプ（FLIPPERAT）----
+  static uint8_t dist_mode = 0;
+  if (FLIPPERAT) dist_mode = (dist_mode + 1) % 3;
+
+  int32_t gtmp;
+  if (dist_mode == 0) {
+    gtmp = (yellow_sig ^ (yellow_sig >> 3));
+  } else if (dist_mode == 1) {
+    gtmp = yellow_sig - (yellow_sig >> 2);
+  } else {
+    gtmp = (yellow_sig ^ (yellow_sig >> 1) ^ (yellow_sig >> 4));
+  }
+
+  // ---- フィルター種類（SKIPPERAT）----
+  static uint8_t filt_mode = 0;
+  if (SKIPPERAT) filt_mode = (filt_mode + 1) % 3;
+
+  static int16_t fz1 = 0;
+  static int16_t fz2 = 0;
+
+  if (filt_mode == 0) {
+    // lowpass
+    fz1 += (gtmp - fz1) >> 3;
+    gtmp = fz1;
+  }
+  else if (filt_mode == 1) {
+    // highpass
+    fz1 += (gtmp - fz1) >> 3;
+    gtmp = gtmp - fz1;
+  }
+  else {
+    // band-ish
+    fz1 += (gtmp - fz1) >> 4;
+    fz2 += (fz1 - fz2) >> 3;
+    gtmp = fz2;
+  }
+
+  gtmp *= (lamp ? 2 : 1);
+  if (gtmp > 32767) gtmp = 32767;
+  if (gtmp < -32768) gtmp = -32768;
+  int16_t gray_sig = (int16_t)gtmp;
+
+  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+  YELLOWERS(yellow_sig);
+  ASHWRITER(gray_sig);
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= (BIT(5));
+}
+
+///xor noise beat
+void IRAM_ATTR nc() {
+    INTABRUPT;
+
+    static uint32_t t = 0;
+    static int16_t last = 0;
+    const uint8_t L1 = 3; 
+    const uint8_t L2 = 5;
+    static uint8_t M1 = 9;
+    static uint8_t M2 = 11;
+    const uint8_t H1 = 15;
+    const uint8_t H2 = 17;
+
+    if (FLIPPERAT) {
+        M1 = 9 + ((t >> 9) % 4);
+    }
+    if (SKIPPERAT) {
+        M2 = 11 + ((t >> 7) % 4);
+    }
+
+    uint32_t s = t;
+    uint8_t beat =
+        ((s >> L1) ^
+         (s >> L2) ^
+         (s >> M1) ^
+         (s >> H1)) & 0xFF;
+    int16_t base =
+        ((s >> L2) ^
+         (s >> M2) ^
+         (s >> H2)) & 0x7FF;
+    base -= 1024;
+    if (beat < 64) base >>= 1; 
+    if (beat > 192) base <<= 1; 
+    int16_t out = (last + base) >> 1;
+    last = out;
+    int16_t dac_out = out >> 1;
+
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, lamp);
+    DACWRITER(pout);
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    ASHWRITER(out);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    t++;
+}
+
 #define tapsz 4
 void IRAM_ATTR cd() {
     static int32_t chaos = 0;
@@ -614,6 +735,49 @@ void IRAM_ATTR disj() {
     t++; 
 }
 
+
+static uint16_t pattern1(uint32_t t){ return (t*(t>>8)) & 0xFFF; }
+static uint16_t pattern2(uint32_t t){ return (t*(t>>6 | t>>9)) & 0xFFF; }
+static uint16_t pattern3(uint32_t t){ return (t*(t>>5 | t>>7)) & 0xFFF; }
+static uint16_t pattern4(uint32_t t){ return (t*((t>>4)|(t>>10))) & 0xFFF; }
+static uint16_t pattern5(uint32_t t){ return (t*(t>>3 | t>>11)) & 0xFFF; }
+static uint16_t pattern6(uint32_t t){ return (t*(t>>2 | t>>9)) & 0xFFF; }
+static uint16_t pattern7(uint32_t t){ return (t*(t>>7 ^ t>>10)) & 0xFFF; }
+static uint16_t pattern8(uint32_t t){ return (t*((t>>5)|(t>>12))) & 0xFFF; }
+typedef uint16_t (*BytebeatFunc)(uint32_t);
+
+void IRAM_ATTR bytebeats() {
+    INTABRUPT;
+
+    if (FLIPPERAT) t++;
+    else t--;
+
+    if (SKIPPERAT) t += 2;
+
+    bool both_pressed = (FLIPPERAT && SKIPPERAT);
+
+    static BytebeatFunc patterns[] = { pattern1, pattern2, pattern3, pattern4, pattern5, pattern6, pattern7, pattern8 };
+    static const int num_patterns = sizeof(patterns)/sizeof(patterns[0]);
+    static int current_pattern = 0;
+
+    static bool prev_both_pressed = false;
+    if (both_pressed && !prev_both_pressed) {
+        current_pattern = (current_pattern + 1) % num_patterns;
+    }
+    prev_both_pressed = both_pressed;
+
+    pout = patterns[current_pattern](t);
+
+    DACWRITER(pout & 0xFFF); 
+
+    gyo = ADCREADER;
+    adc_read = EARTHREAD;
+    ASHWRITER(adc_read);
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
+    YELLOWERS(pout);
+}
 
 typedef uint16_t (*BytebeatFunc2)(uint32_t, uint16_t, uint16_t);
 uint16_t wallflower_mod(uint32_t t, uint16_t m1, uint16_t m2) {

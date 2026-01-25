@@ -66,16 +66,11 @@ void IRAM_ATTR echo() {
 ///bbd delay
 void IRAM_ATTR bbd() {
     INTABRUPT;
-    DACWRITER(pout);
+
     gyo = ADCREADER;
 
-    static int16_t last_mix = 0;
-    int32_t mix = (gyo + last_mix * 7) >> 3;
-    last_mix = mix;
-
-    pout = dellius(t, (int16_t)mix, lamp);
-
-    if (FLIPPERAT) t++; else t--;
+    if (FLIPPERAT) t++;
+    else t--;
     t &= 0x1FFF;
 
     if (SKIPPERAT) {
@@ -86,89 +81,30 @@ void IRAM_ATTR bbd() {
         lastskp = 0;
     }
 
+    int16_t dly = dellius(t, gyo, lamp);
+
+    static int16_t lp = 0;
+    static int16_t fb = 0;
+
+    int16_t cut = 4 + (EARTHREAD >> 12);
+    if (cut > 7) cut = 7;
+
+    int16_t res = (EARTHREAD >> 9);
+    if (res > 96) res = 96;
+
+    int16_t damp = fb >> 4;
+    int16_t x = dly - damp - ((fb * res) >> 11);
+
+    lp += (x - lp) >> cut;
+    fb = lp;
+
+    pout = lp & 0x0FFF;
+    DACWRITER(pout);
+
     REG(I2S_CONF_REG)[0] &= ~BIT(5);
-
-    adc_read = EARTHREAD;
-
-    static int16_t ash_s = 0;
-    ash_s = (ash_s * 7 + adc_read) >> 3;
-
-    ASHWRITER(ash_s);
-
+    ASHWRITER(lp >> 4);
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
     REG(I2S_CONF_REG)[0] |= BIT(5);
-
-    YELLOWERS(t);
-}
-
-///single slope genelator
-void IRAM_ATTR ssg() {
-    INTABRUPT;
-
-    int16_t gyo = ADCREADER;
-    int16_t ear = EARTHREAD & 0x7FF;
-    static int32_t phase = 0;
-    static bool rising = true; 
-    static bool active = false; 
-    static bool prev_skipp = false; 
-    int16_t env = 0;
-    if (!lamp) {
-        if (SKIPPERAT && !prev_skipp && !active) {
-            active = true;
-            phase = 0;
-            rising = true;
-        }
-        prev_skipp = SKIPPERAT;
-
-        if (active) {
-            int32_t step_up = 60;              
-            int32_t step_down = 30 + ((ear * 1200) >> 11); // fall を EARTHREAD で変化
-            if (rising) {
-                env = (phase >> 8); 
-                phase += step_up;
-                if (phase >= 255 << 8) { 
-                    phase = 255 << 8; 
-                    rising = false; 
-                }
-            } else {
-                env = (phase >> 8);
-                phase -= step_down;
-                if (phase <= 0) { 
-                    phase = 0; 
-                    active = false; 
-                }
-            }
-        } 
-        if (!active) {
-            env = 0;
-            phase = 0;
-            rising = true;
-        }
-        ASHWRITER(env);
-    }
-
-    else {
-        static int32_t cyc_phase = 0;
-        static bool cyc_rising = true;
-        int16_t cyc;
-        int32_t step_up = 150 + ((ear * 200) >> 11);   // 150〜350
-        int32_t step_down = 100 + ((ear * 10000) >> 11); // 100〜250
-        if (cyc_rising) {
-            cyc = (cyc_phase >> 8); // 最大255
-            cyc_phase += step_up;
-            if (cyc_phase >= 255 << 8) { cyc_phase = 255 << 8; cyc_rising = false; }
-        } else {
-            cyc = (cyc_phase >> 8);
-            cyc_phase -= step_down;
-            if (cyc_phase <= 0) { cyc_phase = 0; cyc_rising = true; }
-        }
-        ASHWRITER(cyc);
-    }
-
-    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-    YELLOWERS(0);
 }
 
 ///earth>wave multiplier>ash + coco
@@ -230,78 +166,80 @@ void IRAM_ATTR wmp() {
     ASHWRITER((int16_t)fold3);
 }
 
-///distortion coco
-void IRAM_ATTR dico() {
-  INTABRUPT
-  DACWRITER(pout)
-  gyo = ADCREADER;
-  pout = dellius(t, gyo, lamp);
+void IRAM_ATTR nsd(){
+    INTABRUPT;
 
-  if (FLIPPERAT) t++;
-  else t--;
-  t &= 0x1FFFF;
+    static int16_t buf[256]={0};
+    static uint16_t idx=0;
+    static bool l=true;
 
-  if (SKIPPERAT) {
-    if (lastskp == 0) delayskp = t;
-    lastskp = 1;
-  } else {
-    if (lastskp) t = delayskp;
-    lastskp = 0;
-  }
+    gyo = ADCREADER;
 
-  int16_t abc_in = EARTHREAD;
-  int32_t ytmp = abc_in * (lamp ? 3 : 2);
-  if (ytmp > 32767) ytmp = 32767;
-  if (ytmp < -32768) ytmp = -32768;
-  int16_t yellow_sig = (int16_t)ytmp;
+    uint16_t dt = FLIPPERAT;
+    uint16_t r  = (idx + 256 - dt) & 0xFF;
+    int16_t out = buf[r];
 
-  // ---- 歪みタイプ（FLIPPERAT）----
-  static uint8_t dist_mode = 0;
-  if (FLIPPERAT) dist_mode = (dist_mode + 1) % 3;
+    int16_t pout = ((gyo + out) >> 1) * 70 / 100;
 
-  int32_t gtmp;
-  if (dist_mode == 0) {
-    gtmp = (yellow_sig ^ (yellow_sig >> 3));
-  } else if (dist_mode == 1) {
-    gtmp = yellow_sig - (yellow_sig >> 2);
-  } else {
-    gtmp = (yellow_sig ^ (yellow_sig >> 1) ^ (yellow_sig >> 4));
-  }
+    ASHWRITER(pout);
+    DACWRITER(pout);
 
-  // ---- フィルター種類（SKIPPERAT）----
-  static uint8_t filt_mode = 0;
-  if (SKIPPERAT) filt_mode = (filt_mode + 1) % 3;
+    l = !l;
+    buf[idx] = gyo + (out >> 1);
+    idx = (idx + 1) & 0xFF;
+}
 
-  static int16_t fz1 = 0;
-  static int16_t fz2 = 0;
+void IRAM_ATTR fico() {
+    static int16_t gyo, pout, filt_out, dist_out;
+    static uint32_t t;
+    static bool lastskp = 0;
+    static uint32_t delayskp;
 
-  if (filt_mode == 0) {
-    // lowpass
-    fz1 += (gtmp - fz1) >> 3;
-    gtmp = fz1;
-  }
-  else if (filt_mode == 1) {
-    // highpass
-    fz1 += (gtmp - fz1) >> 3;
-    gtmp = gtmp - fz1;
-  }
-  else {
-    // band-ish
-    fz1 += (gtmp - fz1) >> 4;
-    fz2 += (fz1 - fz2) >> 3;
-    gtmp = fz2;
-  }
+    INTABRUPT;
 
-  gtmp *= (lamp ? 2 : 1);
-  if (gtmp > 32767) gtmp = 32767;
-  if (gtmp < -32768) gtmp = -32768;
-  int16_t gray_sig = (int16_t)gtmp;
+    gyo = ADCREADER;
+    pout = dellius(t, gyo, 0);
 
-  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-  YELLOWERS(yellow_sig);
-  ASHWRITER(gray_sig);
-  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-  REG(I2S_CONF_REG)[0] |= (BIT(5));
+    int16_t cv = EARTHREAD >> 4;
+    if (cv < 1) cv = 1;
+    if (cv > 128) cv = 128;
+
+    if (FLIPPERAT) {
+        if (SKIPPERAT) filt_out += ((int32_t)(pout - filt_out) * cv) >> 8;
+        else filt_out += ((int32_t)(pout - filt_out) * cv) >> 9;
+    } else {
+        filt_out += ((int32_t)(pout - filt_out) * cv) >> 9;
+    }
+
+    int32_t tmp = filt_out + gyo;
+    if (tmp > 32767) tmp = 32767;
+    if (tmp < -32768) tmp = -32768;
+    dist_out = tmp >> 1;
+
+    DACWRITER(filt_out);
+    ASHWRITER(dist_out);
+
+    uint32_t gate_val = 0;
+    if (FLIPPERAT) gate_val |= 0x1;
+    if (SKIPPERAT) gate_val |= 0x2;
+    gate_val |= (EARTHREAD & 0xFF) << 8;
+    YELLOWERS(gate_val);
+
+    if (FLIPPERAT) t++;
+    else t--;
+    t &= 0x1FFFF;
+
+    if (SKIPPERAT) {
+        if (!lastskp) delayskp = t;
+        lastskp = 1;
+    } else {
+        if (lastskp) t = delayskp;
+        lastskp = 0;
+    }
+
+    REG(I2S_CONF_REG)[0] &= ~BIT(5);
+    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= BIT(5);
 }
 
 ///3layer grain coco
@@ -387,24 +325,18 @@ void IRAM_ATTR ccc() {
 
 ///degital crackle
 void IRAM_ATTR crackle() {
-    static int16_t fb = 0;
-    static int32_t chaos = 0;
-    static int16_t last_cr = 0;
-    static int16_t last_dac = 0;
+    static int16_t fb = 0, last_cr = 0, last_dac = 0;
+    static int32_t chaos = 0, tri_phase = 0;
     static int low_speed_counter = 0;
-    static int32_t tri_phase = 0;
-    static int16_t last_cr_out = 0;
 
     INTABRUPT;
 
     auto crackle_on_ear = [&](int16_t ear, bool flipp, bool skipp, bool lamp) -> int16_t {
-        int32_t chaos_delta = 0;
-        int32_t fb_delta = 0;
-        int32_t touch;
+        int32_t touch, chaos_delta = 0, fb_delta = 0;
 
-        if(!lamp){
+        if (!lamp) {
             touch = (int32_t)ear - 2048;
-            if(++low_speed_counter >= 20){
+            if (++low_speed_counter >= 20) {
                 int16_t lfo = ((tri_phase >> 6) & 0xFF) - 128;
                 chaos_delta = lfo;
                 fb_delta = (lfo >> 2);
@@ -413,40 +345,40 @@ void IRAM_ATTR crackle() {
             }
         } else {
             touch = (ear >> 3) - 64;
-            chaos_delta = 3000 + ((tri_phase & 0xFF) - 128);
-            fb_delta = 800 + (((tri_phase >> 1) & 0xFF) - 128);
-            tri_phase += 20;
+            int16_t low = ((tri_phase >> 8) & 0xFF) - 128;
+            int16_t fast = ((tri_phase >> 2) & 0xFF) - 128;
+            chaos_delta = low + (fast >> 2);
+            fb_delta = (low >> 1) + (fast >> 3);
+            tri_phase += 4;
         }
 
-        int32_t x = chaos + fb + touch + chaos_delta;
-        if(x > 30000) x = 30000 - (x - 30000);
-        if(x < -30000) x = -30000 - (x + 30000);
+        int32_t x = chaos + touch + chaos_delta + fb;
+        if (x > 30000) x = 30000 - (x - 30000);
+        if (x < -30000) x = -30000 - (x + 30000);
         chaos = x;
 
         int32_t y = chaos * 2 + fb_delta;
-        if(y > 32767) y = 32767;
-        if(y < -32768) y = -32768;
-        fb = y >> 3;
+        if (y > 32767) y = 32767;
+        if (y < -32768) y = -32768;
+        fb += ((y >> 3) - fb) >> 2;
 
         int16_t out = (last_cr + (int16_t)y) >> 1;
         last_cr = out;
 
-        if(flipp){
-            int32_t old = chaos;
-            int32_t rev = -old + ((tri_phase & 0x3FF) - 512);
-            int32_t d   = (old - rev);
-            d = (d * 3) >> 2;
+        if (flipp) {
+            int32_t rev = -chaos + ((tri_phase & 0x3FF) - 512);
+            int32_t d = ((chaos - rev) * 3) >> 2;
             out += (int16_t)d;
             chaos = rev + (d >> 3);
         }
 
-        if(skipp){
-            if(out > 3000)  out = 15000 - out;
-            if(out < -3000) out = -15000 - out;
-            out = out >> 1;
+        if (skipp) {
+            if (out > 3000) out = 15000 - out;
+            if (out < -3000) out = -15000 - out;
+            out >>= 1;
         }
 
-        if(flipp && skipp){
+        if (flipp && skipp) {
             out += ((tri_phase >> 2) & 0x7FF) - 1024;
         }
 
@@ -456,18 +388,11 @@ void IRAM_ATTR crackle() {
     int16_t gyo = ADCREADER;
     int16_t cr = crackle_on_ear(EARTHREAD, FLIPPERAT, SKIPPERAT, lamp);
 
-    int16_t cr_out;
-    if(!lamp){
-        int32_t gain = EARTHREAD;
-        cr_out = (cr * gain) >> 12;
-    } else {
-        int32_t gain = (EARTHREAD >> 3);
-        cr_out = (cr * gain) >> 8;
-    }
+    int16_t cr_out = !lamp ? (cr * EARTHREAD) >> 12 : (cr * (EARTHREAD >> 3)) >> 8;
 
     int32_t temp = gyo * 2;
-    if(temp > 32767) temp = 32767;
-    if(temp < -32768) temp = -32768;
+    if (temp > 32767) temp = 32767;
+    if (temp < -32768) temp = -32768;
     int16_t out_dac = (last_dac + (int16_t)temp) >> 1;
     last_dac = out_dac;
 
@@ -475,97 +400,7 @@ void IRAM_ATTR crackle() {
     ASHWRITER(cr_out);
     YELLOWERS(cr_out);
 
-    last_cr_out = cr_out;
-
     REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
 }
 
-///xor noise beat
-void IRAM_ATTR nc() {
-    INTABRUPT;
 
-    static uint32_t t = 0;
-    static int16_t last = 0;
-    const uint8_t L1 = 3; 
-    const uint8_t L2 = 5;
-    static uint8_t M1 = 9;
-    static uint8_t M2 = 11;
-    const uint8_t H1 = 15;
-    const uint8_t H2 = 17;
-
-    if (FLIPPERAT) {
-        M1 = 9 + ((t >> 9) % 4);
-    }
-    if (SKIPPERAT) {
-        M2 = 11 + ((t >> 7) % 4);
-    }
-
-    uint32_t s = t;
-    uint8_t beat =
-        ((s >> L1) ^
-         (s >> L2) ^
-         (s >> M1) ^
-         (s >> H1)) & 0xFF;
-    int16_t base =
-        ((s >> L2) ^
-         (s >> M2) ^
-         (s >> H2)) & 0x7FF;
-    base -= 1024;
-    if (beat < 64) base >>= 1; 
-    if (beat > 192) base <<= 1; 
-    int16_t out = (last + base) >> 1;
-    last = out;
-    int16_t dac_out = out >> 1;
-
-    gyo = ADCREADER;
-    pout = dellius(t, gyo, lamp);
-    DACWRITER(pout);
-    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-    ASHWRITER(out);
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-    t++;
-}
-
-static uint16_t pattern1(uint32_t t){ return (t*(t>>8)) & 0xFFF; }
-static uint16_t pattern2(uint32_t t){ return (t*(t>>6 | t>>9)) & 0xFFF; }
-static uint16_t pattern3(uint32_t t){ return (t*(t>>5 | t>>7)) & 0xFFF; }
-static uint16_t pattern4(uint32_t t){ return (t*((t>>4)|(t>>10))) & 0xFFF; }
-static uint16_t pattern5(uint32_t t){ return (t*(t>>3 | t>>11)) & 0xFFF; }
-static uint16_t pattern6(uint32_t t){ return (t*(t>>2 | t>>9)) & 0xFFF; }
-static uint16_t pattern7(uint32_t t){ return (t*(t>>7 ^ t>>10)) & 0xFFF; }
-static uint16_t pattern8(uint32_t t){ return (t*((t>>5)|(t>>12))) & 0xFFF; }
-typedef uint16_t (*BytebeatFunc)(uint32_t);
-
-void IRAM_ATTR bytebeats() {
-    INTABRUPT;
-
-    if (FLIPPERAT) t++;
-    else t--;
-
-    if (SKIPPERAT) t += 2;
-
-    bool both_pressed = (FLIPPERAT && SKIPPERAT);
-
-    static BytebeatFunc patterns[] = { pattern1, pattern2, pattern3, pattern4, pattern5, pattern6, pattern7, pattern8 };
-    static const int num_patterns = sizeof(patterns)/sizeof(patterns[0]);
-    static int current_pattern = 0;
-
-    static bool prev_both_pressed = false;
-    if (both_pressed && !prev_both_pressed) {
-        current_pattern = (current_pattern + 1) % num_patterns;
-    }
-    prev_both_pressed = both_pressed;
-
-    pout = patterns[current_pattern](t);
-
-    DACWRITER(pout & 0xFFF); 
-
-    gyo = ADCREADER;
-    adc_read = EARTHREAD;
-    ASHWRITER(adc_read);
-    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
-    REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
-    REG(I2S_CONF_REG)[0] |= BIT(5);
-    YELLOWERS(pout);
-}
