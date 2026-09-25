@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.4"
+#define FW_VERSION "3.5"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -691,8 +691,8 @@ void ota_service() {                      // loop() while updating: ring -> flas
 // ------------------------------------------
 // PRESET PLAYLIST
 // ------------------------------------------
-// Ten presets. Long-press the button, tap N times (count from 0), long-press again.
-// The lamp blinks the number (1-10) in the menu and right after a preset is loaded. The phone switches with "G <n>".
+// Eleven presets. Long-press the button, tap N times (count from 0), long-press again.
+// The lamp blinks the number (1-11) in the menu and right after a preset is loaded. The phone switches with "G <n>".
 //   1 = coco_mod  (startup preset)
 //   2 = echo_og   (4-tap echo, organ on YELLOW with EARTH FM, FLIP deeper, SKIP wobble)
 //   3 = BLE       (coco_pc: played from the phone. Modes: GRAIN / COCO / DELAY / NOISE)
@@ -703,8 +703,9 @@ void ota_service() {                      // loop() while updating: ring -> flas
 //   8 = rungler   (coco chopped by an 8-bit shift register: FLIP = clock, SKIP = data)
 //   9 = selfread  (the sound on the tape steers the play head: loaded files make their own paths)
 //  10 = multi     (seven effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
+//  11 = arpdelay  (MULTI's stereo tap delay for the phone's arpeggiator; SKIP = tap tempo, shared with the phone)
 void (*playlist_main[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi, arpdelay
 };
 
 // ------------------------------------------
@@ -857,7 +858,7 @@ void loop() {
     cafe_bpm = bpm;
     if (dl_p[8] < 500) dl_p[8] = 1000;
     if (hd_p[11] < 500) hd_p[11] = 1000;
-    dl_update(); hd_update();
+    dl_update(); hd_update(); fx_update_all();
     Serial.printf("[tap] %.1f bpm\n", bpm);
   }
 

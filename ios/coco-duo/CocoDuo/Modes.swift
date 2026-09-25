@@ -27,7 +27,7 @@
 import Foundation
 
 enum Preset {
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI"]
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "ARP_DELAY"]
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
@@ -39,12 +39,14 @@ enum Preset {
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
+        "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
     ]
     /// presets that exist in the firmware
-    static let count = 10
+    static let count = 11
     static let ble = 2
     static let harmony = 6
     static let multi = 9
+    static let arp = 10
     static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
     static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
@@ -52,7 +54,30 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, harmony, multi, knob }
+enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, knob }
+
+/// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
+enum ArpPad {
+    static let titles = ["ROOT · CHORD", "PATTERN · OCTAVES", "RATE · SWING", "GATE · DECAY",
+                         "TIME · FEEDBACK", "TAPS · WIDTH", "TONE · WOW", "WET · DRY"]
+    static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
+                                             (0.625, 0.4), (0.0, 0.8), (0.7, 0.0), (0.6, 1.0)]
+    static func root(_ x: Double) -> Int { 36 + min(24, Int(x * 25)) }
+    static func chord(_ y: Double) -> Int { min(6, Int(y * 7)) }
+    static func pattern(_ x: Double) -> Int { min(6, Int(x * 7)) }
+    static func octaves(_ y: Double) -> Int { 1 + min(3, Int(y * 4)) }
+    static func rate(_ x: Double) -> Int { min(5, Int(x * 6)) }
+    /// what a pad is set to, under its title
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 0: let r = root(x); return "\(ArpEngine.noteNames[r % 12])\(r / 12 - 1) \(ArpEngine.chordNames[chord(y)])"
+        case 1: return "\(ArpEngine.patterns[pattern(x)]) ×\(octaves(y))"
+        case 2: return "\(ArpEngine.rateNames[rate(x)]) · SWING \(Int(y * 60))%"
+        case 3: return "GATE \(Int((0.05 + x * 0.9) * 100))%"
+        default: return ""
+        }
+    }
+}
 
 /// MULTI's effects (firmware ids "F <effect> <0..7> <v>"; pad k = ids 2k, 2k+1; "—" = not used)
 enum Fx {
@@ -170,6 +195,19 @@ final class Rig: ObservableObject {
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
 
+    // ARP_DELAY
+    let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }
+    @Published var arpPlaying = false
+    @Published var arpGlide = 0.0
+    @Published var arpFifth = 0.0
+    @Published var arpLevel = 0.7
+    /// the Cafe's tap delay from the bottom row (pad 4..7 -> F 1 ids 0..7)
+    func arpDelayCommands(pad i: Int) -> [String] {
+        let a = arpAxes[i], k = i - 4
+        return ["F 1 \(2 * k) \(Int((a.x * 1000).rounded()))", "F 1 \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
+    }
+    func arpDelayAll() -> [String] { (4..<8).flatMap { arpDelayCommands(pad: $0) } + ["F 94 \(fxHold ? 1 : 0)", "F 95 \(Int(fxEarth * 1000))"] }
+
     /// the Cafe whose preset the screen shows
     var focus: Int { target == 1 ? 1 : 0 }
     var ctxPreset: Int { preset[focus] }
@@ -179,6 +217,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         if ctxPreset == Preset.multi { return .multi }
+        if ctxPreset == Preset.arp { return .arp }
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .coco, .delay, .noise][min(max(ctxMode, 0), 3)]
     }

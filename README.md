@@ -8,7 +8,7 @@ Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, 
 
 | folder | what it is |
 |---|---|
-| `esp_cafe_duo` | **Main one.** Presets: 1 coco_mod · 2 echo · 3 BLE · 4 resonator · 5 formant · 6 saturator · 7 harmony · 8 rungler · 9 selfread · 10 multi. Controlled over BLE by the **coco duo** iPhone app (two Cafes), firmware updates over BLE too. Needs the library *NimBLE-Arduino*. |
+| `esp_cafe_duo` | **Main one.** Presets: 1 coco_mod · 2 echo · 3 BLE · 4 resonator · 5 formant · 6 saturator · 7 harmony · 8 rungler · 9 selfread · 10 multi · 11 arp_delay. Controlled over BLE by the **coco duo** iPhone app (two Cafes), firmware updates over BLE too. Needs the library *NimBLE-Arduino*. |
 | `esp_cafe_ble` | coco-pc over BLE *and* USB (Mac page / coco-pc iPhone app, with WAV dump). |
 | `esp_cafe_apple_pi` | coco-pc over USB serial only (no BLE). |
 | `esp_ble_min` | Minimal BLE test (no audio): checks that the phone / Mac side works. |
@@ -23,6 +23,8 @@ Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, 
 **HARMONY (7)**: three-layer harmonic delay — unison, a fifth down, a fifth up (pitch-shifted heads), fed back so the repeats climb and fall in fifths. main = down side, ASH = up side, YELLOW = click, SKIP = tap.
 
 **MULTI (10)**: seven effects in one preset (clean, stereo tap delay, one-shot sampler −1…+2 oct, reverse, glitch, fold + octaver, reverb). FLIP = next, SKIP = random (a seed shared by both Cafes), crossfaded, LOCK against fast gates, EARTH modulates each effect.
+
+**ARP_DELAY (11)**: the coco duo app plays a sine arpeggiator (7 patterns, 7 chords) out of the iPhone into the Cafe's input, through MULTI's stereo tap delay. The tempo goes both ways: the app's BPM to the Cafes, a SKIP tap on a Cafe back to the arpeggio.
 
 **Firmware update over BLE**: after one USB upload, *Sketch > Export Compiled Binary* and send `esp_cafe_duo.ino.bin` from the coco duo app (PRESET MANAGER > UPDATE, A / B / both) or from `web/coco-pc.html` (update button).
 

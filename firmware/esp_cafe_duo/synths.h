@@ -2521,3 +2521,45 @@ void IRAM_ATTR multi() {
   REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
+
+// ==========================================
+// ARP_DELAY --- NEW PRESET 11 (k.odk): MULTI's stereo tap delay on its own, for the phone's arpeggiator
+// ==========================================
+// Patch the iPhone's audio (coco duo, ARP) into the Cafe's input. The tempo is shared both ways:
+// the phone sends it ("K"), and SKIP on the Cafe = tap tempo (the phone's arpeggio follows).
+// FLIP / BUTTON / the phone's HOLD = hold (the repeats go on). EARTH = wow (depth F 95).
+// Parameters: the same as MULTI's TAP DELAY ("F 1 <id> <v>"). main out = L, ASH = R, YELLOW = click on the beat.
+void IRAM_ATTR arpdelay() {
+  static uint32_t gen_seen = 0xFFFFFFFF; static bool was_in_menu = true;
+  static uint32_t bc = 0; static int click = 0;
+  if (preset_mode) { was_in_menu = true; }
+  else if (was_in_menu || gen_seen != preset_gen) {
+    gen_seen = preset_gen; was_in_menu = false;
+    audio_frozen_state = false; lamp = false;
+    fx_rs[1] = true; bc = 0;
+  }
+  DACWRITER(pout)
+  gyo = ADCREADER
+  pc_samples++;
+  earth_ac();
+  fx_em = (pc_emod * fx_edepth) >> 8;
+  if (skip_press()) { tap_note(); bc = 0; click = 300; }
+  if (fx_sync) { fx_sync = false; bc = 0; click = 300; }
+  bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;
+  int32_t in = gyo - 2048, l, r;
+  bool rs = fx_rs[1]; fx_rs[1] = false;
+  l = td_tick(in, &r, hold, rs);
+  int32_t v = l + 2048; if (v > 4095) v = 4095; if (v < 0) v = 0;
+  pout = v;
+  int32_t vr = r + 2048; if (vr > 4095) vr = 4095; if (vr < 0) vr = 0;
+  ASHWRITER(vr);
+  if (++bc >= (uint32_t)fx_beat) { bc = 0; click = 300; }
+  if (click > 0) { click--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
+  if (hold || click > 200) { LAMP_ON; } else { LAMP_OFF; }
+  pc_wpos = 0; pc_ppos = 0;
+  pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
+  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= (BIT(5));
+}
+/////////////////////////////////////////////////////////END//////////////////////////////////////////////////////

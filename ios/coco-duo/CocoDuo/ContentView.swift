@@ -5,12 +5,14 @@
 //               DELAY: top row = Cafe A's delay, bottom row = Cafe B's (LINK = both rows move together)
 //   HARMONY     like DELAY (top row A, bottom row B)
 //   MULTI       top row = the 4 pads of A's effect, bottom row = B's (LINK = same effect, both rows together)
+//   ARP_DELAY   top row = the phone's sine arpeggiator, bottom row = the Cafes' stereo tap delay
 //   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR, RUNGLER, SELF_READ): a placard, the Cafe is played with its own controls
 // Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
 //        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
 //   GRAIN   freeze · percussion · MOVE (pitch) · sync          COCO     rec · reverse · to the loop start · sync
 //   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
 //   NOISE   dice · sync                                 MULTI    next effect · random effect (per Cafe)
+//   ARP     play / stop · hold · tap · sync
 
 import SwiftUI
 import UIKit
@@ -27,6 +29,7 @@ final class Director: ObservableObject {
     let rig = Rig()
     let grain = GrainMode()
     let camera = CameraRig()
+    let arp = ArpEngine()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -54,6 +57,7 @@ final class Director: ObservableObject {
         camera.axes = axes()
         camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
         camera.warm()
+        applyArp()
     }
 
     /// the 8 pads of the current set (the camera moves these)
@@ -65,6 +69,7 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
+        case .arp: return rig.arpAxes
         case .knob: return []
         }
     }
@@ -91,6 +96,8 @@ final class Director: ObservableObject {
             rig.hdAll(slot: s).forEach(u.send)
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
+        case Preset.arp:
+            rig.arpDelayAll().forEach(u.send)
         default:
             break
         }
@@ -101,6 +108,7 @@ final class Director: ObservableObject {
         var p = rig.preset
         for s in rig.slots { p[s] = n }
         rig.preset = p
+        if n == Preset.arp { arp.startAudio() }
         for s in rig.slots where units[s].isConnected { sendAll(to: units[s]) }
         refresh()
         syncIfPair()
@@ -165,10 +173,33 @@ final class Director: ObservableObject {
             for r in rows where rig.inCtx(r) && units[r].isConnected {
                 rig.fxCommands(slot: r, e: e, k: k).forEach(units[r].send)
             }
+        case .arp:
+            if i < 4 { applyArp() }
+            else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .knob:
             break
         }
     }
+
+    // MARK: ARP
+
+    /// the top pads and the sliders -> the arpeggiator
+    func applyArp() {
+        let a = rig.arpAxes
+        arp.bpm = rig.bpm
+        arp.root = ArpPad.root(a[0].x); arp.chord = ArpPad.chord(a[0].y)
+        arp.pattern = ArpPad.pattern(a[1].x); arp.octaves = ArpPad.octaves(a[1].y)
+        arp.rateIndex = ArpPad.rate(a[2].x); arp.swing = a[2].y * 0.6
+        arp.gate = 0.05 + a[3].x * 0.9; arp.decay = a[3].y
+        arp.glide = rig.arpGlide; arp.fifth = rig.arpFifth; arp.level = rig.arpLevel
+    }
+    func arpToggle() {
+        applyArp()
+        if arp.playing { arp.stop() } else { arp.play(); ctxUnits().forEach { $0.send("Z") } }
+        rig.arpPlaying = arp.playing
+    }
+    /// the arpeggio from its first note, and the Cafes' clicks with it
+    func arpSync() { arp.restart(); ctxUnits().forEach { $0.send("Z") } }
 
     // MARK: MULTI
 
@@ -262,6 +293,7 @@ final class Director: ObservableObject {
 
     func setBpm(_ b: Double) {
         rig.bpm = min(max(b, 30), 300)
+        arp.bpm = rig.bpm
         let v = Int((rig.bpm * 10).rounded())
         units.filter { $0.isConnected }.forEach { $0.send("K \(v)") }
     }
@@ -270,6 +302,8 @@ final class Director: ObservableObject {
     func tempoFromCafe(_ b: Double, slot: Int) {
         guard abs(b - rig.bpm) > 0.3 else { return }
         rig.bpm = b
+        arp.bpm = b
+        if arp.playing { arp.restart() }                          // the tap was on the beat: start the arpeggio there
         let v = Int((b * 10).rounded())
         for u in units where u.slot != slot && u.isConnected { u.send("K \(v)") }
         if rig.link { sync() }
@@ -388,6 +422,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
+        case .arp: return (rig.arpAxes[i], ArpPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -395,11 +430,12 @@ private struct MainScreen: View {
     @ViewBuilder private func pad(_ i: Int) -> some View {
         let item = info(i)
         let live = (rig.perRow ? rig.inCtx(i / 4) : true) && item.1 != "—"
+        let caption: ((Double, Double) -> String)? = rig.padSet == .arp && i < 4 ? { x, y in ArpPad.caption(i, x, y) } : nil
         let tag = rig.perRow ? (i < 4 ? "A" : "B") + String(format: ".%02ld", i % 4 + 1) : String(format: "%02ld", i + 1)
         let director = d
         HudPad(axis: item.0, title: item.1, tag: tag,
                send: { director.padMoved(i) },
-               cam: camera.state, cameraMode: camera.enabled, index: i, padHeight: padHeight)
+               cam: camera.state, cameraMode: camera.enabled, index: i, padHeight: padHeight, caption: caption)
             .frame(height: padHeight)
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
@@ -428,6 +464,7 @@ private struct HudPad: View {
     let cameraMode: Bool
     let index: Int
     let padHeight: CGFloat
+    var caption: ((Double, Double) -> String)? = nil
 
     private var edgeGlow: Double {
         guard cameraMode else { return 0 }
@@ -466,6 +503,16 @@ private struct HudPad: View {
             .padding(.leading, 7)
             .padding(.top, 6)
             .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let caption {
+                Text(caption(axis.x, axis.y))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(PastelTheme.hudBlack.opacity(0.7))
+                    .padding(.leading, 8)
+                    .padding(.bottom, 6)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -577,7 +624,7 @@ private struct HudBar: View {
                     .foregroundStyle(PastelTheme.hudOrange)
                 if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
-            if (p == Preset.ble && m == 2) || p == Preset.harmony {
+            if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
                 Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
                     .font(.hudBig(14))
                     .foregroundStyle(PastelTheme.hudBlack)
@@ -629,6 +676,13 @@ private struct HudBar: View {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
             default: blank
+            }
+        case .arp:
+            switch n {
+            case 0: key(rig.arpPlaying ? "stop.fill" : "play.fill", on: rig.arpPlaying) { d.arpToggle() }
+            case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }
+            case 2: key("hand.tap") { d.tapTempo() }
+            default: key("arrow.triangle.2.circlepath") { d.arpSync() }
             }
         case .multi:
             switch n {

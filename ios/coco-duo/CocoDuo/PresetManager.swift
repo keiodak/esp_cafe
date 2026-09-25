@@ -29,8 +29,8 @@ struct PresetManagerView: View {
                         }
                     }
                 }
-                PanelCard(title: "PRESETS", note: "1–10", spacing: 3) {
-                    ForEach(0..<10, id: \.self) { n in
+                PanelCard(title: "PRESETS", note: "1–11", spacing: 3) {
+                    ForEach(0..<Preset.names.count, id: \.self) { n in
                         PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
                     }
                 }
@@ -51,6 +51,9 @@ struct PresetManagerView: View {
                 }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
+                }
+                if rig.preset.contains(Preset.arp) {
+                    ArpCard(d: d, rig: rig)
                 }
                 PanelCard(title: "TEMPO", note: "delay · harmony · multi · SKIP on a Cafe = tap") {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -160,6 +163,30 @@ private struct MultiCard: View {
             PanelRow(label: "LOCK", value: Binding(get: { rig.fxLock },
                                                    set: { rig.fxLock = $0; d.fxSetting("F 96 \(Int($0 * 1000))") }))
             Text("XFADE 0.02–2 s between effects · EARTH = how much it modulates each effect (level, delay time, sampler pitch + trigger, reverse speed, glitch chance, fold drive, reverb size) · LOCK = the shortest time between two changes (0.05–5 s), so fast gates on FLIP / SKIP don't make it flutter. LINK: both Cafes on the same effect, pads together; the same gate into both Cafes then jumps the same way.")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// ARP_DELAY: the arpeggiator's sound, and play / hold / sync
+private struct ArpCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        PanelCard(title: "ARP", note: "phone audio -> Cafe input") {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: rig.arpPlaying ? "STOP" : "PLAY", filled: rig.arpPlaying) { d.arpToggle() }
+                ChipButton(title: "SYNC", filled: false) { d.arpSync() }
+                ChipButton(title: "TAP", filled: false) { d.tapTempo() }
+                ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+            }
+            PanelRow(label: "GLIDE", value: Binding(get: { rig.arpGlide }, set: { rig.arpGlide = $0; d.applyArp() }))
+            PanelRow(label: "FIFTH", value: Binding(get: { rig.arpFifth }, set: { rig.arpFifth = $0; d.applyArp() }))
+            PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))
+            Text("Plug the iPhone's audio out into the Cafe's input. Top pads = the arpeggio (7 patterns, 7 chords), bottom pads = the Cafe's stereo tap delay (main = L, ASH = R). Tempo both ways: BPM here -> Cafes; SKIP on a Cafe = tap -> the arpeggio follows and restarts on the beat.")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
