@@ -75,7 +75,7 @@ static volatile uint16_t ble_mtu = 23;
 static volatile uint16_t ble_itvl = 0;          // connection interval, units of 1.25 ms
 static bool ble_ok = false;
 static char ble_name[16] = "Cafe";
-static char ble_rb[1024];                          // bytes written by the BLE task (core 0), read in loop()
+RTC_DATA_ATTR static char ble_rb[1024];            // bytes written by the BLE task (core 0), read in loop() (RTC memory: the heap is tight)
 static volatile uint16_t ble_wh = 0, ble_rh = 0;
 static volatile bool ota_active = false;         // a firmware update is running (see below)
 
@@ -156,7 +156,7 @@ void ble_begin() {
   ble_ok = adv->start();
 }
 void ble_line(const char *s) {                     // one text line -> notifications of (MTU-3) bytes
-  static char tmp[1024];
+  static char tmp[320];                            // (the longest reply is ~130 characters)
   if (!ble_conn || !ble_tx) return;
   size_t len = strlen(s);
   if (len > sizeof(tmp) - 2) len = sizeof(tmp) - 2;
@@ -506,10 +506,11 @@ void ota_cmd(char *s) {
   }
 }
 void ota_service() {                      // loop() while updating: ring -> flash
-  static uint8_t buf[1024];
+  static uint8_t *buf = nullptr;                   // taken from the freed tape memory when the update starts
+  if (!buf) { buf = (uint8_t *)malloc(1024); if (!buf) ota_fail("no memory"); }
   uint32_t avail = ota_wh - ota_rh;
   while (avail) {
-    uint32_t n = avail > sizeof(buf) ? sizeof(buf) : avail;
+    uint32_t n = avail > 1024 ? 1024 : avail;
     for (uint32_t i = 0; i < n; i++) buf[i] = ota_rb[(ota_rh + i) & (OTA_RING - 1)];
     if (Update.write(buf, n) != n) ota_fail(Update.errorString());
     ota_crc = ota_crc32(ota_crc, buf, n);

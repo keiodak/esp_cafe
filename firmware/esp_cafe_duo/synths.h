@@ -1716,7 +1716,7 @@ void IRAM_ATTR saturator() {
     
     // TAPE STATE 
     //static int16_t tape_flange[256]; //replaced below by putting this buffer in a specified memory ppol
-    static int16_t tape_flange[256];                 // (k.odk: its own buffer here)
+    RTC_DATA_ATTR static int16_t tape_flange[256];   // (k.odk: its own buffer, in RTC memory: the heap is tight)
     static uint8_t tape_f_ptr = 0;
 
     // RADIO STATE

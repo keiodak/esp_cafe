@@ -406,7 +406,7 @@ uint8_t *delaybuffa;
 uint8_t *delaybuffb;
 // BLE build (k.odk): with the radio on there is no single free block big enough for 2 x 96 KB,
 // so the tape lives in 64 pieces of 2048 samples (3072 bytes). Sample pairs never straddle a piece.
-#define DCHUNK_BITS 11                     // 64 pieces of 2048 samples (3072 bytes): fits the heap's gaps
+#define DCHUNK_BITS 10                     // 128 pieces of 1024 samples (1536 bytes): small enough for the heap's last gaps
 #define DCHUNKS (DELAYSIZE >> DCHUNK_BITS)
 #define DCHUNK_BYTES (((1 << DCHUNK_BITS) * 3) >> 1)
 uint8_t *dchunk[DCHUNKS];

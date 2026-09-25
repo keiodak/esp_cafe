@@ -215,7 +215,9 @@ async function bleConnect(){
     dev.addEventListener('gattserverdisconnected', ()=>{ if(ble && ble.dev===dev){ ble=null; logAdd('[page] BLE connection lost\n'); $('conn').textContent = port ? 'USB' : 'not connected'; $('bBle').textContent='BLE'; if(ota && !otaDone) msg('Update: the connection was lost. The Cafe restarts with its old firmware; try again.', true); else msg(otaDone || 'BLE connection lost.', !otaDone); ota=null; otaDone=''; } });
     let svc=null, err=null;
     for(let k=1; k<=4 && !svc; k++){                 // the first try often drops on macOS: retry
-      try{ const srv = await dev.gatt.connect(); await new Promise(r=>setTimeout(r,300));
+      try{ const srv = await Promise.race([dev.gatt.connect(),
+             new Promise((_,no)=>setTimeout(()=>{ try{ dev.gatt.disconnect(); }catch(e){} no(new Error('no answer in 8 s')); }, 8000))]);
+           await new Promise(r=>setTimeout(r,300));
            if(!dev.gatt.connected) throw new Error('dropped right after connecting');
            svc = await srv.getPrimaryService(NUS); }
       catch(e){ err=e; logAdd('[page] BLE try '+k+': '+e.message+'\n'); msg('BLE try '+k+' failed: '+e.message+' ... retrying'); await new Promise(r=>setTimeout(r,700)); }
@@ -287,8 +289,15 @@ async function otaStart(file){
   let ch; try{ ch = await ble.svc.getCharacteristic(OTA_RX); }catch(e){ msg('This Cafe has no BLE update yet: upload the new esp_cafe_duo once over USB.', true); return; }
   if(!confirm('Write '+file.name+' ('+(data.length/1024).toFixed(0)+' KB) to '+ble.dev.name+'?\nThe sound stops, the tape is cleared and the Cafe restarts.')) return;
   ota = {data, ch, sent:0, acked:0, busy:false, go:false, t0:performance.now(), lastR:0, name:file.name};
-  otaDone=''; bleOut=[]; send('U '+data.length+' '+crc32(data).toString(16));
-  msg('Update: asking the Cafe to get ready ...');
+  otaDone=''; bleOut=[];
+  // ask the packet size first (it is only known after connecting), so the pieces are as big as they can be
+  const mtu0 = bleMtu; send('H');
+  for(let k=0;k<10 && bleMtu===mtu0;k++) await new Promise(r=>setTimeout(r,100));
+  logAdd('[page] update: packet size '+(Math.min(240, bleMtu-3)-4)+' bytes (mtu '+bleMtu+')\n');
+  send('U '+data.length+' '+crc32(data).toString(16));
+  msg('Update: asking the Cafe to get ready ... (mtu '+bleMtu+')');
+  const me = ota;
+  setTimeout(()=>{ if(ota===me && !me.go){ msg('Update: the Cafe did not answer "U". Open "log" to see what came back.\n• Is the firmware on the Cafe the one with the BLE update (flashed over USB after it was added)?\n• Press BLE off / BLE again and retry.', true); ota=null; } }, 6000);
 }
 async function otaPump(){
   if(!ota || ota.busy || !ota.go || !ble) return;
@@ -308,7 +317,7 @@ async function otaPump(){
 function otaLine(l){
   if(!ota) return;
   const a = l.split(' ');
-  if(a[1]==='OK'){ ota.go = true; ota.t0 = performance.now(); otaPump(); }
+  if(a[1]==='OK'){ ota.go = true; ota.t0 = performance.now(); msg('Update: the Cafe is ready, sending ... (the sound stops)'); otaPump(); }
   else if(a[1]==='A'){ ota.acked = +a[2]; if(ota.sent < ota.acked) ota.sent = ota.acked;
     const s = Math.max(0.1, (performance.now()-ota.t0)/1000);
     msg('Update: '+(ota.acked/1024).toFixed(0)+' / '+(ota.data.length/1024).toFixed(0)+' KB  ('+(100*ota.acked/ota.data.length).toFixed(0)+' %, '+(ota.acked/1024/s).toFixed(1)+' KB/s)  - keep this page open');
