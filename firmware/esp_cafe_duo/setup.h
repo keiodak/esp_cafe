@@ -234,7 +234,10 @@ CHANG(SENS_SAR_MEAS_CTRL_REG,(uint32_t)0xFF07338F) //default
    //seems to not need bitmap
  
  
-   #define CTRLJING BIT(26)|(CLKDIVMAGIC)|BIT(6)|BIT(2)|BIT(3)
+   // k.odk: SINGLE mode, ADC1 only (was BIT(3) = double: ADC1 + ADC2 at once). With Bluetooth on, the radio's
+   // power detector takes ADC2 all the time, and in double mode that stalled every conversion: EARTH read 0.
+   // EARTH is ADC1 channel 6 (GPIO34, ADC1_PATT), so single mode on ADC1 keeps it.
+   #define CTRLJING BIT(26)|(CLKDIVMAGIC)|BIT(6)|BIT(2)
    
    #define CTRLPATT 0 //BIT(15)|BIT(19)
   #define CTRLJONG BIT(24)|BIT(23)

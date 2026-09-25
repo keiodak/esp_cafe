@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.8"
+#define FW_VERSION "3.9"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -555,7 +555,7 @@ void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_updat
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
 // The radio (Bluetooth) also uses ADC2 for its power detector and takes it over: then EARTH reads 0.
-// Every 20 ms we give ADC2 back to the digital controller (the bits the original setup sets). e2_fix counts it.
+// (v3.8 took ADC2 back every 20 ms; the radio took it again at once. Not used any more: the ADC runs on ADC1 alone.)
 volatile uint32_t e2_fix = 0;
 void earth_guard() {
   uint32_t a = REG(APB_SARADC_CTRL_REG)[0];
@@ -878,8 +878,7 @@ void loop() {
     hz_t = millis(); hz_n = n;
     if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
   }
-  static uint32_t eg_t = 0;
-  if (millis() - eg_t >= 20) { eg_t = millis(); earth_guard(); }
+  // (no more fighting the radio for ADC2: EARTH is read on ADC1 alone now, see CTRLJING in setup.h)
 
   // SKIP was tapped twice (DELAY / HARMONY): that is the tempo now, and the delay follows it
   if (tap_samples > 0) {
