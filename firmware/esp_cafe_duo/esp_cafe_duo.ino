@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.1"
+#define FW_VERSION "3.2"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -186,13 +186,13 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 //   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
 //   G <n>        switch to preset n (0-based, see the playlist)
-//   M <id> <v>   grain parameter (see mo_update); M 25 <0..3> = BLE preset mode GRAIN / RUNGLER / DELAY / NOISE
-//   B <id> <v>   rungler parameter (see bj_update)
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..3> = BLE preset mode GRAIN / COCO / DELAY / NOISE
+//   C <id> <v>   coco parameter (see co_update)
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
 //   V <id> <v>   harmony parameter (see hd_update)
 //   K <bpm x10>  the shared tempo (DELAY, HARMONY)
-//   Z            sync: grain score / rungler start / the click (send to both Cafes at once = in step)
+//   Z            sync: grain score / coco loop start / the click (send to both Cafes at once = in step)
 //   U ...        firmware update (see ota_cmd)
 // T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10
 void pc_status() {
@@ -405,7 +405,43 @@ void hd_update() {
   float b = sync ? beat : tt;
   hd_beat = (int32_t)(b > 64 ? b : 64);
 }
-void all_update() { mo_update(); bj_update(); dl_update(); nz_update(); hd_update(); }
+// ---- COCO parameters (k.odk). "C <id> <0..1000>" ----
+//  0 speed (centre = stop, 750 = 1x forward, 250 = 1x backward, ends = 4x)  1 overdub  2 loop start  3 loop length
+//  4 EARTH FM depth (up to ±200 %)  5 FM slew (0 = follows at once = audio-rate FM, 1000 = slow bends)
+//  6 wobble rate (0.05 .. 25 Hz)  7 wobble depth (up to ±50 %)  8 cutoff  9 resonance  10 crush (sample & hold)
+//  11 bits  12 dry  13 level  14 this Cafe's speed offset (up to +6 %)  15 this Cafe's loop start offset
+//  16 <0|1> reverse  17 = back to the loop start
+static const int16_t co_default[16] = {750, 0, 0, 1000, 300, 200, 300, 0, 1000, 200, 0, 0, 0, 500, 0, 0};
+void co_update() {
+  float hz = clock_hz(), p[16];
+  for (int i = 0; i < 16; i++) p[i] = co_p[i] / 1000.0f;
+  float x = p[0] * 2.0f - 1.0f;
+  float sp = fabsf(x) < 0.04f ? 0.0f : (x < 0 ? -1.0f : 1.0f) * 4.0f * x * x;
+  co_speed = (int32_t)(sp * 4096.0f);
+  co_dub = 256 - (int32_t)(p[1] * 224.0f);
+  co_ls = (int32_t)(p[2] * 131071.0f);
+  co_len = 256 + (int32_t)(p[3] * p[3] * (131072.0f - 256.0f));
+  co_fm = (int32_t)(p[4] * 512.0f);
+  co_slew = (int32_t)(4096.0f * powf(2.0f, -p[5] * 10.0f)); if (co_slew < 2) co_slew = 2;
+  float lf = 0.05f * powf(500.0f, p[6]);
+  co_lfo_inc = (uint32_t)(lf / hz * 4294967295.0f);
+  co_lfo_depth = (int32_t)(p[7] * 2048.0f);
+  if (p[8] >= 0.98f) co_f = 4096;
+  else {
+    float fc = 60.0f * powf(2.0f, p[8] * 8.0f);
+    if (fc > hz / 6) fc = hz / 6;
+    co_f = (int32_t)(4096.0f * 2.0f * sinf(3.14159265f * fc / hz));
+  }
+  co_q = (int32_t)(4096.0f * (1.0f - 0.92f * p[9]));
+  co_hold = 1 + (int32_t)(p[10] * p[10] * 63.0f);
+  co_bits = (int32_t)(p[11] * 10.0f + 0.5f);
+  co_dry = (int32_t)(p[12] * 256.0f);
+  co_gain = (int32_t)(p[13] * 2.0f * 256.0f);
+  co_det = (int32_t)(p[14] * 0.06f * 4096.0f);
+  co_loff = (int32_t)(p[15] * co_len);
+}
+
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); hd_update(); }
 
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
@@ -433,7 +469,13 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
               } break;
-    case 'Z': mo_sync = true; bj_sync = true; dl_align = true; hd_align = true; break;
+    case 'Z': mo_sync = true; co_restart = true; dl_align = true; hd_align = true; break;
+    case 'C': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // coco parameter
+                if (val < 0) val = 0; if (val > 1000) val = 1000;
+                if (id >= 0 && id < 16) { co_p[id] = (int16_t)val; co_update(); }
+                else if (id == 16) co_rev = val != 0;
+                else if (id == 17) co_restart = true;
+              } break;
     case 'Y': case 'N': case 'V': {
                 long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
@@ -542,17 +584,19 @@ void ota_service() {                      // loop() while updating: ring -> flas
 // ------------------------------------------
 // PRESET PLAYLIST
 // ------------------------------------------
-// Seven presets. Long-press the button, tap N times (count from 0), long-press again.
-// The lamp blinks the number (1-7) in the menu and right after a preset is loaded. The phone switches with "G <n>".
+// Nine presets. Long-press the button, tap N times (count from 0), long-press again.
+// The lamp blinks the number (1-9) in the menu and right after a preset is loaded. The phone switches with "G <n>".
 //   1 = coco_mod  (startup preset)
 //   2 = echo_og   (4-tap echo, organ on YELLOW with EARTH FM, FLIP deeper, SKIP wobble)
-//   3 = BLE       (coco_pc: played from the phone. Modes: GRAIN / RUNGLER / DELAY / NOISE)
+//   3 = BLE       (coco_pc: played from the phone. Modes: GRAIN / COCO / DELAY / NOISE)
 //   4 = resonator
 //   5 = formant   (ieat31415)
 //   6 = saturator (ieat31415: BUTTON = next kind)
 //   7 = harmony   (three-layer harmonic delay: unison, fifth down, fifth up)
+//   8 = rungler   (coco chopped by an 8-bit shift register: FLIP = clock, SKIP = data)
+//   9 = selfread  (the sound on the tape steers the play head: loaded files make their own paths)
 void (*playlist_main[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread
 };
 
 // ------------------------------------------
@@ -646,6 +690,7 @@ void setup() {
      for (int i = 0; i < 13; i++) dl_p[i] = dl_default[i];
      for (int i = 0; i < 13; i++) nz_p[i] = nz_default[i];
      for (int i = 0; i < 14; i++) hd_p[i] = hd_default[i];
+     for (int i = 0; i < 16; i++) co_p[i] = co_default[i];
      all_update();
      PRESETTER(presets[0])
   // ------------------------------------------

@@ -1,8 +1,8 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
 //   TARGET   A / B / A + B — who the presets (and the pads) go to
-//   PRESETS  1–10 (1–7 exist in esp_cafe_duo v3, 8–10 are empty slots). A / B marks show where each Cafe is.
-//   BLE MODE GRAIN / RUNGLER / DELAY / NOISE (preset 3)
+//   PRESETS  1–10 (1–9 exist in esp_cafe_duo v3.2, 10 is an empty slot). A / B marks show where each Cafe is.
+//   BLE MODE GRAIN / COCO / DELAY / NOISE (preset 3)
 //   TEMPO    the shared BPM (DELAY / HARMONY), TAP
 //   UPDATE   write a new firmware over Bluetooth to A / B / both (the .ino.bin from "Export Compiled Binary")
 
@@ -29,7 +29,7 @@ struct PresetManagerView: View {
                         }
                     }
                 }
-                PanelCard(title: "PRESETS", note: "1–7 · 8–10 empty", spacing: 3) {
+                PanelCard(title: "PRESETS", note: "1–9 · 10 empty", spacing: 3) {
                     ForEach(0..<10, id: \.self) { n in
                         PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
                     }

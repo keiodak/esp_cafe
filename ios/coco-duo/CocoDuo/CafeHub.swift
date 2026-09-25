@@ -100,13 +100,13 @@ final class CafeUnit: ObservableObject {
         guard rx != nil, let k = s.first else { return }
         if k == "Q" && !out.isEmpty { waitingQ = false; return }
         let key = Self.key(s)
-        if "SLJKXMBYNV".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
+        if "SLJKXMBYNVC".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
         out.append(s)
         pump()
     }
 
     private static func key(_ s: String) -> Substring {
-        if let f = s.first, "XMBYNV".contains(f) {     // "M 12", "Y 3", …: the id is part of the key
+        if let f = s.first, "XMBYNVC".contains(f) {     // "M 12", "Y 3", …: the id is part of the key
             let parts = s.split(separator: " ", maxSplits: 2)
             if parts.count >= 2 { return s.prefix(parts[0].count + 1 + parts[1].count) }
         }

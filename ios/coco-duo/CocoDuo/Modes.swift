@@ -3,8 +3,14 @@
 // the shared tempo, and the pads of DELAY, NOISE and HARMONY. (GRAIN and RUNGLER pads: GrainMode.swift, Benjolin.swift)
 //
 // Firmware esp_cafe_duo v3 playlist ("G <n>", 0-based):
-//   0 COCO_MOD · 1 ECHO · 2 BLE (modes GRAIN / RUNGLER / DELAY / NOISE, "M 25 <m>") · 3 RESONATOR · 4 FORMANT
-//   5 SATURATOR · 6 HARMONY (three-layer harmonic delay)            slots 8–10: empty for now
+//   0 COCO_MOD · 1 ECHO · 2 BLE (modes GRAIN / COCO / DELAY / NOISE, "M 25 <m>") · 3 RESONATOR · 4 FORMANT
+//   5 SATURATOR · 6 HARMONY (three-layer harmonic delay) · 7 RUNGLER (coco + shift register) · 8 SELF_READ
+//   slot 10: empty for now
+//
+// COCO (C ids) — the 8 pads go to both (L · R = only B moves):
+//   SPEED (speed · overdub) LOOP (start · length) EARTH_FM (depth · slew) WOBBLE (rate · depth)
+//   FILTER  CRUSH (hold · bits)  L · R (B faster · B's loop later)  MIX (dry · level)
+//   keys: REC · reverse · back to the loop start · sync
 //
 // DELAY (Y ids) — pads per Cafe, top row = A, bottom row = B:
 //   TIME · FB    X = time (on the grid: steps through 1/16 … 1/1)   Y = feedback      -> Y 0, Y 7, Y 2
@@ -21,29 +27,50 @@
 import Foundation
 
 enum Preset {
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "EMPTY", "EMPTY", "EMPTY"]
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "EMPTY"]
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
-        "played from here · GRAIN / RUNGLER / DELAY / NOISE",
+        "played from here · GRAIN / COCO / DELAY / NOISE",
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
         "unison + fifth down + fifth up · repeats climb in fifths",
-        "—", "—", "—",
+        "coco chopped by a shift register · FLIP = clock · SKIP = data",
+        "the sound on the tape steers the head · load a file = its own path",
+        "—",
     ]
     /// presets that exist in the firmware
-    static let count = 7
+    static let count = 9
     static let ble = 2
     static let harmony = 6
-    static let modeNames = ["GRAIN", "RUNGLER", "DELAY", "NOISE"]
-    static let modeIcons = ["circle.grid.3x3", "waveform.path.ecg", "repeat", "scribble.variable"]
+    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
+    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String { String(format: "%02ld_", n + 1) + (n >= 0 && n < names.count ? names[n] : "—") }
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, rungler, delay, noise, harmony, knob }
+enum PadSet { case grain, coco, delay, noise, harmony, knob }
+
+enum CoPad: Int, CaseIterable {
+    case speed, loop, fm, wobble, filter, crush, stereo, mix
+    var title: String { ["SPEED · DUB", "LOOP", "EARTH FM", "WOBBLE", "FILTER", "CRUSH", "L · R", "DRY · LEVEL"][rawValue] }
+    /// the same as the firmware's defaults (speed 1x forward, whole tape)
+    var start: (Double, Double) { [(0.75, 0.0), (0.0, 1.0), (0.3, 0.2), (0.3, 0.0), (1.0, 0.2), (0.0, 0.0), (0.0, 0.0), (0.0, 0.5)][rawValue] }
+    var ids: [Int] {
+        switch self {
+        case .speed: return [0, 1]
+        case .loop: return [2, 3]
+        case .fm: return [4, 5]
+        case .wobble: return [6, 7]
+        case .filter: return [8, 9]
+        case .crush: return [10, 11]
+        case .stereo: return [14, 15]           // only B: a little faster, its loop a little later
+        case .mix: return [12, 13]
+        }
+    }
+}
 
 enum DlPad: Int, CaseIterable {
     case time, spread, tone, mix
@@ -102,6 +129,8 @@ final class Rig: ObservableObject {
     let dlAxes: [PadAxis] = (0..<8).map { PadAxis(DlPad(rawValue: $0 % 4)!.start) }
     let hdAxes: [PadAxis] = (0..<8).map { PadAxis(HdPad(rawValue: $0 % 4)!.start) }
     let nzAxes: [PadAxis] = NzPad.allCases.map { PadAxis($0.start) }
+    let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
+    @Published var coReverse = false
 
     /// the Cafe whose preset the screen shows
     var focus: Int { target == 1 ? 1 : 0 }
@@ -112,7 +141,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .rungler, .delay, .noise][min(max(ctxMode, 0), 3)]
+        return [PadSet.grain, .coco, .delay, .noise][min(max(ctxMode, 0), 3)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony }
@@ -154,6 +183,38 @@ final class Rig: ObservableObject {
     func hdAll(slot: Int) -> [String] {
         (0..<4).flatMap { hdCommands(pad: slot * 4 + $0) } + ["V 11 \(grid ? 1000 : 0)", "V 13 \(hdHold ? 1000 : 0)"]
     }
+
+    // MARK: COCO
+    func coValue(_ id: Int, slot: Int) -> Double {
+        func a(_ p: CoPad) -> PadAxis { coAxes[p.rawValue] }
+        let v: Double
+        switch id {
+        case 0: v = a(.speed).x
+        case 1: v = a(.speed).y
+        case 2: v = a(.loop).x
+        case 3: v = a(.loop).y
+        case 4: v = a(.fm).x
+        case 5: v = a(.fm).y
+        case 6: v = a(.wobble).x
+        case 7: v = a(.wobble).y
+        case 8: v = a(.filter).x
+        case 9: v = a(.filter).y
+        case 10: v = a(.crush).x
+        case 11: v = a(.crush).y
+        case 12: v = a(.mix).x
+        case 13: v = a(.mix).y
+        case 14: v = slot == 1 ? a(.stereo).x : 0
+        case 15: v = slot == 1 ? a(.stereo).y : 0
+        default: v = 0
+        }
+        return min(max(v, 0), 1)
+    }
+    func coLine(_ id: Int, slot: Int) -> String { "C \(id) \(Int((coValue(id, slot: slot) * 1000).rounded()))" }
+    func coCommands(pad i: Int, slot: Int) -> [String] {
+        guard let p = CoPad(rawValue: i) else { return [] }
+        return p.ids.map { coLine($0, slot: slot) }
+    }
+    func coAll(slot: Int) -> [String] { (0...15).map { coLine($0, slot: slot) } + ["C 16 \(coReverse ? 1 : 0)"] }
 
     // MARK: NOISE
     func nzValue(_ id: Int, slot: Int) -> Double {

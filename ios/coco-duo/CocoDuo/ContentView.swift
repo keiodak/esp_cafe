@@ -1,13 +1,13 @@
 // ContentView.swift — coco duo (k.odk)
 // HUD layout: top bar = Cafe A, eight XY pads, bottom bar = Cafe B.
 // What the pads are depends on the preset the TARGET Cafe is on (see Modes.swift):
-//   BLE preset  GRAIN / RUNGLER / NOISE: the 8 pads go to every Cafe on that mode
+//   BLE preset  GRAIN / COCO / NOISE: the 8 pads go to every Cafe on that mode
 //               DELAY: top row = Cafe A's delay, bottom row = Cafe B's (LINK = both rows move together)
 //   HARMONY     like DELAY (top row A, bottom row B)
-//   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR): a placard, the Cafe is played with its own controls
+//   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR, RUNGLER, SELF_READ): a placard, the Cafe is played with its own controls
 // Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
 //        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
-//   GRAIN   freeze · percussion · mark · sync          RUNGLER  rec · lock · sync · new pattern
+//   GRAIN   freeze · percussion · mark · sync          COCO     rec · reverse · to the loop start · sync
 //   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
 //   NOISE   dice · sync
 
@@ -55,7 +55,7 @@ final class Director: ObservableObject {
     func axes() -> [PadAxis] {
         switch rig.padSet {
         case .grain: return grain.axes
-        case .rungler: return grain.bjAxes
+        case .coco: return rig.coAxes
         case .delay: return rig.dlAxes
         case .noise: return rig.nzAxes
         case .harmony: return rig.hdAxes
@@ -77,7 +77,7 @@ final class Director: ObservableObject {
             u.send("M 25 \(rig.mode[s])")
             switch rig.mode[s] {
             case 0: grain.allCommands(slot: s).forEach(u.send)
-            case 1: grain.bjAllCommands(slot: s).forEach(u.send)
+            case 1: rig.coAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             default: rig.nzAll(slot: s).forEach(u.send)
             }
@@ -111,7 +111,7 @@ final class Director: ObservableObject {
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
 
-    /// both Cafes on the same thing: start them together (grain score / rungler / the click)
+    /// both Cafes on the same thing: start them together (grain score / coco loop / the click)
     func syncIfPair() {
         let u = ctxUnits()
         if u.count == 2 && rig.padSet != .knob && rig.padSet != .noise { u.forEach { $0.send("Z") } }
@@ -126,8 +126,8 @@ final class Director: ObservableObject {
             let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
             for u in ctxUnits() { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
             if resync { sync() }
-        case .rungler:
-            for u in ctxUnits() { grain.bjCommands(pad: i, slot: u.slot).forEach(u.send) }
+        case .coco:
+            for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .delay, .harmony:
@@ -209,6 +209,11 @@ final class Director: ObservableObject {
     func toggleRec() {
         let r = units[rig.focus].recording ? 0 : 1
         ctxUnits().forEach { $0.send("R \(r)") }
+    }
+
+    func toggleCoReverse() {
+        rig.coReverse.toggle()
+        ctxUnits().forEach { $0.send("C 16 \(rig.coReverse ? 1 : 0)") }
     }
 
     func noiseDice() {
@@ -309,7 +314,7 @@ private struct MainScreen: View {
     private func info(_ i: Int) -> (PadAxis, String) {
         switch rig.padSet {
         case .grain: return (grain.axes[i], GrainPad(rawValue: i)!.title)
-        case .rungler: return (grain.bjAxes[i], BjPad(rawValue: i)!.title)
+        case .coco: return (rig.coAxes[i], CoPad(rawValue: i)!.title)
         case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
@@ -528,12 +533,12 @@ private struct HudBar: View {
             case 2: key("bookmark", on: grain.useMarks) { grain.mark(d.ctxUnits()) }
             default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
-        case .rungler:
+        case .coco:
             switch n {
             case 0: key("record.circle", on: d.units[rig.focus].recording) { d.toggleRec() }
-            case 1: key("lock", on: grain.bjLock) { grain.setBjLock(!grain.bjLock, d.ctxUnits()) }
-            case 2: key("arrow.triangle.2.circlepath") { d.sync() }
-            default: key("dice") { grain.bjKick(d.ctxUnits()) }
+            case 1: key("arrow.left.arrow.right", on: rig.coReverse) { d.toggleCoReverse() }
+            case 2: key("backward.end") { d.ctxUnits().forEach { $0.send("C 17 1") } }
+            default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .delay, .harmony:
             switch n {

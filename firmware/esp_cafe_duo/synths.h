@@ -851,11 +851,11 @@ void IRAM_ATTR selfread() {
 // ==========================================
 // Preset 3, played from the phone (coco duo app over BLE). Four modes ("M 25 <0..3>", ~12 ms fade between them):
 //   0 GRAIN   = smooth or struck grains of the tape on a shared score (grain_tick)
-//   1 RUNGLER = two oscillators + rungler + filter, linked to the tape (bj_tick)
+//   1 COCO    = a play head in a loop at its own speed, EARTH = FM of the speed, wobble, filter, crush (co_tick)
 //   2 DELAY   = stereo / ping-pong delay: main out = L, ASH = R, YELLOW = click on the beat (dl_tick)
 //   3 NOISE   = a noise machine: a ring of three delay lines through deciders, shift-register noise,
 //               a gate and a filter bent by the ring (nz_tick). Nothing is recorded.
-// GRAIN / RUNGLER keep a record head on the tape (BUTTON = hold). DELAY / NOISE use the tape as their own memory.
+// GRAIN / COCO keep a record head on the tape (BUTTON = hold). DELAY / NOISE use the tape as their own memory.
 
 volatile int32_t  pc_speed = 4096;          // (kept for the status line)
 volatile int32_t  pc_ls = 0, pc_le = 131072;
@@ -930,7 +930,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int      pc_mode = 0;               // BLE preset: 0 = GRAIN, 1 = RUNGLER, 2 = DELAY, 3 = NOISE ("M 25 <0..3>")
+volatile int      pc_mode = 0;               // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE ("M 25 <0..3>")
 volatile int32_t  pc_emod = 0;               // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool     mo_reset = true;           // set when the preset wakes up: the grain engine starts clean
 volatile int      mo_pulse = 0;              // YELLOW pulse length after a grain (read by coco_pc)
@@ -1353,6 +1353,104 @@ static int32_t IRAM_ATTR nz_tick(int32_t in, int32_t *rout, bool onebit, bool fr
   return (la * nz_gain) >> 8;
 }
 
+// ==========================================
+// COCO --- mode 1 of the BLE preset (k.odk)
+// ==========================================
+// coco with a separate play head: the record head keeps writing the input (BUTTON / REC key = hold),
+// the play head runs inside a loop at its own speed. EARTH (AC-coupled) = FM of the play speed —
+// from slow bends to audio-rate FM (SLEW), a WOBBLE LFO on the speed, a resonant low-pass, a CRUSH
+// (sample & hold + bits), and the dry input mixed in. Loop wraps and restarts are crossfaded.
+// FLIP = backwards (while high) · SKIP = back to the loop start · YELLOW = a pulse at every wrap
+// Parameters: "C <id> <0..1000>" (see co_update). "Z" = restart the loop (both Cafes together).
+volatile int16_t  co_p[18];
+volatile int32_t  co_speed = 4096;            // Q12 (4096 = 1x forward)
+volatile int32_t  co_ls = 0, co_len = 131072; // loop start / length, samples
+volatile int32_t  co_dub = 256;               // record strength Q8: 256 = replace, lower = overdub
+volatile int32_t  co_fm = 150;                // EARTH -> speed, 0..512 (512 = up to ±200 %)
+volatile int32_t  co_slew = 1024;             // how fast the FM follows EARTH, Q12 (4096 = at once)
+volatile uint32_t co_lfo_inc = 0;             // WOBBLE rate (Q32 per sample)
+volatile int32_t  co_lfo_depth = 0;           // WOBBLE depth, Q12 share of the speed
+volatile int32_t  co_f = 4096, co_q = 4096;   // low-pass (4096 = open), resonance
+volatile int32_t  co_hold = 1, co_bits = 0;   // CRUSH: keep each sample n samples, drop n bits
+volatile int32_t  co_dry = 0, co_gain = 256;  // Q8
+volatile int32_t  co_det = 0;                 // this Cafe's speed offset, Q12 share (L · R pad, B side)
+volatile int32_t  co_loff = 0;                // this Cafe's loop start offset (B side)
+volatile bool     co_rev = false, co_restart = false, co_reset = true;
+volatile int      co_pulse = 0;
+volatile uint32_t co_ppos = 0;
+#define CO_XF 256
+
+static int32_t IRAM_ATTR co_tick(uint32_t wpos, int32_t in, int32_t rg, bool back) {
+  static int32_t rel = 0;                         // position inside the loop, Q12
+  static int32_t tail = -1, xf = 0;               // the old head (absolute Q12) while a crossfade runs
+  static int32_t ef = 0;                          // EARTH, smoothed, Q8
+  static uint32_t lph = 0;
+  static int32_t low = 0, band = 0, held = 0, hn = 0;
+  if (co_reset) { co_reset = false; rel = 0; xf = 0; ef = 0; lph = 0; low = band = 0; held = 0; hn = 0; }
+
+  int32_t start = (co_ls + co_loff) & 0x1FFFF;
+  int32_t len = co_len; if (len < 256) len = 256; if (len > 131072) len = 131072;
+  int32_t lenq = len << 12;
+
+  // speed: base (+ B's detune), EARTH FM, WOBBLE, FLIP / reverse key
+  int32_t sp = co_speed;
+  sp += (int32_t)(((int64_t)sp * co_det) >> 12);
+  ef += (int32_t)((((int64_t)(pc_emod << 8) - ef) * co_slew) >> 12);
+  sp += (int32_t)(((int64_t)sp * (ef >> 8) * co_fm) >> 15);
+  lph += co_lfo_inc;
+  if (co_lfo_depth) {
+    int32_t tri = (int32_t)(lph >> 16); tri = tri < 32768 ? tri * 2 - 32768 : (65535 - tri) * 2 - 32768;   // -32768..32766
+    sp += (int32_t)(((int64_t)sp * tri * co_lfo_depth) >> 27);
+  }
+  if (back != co_rev) sp = -sp;
+  if (sp > 8 * 4096) sp = 8 * 4096; if (sp < -8 * 4096) sp = -8 * 4096;
+
+  bool jump = false;
+  if (co_restart) { co_restart = false; jump = true; }
+  if (rel >= lenq || rel < 0) rel %= lenq;       // the loop got shorter
+  if (rel < 0) rel += lenq;
+  int32_t abs_q = (int32_t)((((uint32_t)start << 12) + (uint32_t)rel) & 0x1FFFFFFFu);
+  int32_t v = pc_read(abs_q) - 2048;
+  if (xf > 0) {
+    int32_t w = pc_read(tail) - 2048;
+    v = (v * (CO_XF - xf) + w * xf) / CO_XF;
+    tail = (tail + sp) & 0x1FFFFFFF;
+    xf--;
+  }
+  // seam: near the record head, lean on the live input (no click where "a lap ago" meets "now")
+  if (rg) {
+    int32_t d = (int32_t)(((uint32_t)(abs_q >> 12) - wpos) & 0x1FFFF);
+    if (d >= 65536) d -= 131072;
+    int32_t ad = d < 0 ? -d : d;
+    if (ad < 256) { int32_t g = ((256 - ad) * rg) >> 8; v = (v * (256 - g) + in * g) >> 8; }
+  }
+  co_ppos = (uint32_t)(abs_q >> 12);
+
+  rel += sp;
+  if (rel >= lenq || rel < 0 || jump) {
+    if (xf == 0) { tail = (abs_q + sp) & 0x1FFFFFFF; xf = CO_XF; }
+    if (jump) rel = 0;
+    else if (rel >= lenq) rel -= lenq;
+    else rel += lenq;
+    if (rel >= lenq || rel < 0) rel = 0;
+    co_pulse = 1500;
+  }
+
+  // filter, crush
+  if (co_f < 4096) {
+    low += (co_f * band) >> 12;
+    int32_t high = v - low - ((co_q * band) >> 12);
+    band += (co_f * high) >> 12;
+    if (low > 32767) low = 32767; if (low < -32768) low = -32768;
+    if (band > 32767) band = 32767; if (band < -32768) band = -32768;
+    v = low;
+  }
+  if (++hn >= co_hold) { hn = 0; held = v; }
+  v = held;
+  if (co_bits) v &= ~((1 << co_bits) - 1);
+  return ((v * co_gain) >> 8) + ((in * co_dry) >> 8);
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;                  // record gain ramp
@@ -1384,40 +1482,39 @@ void IRAM_ATTR coco_pc() {
   int want = pc_mode;
   if (cur < 0) {
     cur = want;
-    if (cur == 0) mo_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true;
+    if (cur == 0) mo_reset = true; else if (cur == 1) co_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
-    else { cur = want; if (cur == 0) mo_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true; }
+    else { cur = want; if (cur == 0) mo_reset = true; else if (cur == 1) co_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true; }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3;
   bool frz = gmode && mo_freeze;              // FREEZE only exists in GRAIN mode
 
-  // --- SKIP: GRAIN = restart the score · RUNGLER = a new pattern · DELAY = tap tempo · NOISE = burst (held) ---
+  // --- SKIP: GRAIN = restart the score · COCO = back to the loop start · DELAY = tap tempo · NOISE = burst (held) ---
   bool press = skip_press();
   bool g_restart = false;
   if (press) {
     if (gmode) g_restart = true;
-    else if (bmode) bj_kick = true;
+    else if (bmode) co_restart = true;
     else if (dmode) { tap_note(); dl_align = true; }
   }
   nz_burst = nmode && SKIPPERAT;
 
-  // --- RECORD HEAD (GRAIN / RUNGLER only: the other two use the tape themselves) ---
+  // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
   bool rec = (gmode || bmode) && pc_rec && !audio_frozen_state && !frz;
   if (rec) { if (rg < 256) rg++; } else { if (rg > 0) rg--; }
   if (rg && (gmode || bmode)) {
     int32_t old = dread(wpos);
-    int32_t src = gyo;
-    if (bmode && bj_print) src = gyo + (((bj_last + 2048) - gyo) * bj_print >> 8);   // PRINT: the Rungler onto the tape
-    dwrite(wpos, old + (((src - old) * rg) >> 8));
+    int32_t g = bmode ? ((rg * co_dub) >> 8) : rg;          // COCO: overdub keeps some of the old sound
+    dwrite(wpos, old + (((gyo - old) * g) >> 8));
   }
   if (gmode || bmode) wpos = (wpos + 1) & 0x1FFFF;
 
   // --- THE SOUND ---
   int32_t l = 0, r = 0;
   if (gmode) { l = grain_tick(wpos, now, frz, g_restart); r = l; }
-  else if (bmode) { l = bj_tick(gyo - 2048); r = l; }
+  else if (bmode) { l = co_tick(wpos, gyo - 2048, rg, FLIPPERAT); r = l; }
   else if (dmode) { bool hold = dl_hold || FLIPPERAT || audio_frozen_state; l = dl_tick(gyo - 2048, &r, hold); }
   else { l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT); }
   if (!gmode && g_restart) mo_sync = true;
@@ -1425,19 +1522,19 @@ void IRAM_ATTR coco_pc() {
   int32_t v = l + 2048; if (v > 4095) v = 4095; if (v < 0) v = 0;
   pout = v;
   int32_t vr = r + 2048; if (vr > 4095) vr = 4095; if (vr < 0) vr = 0;
-  ASHWRITER(vr);                              // ASH = R (the same as L in GRAIN / RUNGLER)
+  ASHWRITER(vr);                              // ASH = R (the same as L in GRAIN / COCO)
 
-  // --- YELLOW: GRAIN = a pulse at every grain · RUNGLER = its clock · DELAY = the click · NOISE = the gate ---
+  // --- YELLOW: GRAIN = a pulse at every grain · COCO = a pulse at every wrap · DELAY = the click · NOISE = the gate ---
   bool y = false;
   if (gmode) { if (mo_pulse > 0) { mo_pulse--; y = true; } }
-  else if (bmode) { if (bj_pulse > 0) { bj_pulse--; y = true; } }
+  else if (bmode) { if (co_pulse > 0) { co_pulse--; y = true; } }
   else if (dmode) { if (dl_click > 0) { dl_click--; y = true; } }
   else y = nz_gate;
   if (y) { YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
 
   // --- LAMP ---
   //   phone not connected : slow blink (about once a second)
-  //   GRAIN / RUNGLER     : OFF while recording, ON while the tape is held
+  //   GRAIN / COCO        : OFF while recording, ON while the tape is held
   //   DELAY               : ON while held, else a flash on every click
   //   NOISE               : the gate
   if (!pc_link) { if ((now >> 19) & 1) { LAMP_ON; } else { LAMP_OFF; } }
@@ -1447,7 +1544,8 @@ void IRAM_ATTR coco_pc() {
 
   // --- report ---
   if (dmode) { pc_wpos = dl_wpos; pc_ppos = dl_rpos; }
-  else { t = wpos; pc_wpos = wpos; pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : wpos; }
+  else { t = wpos; pc_wpos = wpos; pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : co_ppos; }
+  if (bmode) { pc_ls = (co_ls + co_loff) & 0x1FFFF; pc_le = pc_ls + co_len; }
   pc_earth = EARTHREAD;
   pc_flip = FLIPPERAT ? 1 : 0;
   pc_skip = SKIPPERAT ? 1 : 0;
