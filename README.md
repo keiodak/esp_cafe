@@ -2,6 +2,8 @@
 
 Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, and iPhone / Mac control.
 
+**New here? Start with [SETUP.md](SETUP.md)**: install, upload, web page, updates over Bluetooth, iPhone app.
+
 ### firmware/ (Arduino IDE, board "ESP32 Dev Module")
 
 | folder | what it is |
