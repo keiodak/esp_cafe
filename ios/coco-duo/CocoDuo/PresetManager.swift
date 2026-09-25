@@ -45,6 +45,9 @@ struct PresetManagerView: View {
                     }
                     .disabled(rig.ctxPreset != Preset.ble)
                     .unlit(rig.ctxPreset != Preset.ble)
+                    if rig.padSet == .grain {
+                        GrainOptions(d: d, grain: d.grain)
+                    }
                 }
                 PanelCard(title: "TEMPO", note: "delay · harmony · SKIP on a Cafe = tap") {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -94,6 +97,31 @@ struct PresetManagerView: View {
             guard let data = try? Data(contentsOf: url) else { fileNote = "could not read the file"; return }
             fileNote = "\(url.lastPathComponent) · \(data.count / 1024) KB"
             d.update([UInt8](data))
+        }
+    }
+}
+
+/// GRAIN's switches: MOVE (Ikue Mori-like pitch), and the marks (places to take grains from)
+private struct GrainOptions: View {
+    let d: Director
+    @ObservedObject var grain: GrainMode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+        HStack(spacing: PanelMetrics.chipSpacing) {
+            ChipButton(title: "MOVE PITCH", filled: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
+            ChipButton(title: "FREEZE", filled: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
+            ChipButton(title: "PERC", filled: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
+        }
+        HStack(spacing: PanelMetrics.chipSpacing) {
+            ChipButton(title: "MARK", filled: false) { grain.mark(d.ctxUnits()) }
+            ChipButton(title: "ONLY MARKS", filled: grain.useMarks) { grain.setUseMarks(!grain.useMarks, d.ctxUnits()) }
+            ChipButton(title: "CLEAR \(grain.marks)", filled: false) { grain.clearMarks(d.ctxUnits()) }
+        }
+        Text("MOVE PITCH: every grain its own pitch from all intervals, gliding up or down (Ikue Mori-like). Off: pitch held for phrases (PITCH / REV·HOLD pads).")
+            .font(.hud(8))
+            .foregroundStyle(PastelTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

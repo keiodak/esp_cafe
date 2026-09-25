@@ -7,7 +7,7 @@
 //   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR, RUNGLER, SELF_READ): a placard, the Cafe is played with its own controls
 // Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
 //        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
-//   GRAIN   freeze · percussion · mark · sync          COCO     rec · reverse · to the loop start · sync
+//   GRAIN   freeze · percussion · MOVE (pitch) · sync          COCO     rec · reverse · to the loop start · sync
 //   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
 //   NOISE   dice · sync
 
@@ -530,7 +530,7 @@ private struct HudBar: View {
             switch n {
             case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
             case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
-            case 2: key("bookmark", on: grain.useMarks) { grain.mark(d.ctxUnits()) }
+            case 2: key("waveform.path", on: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
             default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .coco:

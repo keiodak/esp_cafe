@@ -886,6 +886,7 @@ static inline int32_t IRAM_ATTR pc_read(int32_t pq) {        // pq = position Q1
 // and SEPARATION pulls each one toward its own score, OFFSET shifts one of them in time.
 // Only the grains are heard (no dry sound).
 // FREEZE (M 23): hold the moment · PERCUSSION (M 24): struck grains instead of smooth ones
+// MOVE (M 26): Ikue Mori-like — every grain its own pitch (all intervals) and it glides up or down
 // SKIP = restart the score (patch the same gate into both Cafes to re-align them) · FLIP = grains backwards
 // BUTTON = hold the tape · YELLOW = a pulse at every grain.  Parameters: "M <id> <0..1000>", sync: "Z"
 
@@ -909,13 +910,14 @@ volatile uint32_t mo_salt = 0;               // 0 = Cafe A, 1 = Cafe B (whose "o
 volatile bool     mo_sync = false;           // "Z": restart the score now
 volatile bool     mo_freeze = false;         // FREEZE: stop recording and keep taking grains from the same moment
 volatile bool     mo_perc = false;           // PERCUSSION: grains are struck (instant attack, curved decay)
+volatile bool     mo_move = false;           // MOVE (Ikue Mori-like): every grain its own pitch from all intervals, and it glides
 volatile bool     mo_usemarks = false;       // take grains only from the marked places
 volatile int32_t  mo_mark[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 volatile int32_t  mo_last = 0;               // where the last grain started (MARK stores this)
 static int16_t    mo_win[129];               // rising half of sin², 0 .. 4096 (filled at boot)
 // intervals a grain can take (Q12): 1, 2, 1/2, 3/2, 2/3, 4, 1/4, 3, 1/3
 static const int32_t mo_iv[9] = {4096, 8192, 2048, 6144, 2731, 16384, 1024, 12288, 1365};
-struct MoVoice { int32_t pq, rate, n, len, edge, wstep, inv; bool perc; };
+struct MoVoice { int32_t pq, rate, n, len, edge, wstep, inv; bool perc; int32_t rq, dr; };   // rq/dr: MOVE glide, Q20
 static MoVoice mo_v[6];
 
 static inline uint32_t IRAM_ATTR mo_hash(uint32_t x) {
@@ -971,9 +973,18 @@ static int32_t IRAM_ATTR grain_tick(uint32_t wpos, int64_t now, bool frz, bool r
     MoVoice &v = mo_v[vi];
     int32_t len = mo_len;
     // pitch: one interval of the spread, kept for mo_hold grains (a phrase, not a new note every grain)
-    uint32_t pn = n / (uint32_t)(mo_hold > 0 ? mo_hold : 1);
-    int32_t rate = (mo_rate * mo_iv[(mo_rnd(pn, 2) * (uint32_t)(mo_spread ? mo_spread : 1)) >> 16]) >> 12;
+    bool mv = mo_move;
+    uint32_t pn = mv ? n : n / (uint32_t)(mo_hold > 0 ? mo_hold : 1);        // MOVE: a new pitch every grain
+    uint32_t spr = mv ? 9u : (uint32_t)(mo_spread ? mo_spread : 1);            //       from all nine intervals
+    int32_t rate = (mo_rate * mo_iv[(mo_rnd(pn, 2) * spr) >> 16]) >> 12;
     if (rate < 256) rate = 256; if (rate > 65536) rate = 65536;
+    // MOVE: the pitch glides during the grain, up to an octave up or down (a chirp), direction from the score
+    int32_t rend = rate;
+    if (mv) {
+      int32_t g = (int32_t)mo_rnd(n, 7) - 32768;                               // -32768 .. 32767
+      rend = g >= 0 ? rate + (int32_t)(((int64_t)rate * g) >> 15) : rate + (int32_t)(((int64_t)rate * g) >> 16);
+      if (rend < 256) rend = 256; if (rend > 65536) rend = 65536;
+    }
     int32_t span = (int32_t)(((int64_t)len * rate) >> 12);
     int32_t start = -1;
     if (mo_usemarks) {
@@ -991,6 +1002,8 @@ static int32_t IRAM_ATTR grain_tick(uint32_t wpos, int64_t now, bool frz, bool r
     bool backward = mo_rnd(n, 4) < mo_rev;
     if (FLIPPERAT) backward = !backward;
     v.rate = backward ? -rate : rate;
+    v.rq = v.rate << 8;
+    v.dr = mv ? (int32_t)((((int64_t)(backward ? -rend : rend) - v.rate) << 8) / len) : 0;
     v.pq = (backward ? ((start + span) & 0x1FFFF) : start) << 12;
     int32_t edge = mo_edge; if (edge > len / 2) edge = len / 2; if (edge < 16) edge = 16;
     v.len = len; v.n = len; v.edge = edge;
@@ -1019,6 +1032,7 @@ static int32_t IRAM_ATTR grain_tick(uint32_t wpos, int64_t now, bool frz, bool r
     int32_t sm = pc_read(v.pq) - 2048;
     sum += (sm * e) >> 12;
     v.pq = (v.pq + v.rate) & 0x1FFFFFFF;
+    if (v.dr) { v.rq += v.dr; v.rate = v.rq >> 8; }
     v.n--;
   }
 

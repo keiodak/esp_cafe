@@ -51,6 +51,7 @@ final class GrainMode: ObservableObject {
     @Published var useMarks = false
     @Published var freeze = false                  // hold the moment (both Cafes)
     @Published var perc = false                    // struck grains instead of smooth ones
+    @Published var move = false                    // MOVE: Ikue Mori-like — a new pitch every grain, gliding
     @Published var marks = 0                       // how many of the 8 slots hold something
     private var nextMark = 0
 
@@ -97,7 +98,7 @@ final class GrainMode: ObservableObject {
     /// everything (after connecting or switching mode)
     func allCommands(slot: Int) -> [String] {
         (0...16).map { line($0, slot: slot) }
-            + ["M 22 \(useMarks ? 1 : 0)", "M 23 \(freeze ? 1 : 0)", "M 24 \(perc ? 1 : 0)"]
+            + ["M 22 \(useMarks ? 1 : 0)", "M 23 \(freeze ? 1 : 0)", "M 24 \(perc ? 1 : 0)", "M 26 \(move ? 1 : 0)"]
     }
 
     /// true once, when the L · R separation comes back to (almost) zero: time to put L and R back in step
@@ -116,6 +117,10 @@ final class GrainMode: ObservableObject {
     func setFreeze(_ v: Bool, _ units: [CafeUnit]) {
         freeze = v
         units.forEach { $0.send("M 23 \(v ? 1 : 0)") }
+    }
+    func setMove(_ v: Bool, _ units: [CafeUnit]) {
+        move = v
+        units.forEach { $0.send("M 26 \(v ? 1 : 0)") }
     }
     func setPerc(_ v: Bool, _ units: [CafeUnit]) {
         perc = v
