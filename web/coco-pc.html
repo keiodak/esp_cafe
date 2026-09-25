@@ -215,8 +215,10 @@ async function bleConnect(){
     dev.addEventListener('gattserverdisconnected', ()=>{ if(ble && ble.dev===dev){ ble=null; logAdd('[page] BLE connection lost\n'); $('conn').textContent = port ? 'USB' : 'not connected'; $('bBle').textContent='BLE'; if(ota && !otaDone) msg('Update: the connection was lost. The Cafe restarts with its old firmware; try again.', true); else msg(otaDone || 'BLE connection lost.', !otaDone); ota=null; otaDone=''; } });
     let svc=null, err=null;
     for(let k=1; k<=4 && !svc; k++){                 // the first try often drops on macOS: retry
+      let tmo = null;
       try{ const srv = await Promise.race([dev.gatt.connect(),
-             new Promise((_,no)=>setTimeout(()=>{ try{ dev.gatt.disconnect(); }catch(e){} no(new Error('no answer in 8 s')); }, 8000))]);
+             new Promise((_,no)=>{ tmo = setTimeout(()=>{ try{ dev.gatt.disconnect(); }catch(e){} no(new Error('no answer in 8 s')); }, 8000); })])
+             .finally(()=>clearTimeout(tmo));
            await new Promise(r=>setTimeout(r,300));
            if(!dev.gatt.connected) throw new Error('dropped right after connecting');
            svc = await srv.getPrimaryService(NUS); }

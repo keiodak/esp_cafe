@@ -56,6 +56,8 @@
 // For coco-pc (Mac page / iPhone app with save wav) use esp_cafe_ble instead.
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
+// firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
+#define FW_VERSION "3.1"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -412,7 +414,7 @@ void pc_line(char *s) {
   if (s[0] == 'U') { ota_cmd(s); return; }
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
-    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo 3 %s ota", ble_name); pc_out(hb); } break;
+    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
     case 'H': { char hb[128]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
                 (unsigned long)(esp_timer_get_time() / 1000));
@@ -568,7 +570,7 @@ void setup() {
   // FOR DEBUGGING
   Serial.begin(PC_BAUD);  // USB serial for coco-pc.html (same speed in the page / Serial Monitor)
   delay(1000); // Give the serial monitor a moment to connect
-  Serial.printf("\n--- BOOT START --- (esp_cafe_duo, last reset reason %d)\n", (int)esp_reset_reason());
+  Serial.printf("\n--- BOOT START --- (esp_cafe_duo %s, last reset reason %d)\n", FW_VERSION, (int)esp_reset_reason());
   Serial.printf("Initial Free Heap: %d bytes\n", ESP.getFreeHeap());
 
   // BLE test: start the radio FIRST (clean ADC for its calibration), then the Cafe hardware setup
