@@ -16,6 +16,8 @@
 #define CLKDIVMAGIC ((8)<<9) //7 and 8 2<<7
 #define BCKMAGIC 6<<6 //6 7
 #define CLKMAGIC 6 //4
+// k.odk: BUTTON held at power-on = no Bluetooth, and the original ADC setup (EARTH test)
+bool cafe_no_ble = false;
 #define ADC1_PATT (0x6C<<24)
 #define ADC2_PATT (0x0D<<24)
 
@@ -169,7 +171,7 @@ static uint32_t dmall[3];
 void initDIG() {
   //CHANG(SENS_SAR_ATTEN1_REG,0x2<<12)
   //CHANG(SENS_SAR_ATTEN2_REG,0x2)
-  // CHANG(DPORT_WIFI_CLK_EN_REG,0)   // BLE test: this turned off the radio clocks, so it stays off here
+  if (cafe_no_ble) { CHANG(DPORT_WIFI_CLK_EN_REG,0) }   // (the original: radio clocks off. Only without Bluetooth)
   //SPI3 CLOCK
   CHANGOR(DPORT_PERIP_CLK_EN_REG,BIT(4))
   CHANGNOR(DPORT_PERIP_RST_EN_REG,BIT(4))
@@ -237,7 +239,7 @@ CHANG(SENS_SAR_MEAS_CTRL_REG,(uint32_t)0xFF07338F) //default
    // k.odk: SINGLE mode, ADC1 only (was BIT(3) = double: ADC1 + ADC2 at once). With Bluetooth on, the radio's
    // power detector takes ADC2 all the time, and in double mode that stalled every conversion: EARTH read 0.
    // EARTH is ADC1 channel 6 (GPIO34, ADC1_PATT), so single mode on ADC1 keeps it.
-   #define CTRLJING BIT(26)|(CLKDIVMAGIC)|BIT(6)|BIT(2)
+   #define CTRLJING (BIT(26)|(CLKDIVMAGIC)|BIT(6)|BIT(2)|(cafe_no_ble ? BIT(3) : 0))   // no Bluetooth: double mode as the original
    
    #define CTRLPATT 0 //BIT(15)|BIT(19)
   #define CTRLJONG BIT(24)|BIT(23)

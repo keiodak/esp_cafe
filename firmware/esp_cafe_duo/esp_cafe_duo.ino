@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.10"
+#define FW_VERSION "3.11"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -201,7 +201,7 @@ void pc_status() {
   snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
-    (int)pc_earth, (int)pc_flip, (int)pc_skip, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset,
+    (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset,
     pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now);
   pc_out(tb);
 }
@@ -729,7 +729,12 @@ void setup() {
 
   // BLE test: start the radio FIRST (clean ADC for its calibration), then the Cafe hardware setup
   Serial.printf("[1b] Starting BLE... Free Heap before: %d bytes\n", ESP.getFreeHeap());
-  ble_begin();
+  pinMode(32, INPUT);                                  // BUTTON (GPIO 32), low = pressed
+  delay(5);
+  cafe_no_ble = true;                                  // held down for the whole 0.3 s = no Bluetooth
+  for (int i = 0; i < 30 && cafe_no_ble; i++) { if (REG(GPIO_IN1_REG)[0] & 0x1) cafe_no_ble = false; delay(10); }
+  if (cafe_no_ble) Serial.println("[1b] BUTTON held at power-on: Bluetooth OFF, original ADC setup (EARTH test)");
+  else ble_begin();
   Serial.printf("[1b] BLE %s, name %s. Free Heap: %d bytes, largest block %u\n", ble_ok ? "advertising" : "FAILED", ble_name, ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   Serial.println("[1] Running SETUPPERS (Hardware Init)...");
 
@@ -850,6 +855,16 @@ void loop() {
     if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
   }
   // (no more fighting the radio for ADC2: EARTH is read on ADC1 alone now, see CTRLJING in setup.h)
+  // EARTH test over USB: once a second, the raw word and the ADC registers (Serial Monitor, 115200)
+  static uint32_t dbg_t = 0;
+  if (millis() - dbg_t >= 1000) {
+    dbg_t = millis();
+    Serial.printf("[earth] %s fifo %08lx earth %d flip %d skip %d | sarctl %08lx rd1 %08lx rd2 %08lx st1 %08lx st2 %08lx wait2 %08lx i2s %08lx\n",
+      cafe_no_ble ? "noBLE" : "BLE", (unsigned long)pc_fifo, (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0,
+      (unsigned long)REG(APB_SARADC_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0],
+      (unsigned long)REG(SENS_SAR_MEAS_START1_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0],
+      (unsigned long)REG(SENS_SAR_MEAS_WAIT2_REG)[0], (unsigned long)REG(I2S_CONF_REG)[0]);
+  }
 
   // SKIP was tapped twice (DELAY / HARMONY): that is the tempo now, and the delay follows it
   if (tap_samples > 0) {
