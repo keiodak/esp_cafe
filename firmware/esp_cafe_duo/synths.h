@@ -1051,33 +1051,9 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
 
 
 // ==========================================
-// BENJOLIN --- the third mode of the duo preset (k.odk)
+// 2^x table (k.odk) --- shared by NOISE's filter (the old BENJOLIN mode was removed)
 // ==========================================
-// After Rob Hordijk's Benjolin: two triangle oscillators, a "rungler" (8-bit shift register clocked by
-// oscillator 2, fed by oscillator 1's pulse XOR its own last bit), whose 3-bit R2R voltage bends both
-// oscillators and the filter; the PWM of the two triangles goes through a resonant low-pass.
-// Extra links to the Cafe: the tape / live input can go into the filter, the Benjolin can be PRINTED
-// onto the tape (so LOOP and GRAIN play what it made), EARTH = FM for oscillator 1.
-// FLIP = LOCK the rungler (the pattern repeats) · SKIP = flip a bit (a new pattern) · YELLOW = rungler clock
-// Parameters: "B <id> <0..1000>" (see bj_update in the .ino)
-volatile int16_t  bj_p[16];
-volatile uint32_t bj_inc1 = 1000000, bj_inc2 = 700000;   // base phase steps per sample (Q32)
-volatile int32_t  bj_r1 = 0, bj_r2 = 0;          // rungler -> osc 1 / osc 2, 1/256 octave per step (0..7)
-volatile int32_t  bj_x21 = 0;                    // osc 2 triangle -> osc 1, 1/256 octave at full swing
-volatile int32_t  bj_fc = 1600;                  // filter cutoff, 1/256 octave above 20 Hz
-volatile int32_t  bj_frr = 0, bj_fro2 = 0;       // rungler -> cutoff (per step), osc 2 -> cutoff (full swing)
-volatile int32_t  bj_q = 3000;                   // resonance (Q12, lower = more)
-volatile int32_t  bj_fk = 4000;                  // cutoff scale for this clock (Q8)
-volatile uint16_t bj_chaos = 52000;              // 0 = the rungler recycles (loops), 65535 = always new data
-volatile int32_t  bj_in = 0;                     // tape / input into the filter, Q8
-volatile int32_t  bj_print = 0;                  // Benjolin onto the tape, Q8
-volatile int32_t  bj_blend = 2048;               // 0 = PWM .. 4096 = filter
-volatile int32_t  bj_gain = 256;                 // output, Q8
-volatile bool     bj_lock = false;               // the key LOCK (FLIP does the same while high)
-volatile bool     bj_sync = false;               // "Z": same start on both Cafes
-volatile bool     bj_kick = false;               // SKIP: flip a bit
-volatile int32_t  bj_last = 0;                   // last output (for PRINT)
-volatile int      bj_pulse = 0;                  // YELLOW after a rungler clock
+volatile int32_t  bj_fk = 4000;                  // filter cutoff scale for this clock (Q8), set in bj_update
 RTC_DATA_ATTR static uint32_t bj_exp[256];       // 2^(i/256), Q16 (filled at boot; RTC memory: the heap is tight)
 
 static inline uint32_t IRAM_ATTR bj_exp2(int32_t o) {   // 2^(o/256), Q16
@@ -1086,61 +1062,6 @@ static inline uint32_t IRAM_ATTR bj_exp2(int32_t o) {   // 2^(o/256), Q16
   if (ip >= 0) { if (ip > 14) ip = 14; return v << ip; }
   ip = -ip; if (ip > 31) return 0;
   return v >> ip;
-}
-
-/// one sample of the Benjolin. in = tape / live input (centred). Returns the output (centred).
-static int32_t bj_tick(int32_t in) {
-  static uint32_t ph1 = 0, ph2 = 0x40000000;
-  static uint8_t reg = 0xA5;
-  static int32_t low = 0, band = 0;
-  static uint32_t seed = 0x2545F491;
-  if (bj_sync) { bj_sync = false; ph1 = 0; ph2 = 0x40000000; reg = 0xA5; low = band = 0; seed = 0x2545F491; }
-  if (bj_kick) { bj_kick = false; reg ^= 0x01; }
-
-  int32_t cv = (reg >> 5) & 7;                                    // rungler: top 3 bits, R2R 0..7
-  int32_t t1 = (int32_t)(ph1 >> 16); if (t1 > 32767) t1 = 65535 - t1;   // triangles 0..32767
-  int32_t t2 = (int32_t)(ph2 >> 16); if (t2 > 32767) t2 = 65535 - t2;
-  int32_t t2c = (t2 - 16384) * 2;                                 // osc 2, centred ±32767
-
-  // oscillators (exponential FM, 1/256 octave units)
-  int32_t o1 = cv * bj_r1 + ((t2c * bj_x21) >> 15) + pc_emod * 4;  // EARTH = FM for osc 1
-  int32_t o2 = cv * bj_r2;
-  uint32_t i1 = (uint32_t)(((uint64_t)bj_inc1 * bj_exp2(o1)) >> 16);
-  uint32_t i2 = (uint32_t)(((uint64_t)bj_inc2 * bj_exp2(o2)) >> 16);
-  uint32_t old2 = ph2;
-  ph1 += i1; ph2 += i2;
-
-  // rungler clock: osc 2 square rising edge
-  if (!(old2 & 0x80000000u) && (ph2 & 0x80000000u)) {
-    uint8_t last = (reg >> 7) & 1;
-    uint8_t bit = last;                                           // LOCK / loop: the pattern recycles
-    bool locked = bj_lock || FLIPPERAT;
-    seed = seed * 1664525u + 1013904223u;
-    if (!locked && (seed >> 16) < bj_chaos) bit = ((ph1 >> 31) & 1) ^ last;   // Benjolin: osc 1 pulse XOR last bit
-    reg = (uint8_t)((reg << 1) | bit);
-    bj_pulse = 200;
-  }
-
-  // PWM: the comparator of the two triangles
-  int32_t pwm = (t1 > t2) ? 1800 : -1800;
-
-  // filter: resonant low-pass, cutoff bent by the rungler and osc 2
-  int32_t oc = bj_fc + cv * bj_frr + ((t2c * bj_fro2) >> 15);
-  if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
-  int32_t f = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
-  if (f > 4096) f = 4096; if (f < 1) f = 1;
-  int32_t x = pwm + ((in * bj_in) >> 8);
-  low += (f * band) >> 12;
-  int32_t high = x - low - ((bj_q * band) >> 12);
-  band += (f * high) >> 12;
-  if (low > 32767) low = 32767; if (low < -32768) low = -32768;
-  if (band > 32767) band = 32767; if (band < -32768) band = -32768;
-
-  int32_t out = (pwm * (4096 - bj_blend) + low * bj_blend) >> 12;
-  out = (out * bj_gain) >> 8;
-  if (out > 2047) out = 2047; if (out < -2048) out = -2048;
-  bj_last = out;
-  return out;
 }
 
 // ---- shared by the BLE preset and HARMONY (k.odk) ----

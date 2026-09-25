@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.9"
+#define FW_VERSION "3.10"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -283,33 +283,9 @@ void mo_update() {
 }
 void mo_fill_window() { for (int i = 0; i <= 128; i++) { float s = sinf(3.14159265f * 0.5f * i / 128.0f); mo_win[i] = (int16_t)(4096.0f * s * s); } }
 
-// ---- BENJOLIN parameters (k.odk). "B <id> <0..1000>" ----
-//  0 osc 1 freq  1 rungler -> osc 1  2 osc 2 freq  3 rungler -> osc 2  4 cutoff  5 resonance
-//  6 rungler -> cutoff  7 osc 2 -> cutoff  8 chaos (0 = the rungler loops, 1000 = always new)
-//  9 osc 2 -> osc 1 (cross FM)  10 tape / input into the filter  11 PRINT (the Benjolin onto the tape)
-//  12 PWM .. filter  13 level  15 LOCK (0 / 1)  16 = flip a bit (new pattern)
-static const int16_t bj_default[16] = {450, 300, 250, 200, 550, 450, 350, 150, 800, 150, 0, 0, 600, 350, 0, 0};
+// ---- the filter scale for NOISE (k.odk) ----
 void bj_update() {
   float hz = mo_hz > 1000 ? mo_hz : 32000;
-  float p[16];
-  for (int i = 0; i < 16; i++) p[i] = bj_p[i] / 1000.0f;
-  float f1 = 0.5f * powf(2.0f, p[0] * 13.0f), f2 = 0.5f * powf(2.0f, p[2] * 13.0f);   // 0.5 Hz .. 4 kHz
-  if (f1 > hz / 4) f1 = hz / 4; if (f2 > hz / 4) f2 = hz / 4;
-  bj_inc1 = (uint32_t)(f1 / hz * 4294967296.0f);
-  bj_inc2 = (uint32_t)(f2 / hz * 4294967296.0f);
-  bj_r1 = (int32_t)(p[1] * 4.0f * 256.0f / 7.0f);     // up to 4 octaves over the rungler's range
-  bj_r2 = (int32_t)(p[3] * 4.0f * 256.0f / 7.0f);
-  bj_fc = (int32_t)(p[4] * 9.5f * 256.0f);           // 20 Hz .. ~14 kHz
-  bj_q = (int32_t)(4096.0f * (1.0f - 0.95f * p[5]));
-  bj_frr = (int32_t)(p[6] * 4.0f * 256.0f / 7.0f);
-  bj_fro2 = (int32_t)(p[7] * 3.0f * 256.0f);
-  bj_chaos = (uint16_t)(p[8] * 65535.0f);
-  bj_x21 = (int32_t)(p[9] * 4.0f * 256.0f);
-  bj_in = (int32_t)(p[10] * 1.5f * 256.0f);
-  bj_print = (int32_t)(p[11] * 256.0f);
-  bj_blend = (int32_t)(p[12] * 4096.0f);
-  bj_gain = (int32_t)(p[13] * 2.0f * 256.0f);
-  bj_lock = bj_p[15] > 0;
   bj_fk = (int32_t)(2.0f * 3.14159265f * 20.0f / hz * 4096.0f * 256.0f);
 }
 void bj_fill_table() { for (int i = 0; i < 256; i++) bj_exp[i] = (uint32_t)(65536.0f * powf(2.0f, i / 256.0f)); }
@@ -621,10 +597,6 @@ void pc_line(char *s) {
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
                 cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;
-    case 'B': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // benjolin parameter
-                if (id >= 0 && id < 16) { if (val < 0) val = 0; if (val > 1000) val = 1000; bj_p[id] = (int16_t)val; bj_update(); }
-                else if (id == 16) bj_kick = true;                            // a new pattern (same as SKIP)
-              } break;       // grain: restart the grain score now (sent to both Cafes at once)
     case 'W': {                            // write samples into the tape (file loading from the phone)
                 // W <start> <2 chars per sample: each char = 48 + 6 bits, high then low>  ->  "w <start>"
                 char *q = s + 1;
@@ -822,7 +794,6 @@ void setup() {
      for (int i = 0; i < 17; i++) mo_p[i] = mo_default[i];
      mo_fill_window();
      mo_update();
-     for (int i = 0; i < 16; i++) bj_p[i] = bj_default[i];
      bj_fill_table();
      bj_update();
      for (int i = 0; i < 13; i++) dl_p[i] = dl_default[i];

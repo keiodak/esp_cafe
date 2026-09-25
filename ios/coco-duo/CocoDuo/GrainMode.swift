@@ -45,9 +45,6 @@ enum GrainPad: Int, CaseIterable {
 }
 
 final class GrainMode: ObservableObject {
-    // BENJOLIN's own pads and LOCK (see Benjolin.swift)
-    let bjAxes: [PadAxis] = BjPad.allCases.map { PadAxis($0.start) }
-    @Published var bjLock = false
     @Published var useMarks = false
     @Published var freeze = false                  // hold the moment (both Cafes)
     @Published var perc = false                    // struck grains instead of smooth ones

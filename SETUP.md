@@ -54,7 +54,8 @@ What's in the repository:
 ## 4. Upload the firmware over USB (first time)
 
 1. Open `firmware/esp_cafe_duo/esp_cafe_duo.ino` in Arduino IDE.
-   Keep all four files (`.ino`, `setup.h`, `stuff.h`, `synths.h`) in the same folder.
+   Keep all the files (`.ino`, `setup.h`, `stuff.h`, `synths.h`, **`build_opt.h`**) in the same folder.
+   `build_opt.h` trims the Bluetooth library to what the Cafe needs (2 connections, peripheral only) and frees memory.
 2. **Tools** menu:
    - **Board:** ESP32 Dev Module
    - **Partition Scheme:** *Default 4MB with spiffs*. The updates over Bluetooth need this: it keeps
@@ -64,7 +65,7 @@ What's in the repository:
 3. Click **Upload** (→). If it can't connect, hold the ESP32's **BOOT** button while the upload starts.
 4. Open **Tools → Serial Monitor** at **115200** baud and reset the Cafe. You should see:
    ```
-   --- BOOT START --- (esp_cafe_duo 3.9, last reset reason 1)
+   --- BOOT START --- (esp_cafe_duo 3.10, last reset reason 1)
    [1b] BLE advertising, name Cafe-XXXX ...
    -> initDEL: Allocating delay buffers...
    ```
@@ -86,7 +87,7 @@ What's in the repository:
   *Experimental Web Platform features*, and restart Chrome.
 
 **Use it:**
-- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.9 Cafe-XXXX ota`.
+- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.10 Cafe-XXXX ota`.
 - **check** → memory, Bluetooth state, packet size (`mtu`).
 - **log** → everything the Cafe answered.
 - **update** → write a new firmware over Bluetooth (next section).
