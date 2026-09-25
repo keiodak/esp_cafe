@@ -1,15 +1,6 @@
-Hallo
+# esp_cafe (k.odk)
 
-This is the code for the ESP32 in the Ciat Lonbarde Cafe series.
-Most of it may be test code.
-
-It's mostly a prototype, but I've put something stable in stable.
-
----
-
-## k.odk additions (2026-09)
-
-Everything below lives in its own folders. The files at the top level are the original code, untouched.
+Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, and iPhone / Mac control.
 
 ### firmware/ (Arduino IDE, board "ESP32 Dev Module")
 
@@ -42,6 +33,6 @@ Chrome page (Web Serial / Web Bluetooth): the Cafe's tape as a waveform, loop / 
 - `coco-duo`: two Cafes, eight XY pads (top = Cafe A, bottom = Cafe B), LOOP / GRAIN / BENJOLIN, WAVE panel with file loading onto the tape, camera mode.
 
 ### Credits
-- Original Cafe firmware: Ciat-Lonbarde (Peter Blasser) — the top-level files.
+- Original Cafe firmware: Ciat-Lonbarde (Peter Blasser).
 - The firmware in `firmware/` started from **Apple π** by ieat31415 (alt firmware for the Cafe), trimmed and extended. Its README is kept as `firmware/esp_cafe_apple_pi/README_apple_pi.md`.
 - Additions, BLE link, presets and the apps: k.odk.
