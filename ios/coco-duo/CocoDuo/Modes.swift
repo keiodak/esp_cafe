@@ -59,9 +59,9 @@ enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, knob }
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
     static let titles = ["ROOT · CHORD", "PATTERN · OCTAVES", "RATE · SWING", "GATE · DECAY",
-                         "TIME · FEEDBACK", "TAPS · WIDTH", "TONE · WOW", "WET · DRY"]
+                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "WET · DRY"]
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
-                                             (0.625, 0.4), (0.0, 0.8), (0.7, 0.0), (0.6, 1.0)]
+                                             (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
     static func root(_ x: Double) -> Int { 36 + min(24, Int(x * 25)) }
     static func chord(_ y: Double) -> Int { min(6, Int(y * 7)) }
     static func pattern(_ x: Double) -> Int { min(6, Int(x * 7)) }
@@ -82,26 +82,26 @@ enum ArpPad {
 /// MULTI's effects (firmware ids "F <effect> <0..7> <v>"; pad k = ids 2k, 2k+1; "—" = not used)
 enum Fx {
     static let count = 7
-    static let names = ["CLEAN", "TAP DELAY", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB"]
-    static let short = ["CLEAN", "TAPS", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB"]
+    static let names = ["CLEAN", "ECHO", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB"]
+    static let short = ["CLEAN", "ECHO", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB"]
     static let titles: [[String]] = [
         ["LEVEL · —", "—", "—", "—"],
-        ["TIME · FEEDBACK", "PATTERN · WIDTH", "TONE · WOW", "WET · DRY"],
+        ["TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "WET · DRY"],
         ["PITCH · LENGTH", "START · DECAY", "AUTO · TONE", "WET · DRY"],
         ["LENGTH · SPEED", "TONE · —", "—", "WET · DRY"],
-        ["GRID · CHANCE", "SLICE · REPEATS", "PITCH · REVERSE", "CRUSH · WET"],
+        ["GRID · CHANCE", "SLICE · LENGTH", "VARIETY · PITCH", "CRUSH · WET"],
         ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "WET · DRY"],
-        ["SIZE · DAMP", "WIDTH · DIFFUSE", "—", "WET · DRY"],
+        ["SIZE · DAMP", "WIDTH · DIFFUSE", "HOWL · MOD", "WET · DRY"],
     ]
     /// the firmware's defaults (fx_default)
     static let defaults: [[Int]] = [
         [500, 0, 0, 0, 0, 0, 0, 0],
-        [625, 400, 0, 800, 700, 0, 600, 1000],
+        [625, 550, 1000, 500, 800, 300, 900, 1000],
         [333, 400, 0, 300, 0, 1000, 700, 700],
         [400, 500, 1000, 0, 0, 0, 700, 500],
-        [300, 500, 400, 300, 200, 200, 0, 1000],
+        [300, 550, 400, 300, 750, 300, 150, 1000],
         [300, 500, 600, 200, 800, 0, 1000, 0],
-        [600, 400, 800, 500, 0, 0, 500, 1000],
+        [750, 300, 800, 500, 400, 400, 600, 1000],
     ]
 }
 
@@ -189,7 +189,8 @@ final class Rig: ObservableObject {
         (0..<Fx.count).map { e in (0..<4).map { k in PadAxis((Double(Fx.defaults[e][2 * k]) / 1000, Double(Fx.defaults[e][2 * k + 1]) / 1000)) } }
     }
     @Published var fxLocal = [0, 0]
-    @Published var fxLink = false
+    @Published var fxLink = false          // LINK FX: both Cafes on the same effect
+    @Published var fxPadLink = false       // LINK PADS: the XY pads move both Cafes
     @Published var fxHold = false
     @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
     @Published var fxEarth = 0.62          // F 95: EARTH depth

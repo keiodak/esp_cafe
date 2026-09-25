@@ -1144,12 +1144,15 @@ static int32_t bj_tick(int32_t in) {
 
 // ---- shared by the BLE preset and HARMONY (k.odk) ----
 // (the engines' tick functions are NOT in IRAM: the ESP32's 128 KB of IRAM is full with BLE; they run from flash cache)
-/// EARTH, AC-coupled: only its movement counts, so an empty jack does nothing. Sets pc_emod (-128..127).
+/// EARTH, AC-coupled (slow): its movement counts, a constant level does nothing. Sets pc_emod (-128..127).
 static inline void IRAM_ATTR earth_ac() {
-  static int32_t eavg = 128 << 8;
+  // the average follows slowly (~1.5 s), so CV movements, LFOs and hand gestures come through;
+  // only a constant level (e.g. an empty jack) is taken away
+  static int32_t eavg = 0; static bool first = true;
   int32_t ev = (int32_t)(EARTHREAD);
-  eavg += ((ev << 8) - eavg) >> 11;
-  int32_t em = ev - (eavg >> 8);
+  if (first) { first = false; eavg = ev << 16; }
+  eavg += ((ev << 16) - eavg) >> 16;
+  int32_t em = ev - (eavg >> 16);
   if (em > -3 && em < 3) em = 0;                  // a little dead zone for the noise of an empty jack
   if (em > 127) em = 127; if (em < -128) em = -128;
   pc_emod = em;
@@ -2171,8 +2174,8 @@ void IRAM_ATTR saturator() {
 // ==========================================
 // MULTI --- NEW PRESET 10 (k.odk): a multi-effect with seven effects
 // ==========================================
-//   0 CLEAN · 1 TAP DELAY (stereo) · 2 SAMPLER (one-shot, -1 .. +2 octaves) · 3 REVERSE · 4 GLITCH
-//   5 FOLD + OCTAVER · 6 REVERB
+//   0 CLEAN · 1 ECHO (stereo ping-pong) · 2 SAMPLER (one-shot, -1 .. +2 octaves) · 3 REVERSE · 4 GLITCH
+//   5 FOLD + OCTAVER · 6 REVERB (it can HOWL: feedback past unity, held by a soft clip, and a slow MOD)
 // FLIP = next effect · SKIP = a random other one (not faster than LOCK: fast gates don't make it flutter). The random order comes from a seed both Cafes share:
 //   after a sync ("Z") the same gate into both Cafes makes the same jumps (or the phone's LINK mirrors them).
 // Changes are crossfaded (F 91). BUTTON = HOLD (delay / reverb freeze, reverse / glitch keep the past),
@@ -2180,11 +2183,13 @@ void IRAM_ATTR saturator() {
 // EARTH (AC-coupled, depth F 95) modulates each effect: CLEAN = level (VCA) · DELAY = time (wow) ·
 //   SAMPLER = pitch, and a rising EARTH triggers it · REVERSE = speed · GLITCH = chance · FOLD = drive · REVERB = size
 // main out = L, ASH = R, YELLOW = a click on the beat (shared tempo "K"). The lamp blinks the effect's number.
-// Tape: [0, 64K) the input's history · [64K, 96K) delay line · [96K, 120K) the sample · [120K, 128K) reverb
+// Tape: [0, 32K) the input's history · [32K, 64K) echo L · [64K, 96K) echo R · [96K, 120K) the sample · [120K, 128K) reverb
 // Phone: "F <effect> <id 0..7> <0..1000>" parameters, "F 90 <n>" choose, "F 91 <v>" crossfade, "F 92" take a sample,
 //        "F 93" trigger, "F 94 <0|1>" hold, "F 95 <v>" EARTH depth, "F 96 <v>" LOCK (the shortest time between changes)
 #define FX_N 7
-#define TD_BASE 65536
+#define TD_L 32768
+#define TD_R 65536
+#define H_MASK 0x7FFF
 #define SM_BASE 98304
 #define SM_LEN 24576
 #define RB_BASE 122880
@@ -2201,21 +2206,20 @@ static uint32_t   fx_hw = 0;                  // history write position
 // CLEAN
 volatile int32_t  cl_g = 256;
 // TAP DELAY
-volatile int32_t  td_T = 16000 << 8, td_fb = 100, td_pat = 0, td_width = 200, td_tone = 2800, td_wow = 0, td_wet = 256, td_dry = 256;
-static const uint8_t td_m[6][4] = {{4, 8, 12, 16}, {3, 6, 12, 16}, {5, 11, 13, 16}, {4, 7, 12, 16}, {8, 12, 14, 16}, {2, 4, 8, 16}};
-static const int16_t td_pan[4] = {-256, 256, -160, 0};
-static const int16_t td_gain[4] = {256, 220, 190, 256};
+volatile int32_t  td_T = 16000 << 8, td_fb = 140, td_pp = 256, td_ratio = 4096, td_tone = 3500, td_wow = 0, td_wet = 360, td_dry = 256;
 // SAMPLER
 volatile int32_t  sm_rate = 4096, sm_len = 8000, sm_start = 0, sm_auto = 0, sm_tone = 4096, sm_wet = 256, sm_dry = 256;
 volatile uint32_t sm_dec = 65535;
 // REVERSE
 volatile int32_t  rv_W = 12000, rv_speed = 4096, rv_tone = 4096, rv_wet = 256, rv_dry = 128;
 // GLITCH
-volatile int32_t  gl_ev = 5000, gl_chance = 30000, gl_slice = 1000, gl_reps = 4, gl_pitch = 50, gl_rev = 50, gl_crush = 0, gl_wet = 256;
+volatile int32_t  gl_ev = 5000, gl_chance = 30000, gl_slice = 1000, gl_len = 3, gl_var = 200, gl_pitch = 150, gl_crush = 0, gl_wet = 256;
 // FOLD + OCT
 volatile int32_t  fo_drive = 600, fo_bias = 0, fo_down = 150, fo_up = 50, fo_tone = 3000, fo_wet = 256, fo_dry = 0;
 // REVERB
 volatile int32_t  rb_fb = 3500, rb_damp = 1100, rb_width = 200, rb_ap = 2048, rb_wet = 256, rb_dry = 256;
+volatile int32_t  rb_howl = 0, rb_mod = 0;                  // HOWL: feedback past unity (Q12), MOD: comb wobble depth (Q8 samples)
+volatile uint32_t rb_lfo = 40000;                          // MOD rate (Q32 per sample)
 volatile int32_t  rb_len[8] = {1116, 1188, 1277, 1356, 556, 441, 579, 464};
 static const int32_t rb_max[8] = {1116, 1188, 1277, 1356, 556, 441, 579, 464};
 volatile bool     fx_rs[FX_N] = {true, true, true, true, true, true, true};
@@ -2223,40 +2227,42 @@ volatile bool     fx_rs[FX_N] = {true, true, true, true, true, true, true};
 static inline int32_t IRAM_ATTR fx_lp(int32_t *st, int32_t x, int32_t k) { *st += ((x - *st) * k) >> 12; return *st; }
 /// the input's history, interpolated: posq = absolute position, Q12
 static inline int32_t IRAM_ATTR h_readq(uint32_t posq) {
-  uint32_t i = (posq >> 12) & 0xFFFF; int32_t f = (posq >> 4) & 255;
-  int32_t a = dread(i), b = dread((i + 1) & 0xFFFF);
+  uint32_t i = (posq >> 12) & H_MASK; int32_t f = (posq >> 4) & 255;
+  int32_t a = dread(i), b = dread((i + 1) & H_MASK);
   return a + (((b - a) * f) >> 8) - 2048;
 }
 
-// ---- 1 TAP DELAY: one line with feedback, four taps spread L / R ----
+// ---- 1 ECHO: a clear stereo delay, L line + R line, the repeats ping-pong between them ----
 static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
-  static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lp = 0;
-  if (rs) { w = 0; fill = 0; ct = td_T; lp = 0; }
+  static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lpl = 0, lpr = 0;
+  if (rs) { w = 0; fill = 0; ct = td_T; lpl = lpr = 0; }
   ct += (td_T - ct) >> 11;
-  int32_t T = ct + fx_em * td_wow;
-  if (T < (64 << 8)) T = 64 << 8; if (T > (32000 << 8)) T = 32000 << 8;
+  int32_t tl = ct + fx_em * td_wow;
+  if (tl < (64 << 8)) tl = 64 << 8; if (tl > (32000 << 8)) tl = 32000 << 8;
+  int32_t tr = (int32_t)(((int64_t)tl * td_ratio) >> 12);
+  if (tr < (64 << 8)) tr = 64 << 8; if (tr > (32000 << 8)) tr = 32000 << 8;
+  int32_t rq = (int32_t)(w << 8) - tl;
+  int32_t i = (rq >> 8) & 0x7FFF, f = rq & 255;
+  int32_t a = dread(TD_L + i), b = dread(TD_L + ((i + 1) & 0x7FFF));
+  int32_t vl = a + (((b - a) * f) >> 8) - 2048;
+  rq = (int32_t)(w << 8) - tr;
+  i = (rq >> 8) & 0x7FFF; f = rq & 255;
+  a = dread(TD_R + i); b = dread(TD_R + ((i + 1) & 0x7FFF));
+  int32_t vr = a + (((b - a) * f) >> 8) - 2048;
   if (fill < 40000) fill++;
-  bool live = fill > (uint32_t)((T >> 8) + 2);
-  int pat = td_pat; if (pat < 0) pat = 0; if (pat > 5) pat = 5;
-  int32_t sl = 0, sr = 0, last = 0;
-  for (int k = 0; k < 4; k++) {
-    int32_t d = (T * td_m[pat][k]) >> 4;
-    int32_t rq = (int32_t)(w << 8) - d;
-    int32_t i = (rq >> 8) & 0x7FFF, f = rq & 255;
-    int32_t a = dread(TD_BASE + i), b = dread(TD_BASE + ((i + 1) & 0x7FFF));
-    int32_t v = live ? a + (((b - a) * f) >> 8) - 2048 : 0;
-    if (k == 3) last = v;
-    v = (v * td_gain[k]) >> 8;
-    int32_t p = (td_pan[k] * td_width) >> 8;
-    sl += (v * (256 - p)) >> 9; sr += (v * (256 + p)) >> 9;
-  }
-  fx_lp(&lp, last, td_tone);
-  int32_t wr = hold ? last : in + ((lp * td_fb) >> 8);
-  dwrite(TD_BASE + w, soft_clip(wr) + 2048);
+  if (fill <= (uint32_t)(((tl > tr ? tl : tr) >> 8) + 2)) { vl = 0; vr = 0; }   // the lines still hold old tape
+  fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone);
+  int32_t pp = td_pp, fb = hold ? 256 : td_fb;
+  int32_t xl = hold ? vl : lpl, xr = hold ? vr : lpr;
+  int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
+  int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
+  int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
+  dwrite(TD_L + w, soft_clip(wl) + 2048);
+  dwrite(TD_R + w, soft_clip(wr) + 2048);
   w = (w + 1) & 0x7FFF;
   int32_t dry = (in * td_dry) >> 8;
-  *rout = dry + ((sr * td_wet) >> 8);
-  return dry + ((sl * td_wet) >> 8);
+  *rout = dry + ((vr * td_wet) >> 8);
+  return dry + ((vl * td_wet) >> 8);
 }
 
 // ---- 2 SAMPLER: a slice of the recent past, played once per trigger at -1 .. +2 octaves ----
@@ -2267,7 +2273,7 @@ static int32_t sm_tick(int32_t in, bool rs) {
   if (rs) { fx_capture = true; n[0] = n[1] = 0; ac = 0; lp = 0; }
   if (fx_capture) { fx_capture = false; cp = 0; csrc = fx_hw - SM_LEN; }
   if (cp >= 0) {                                               // copy the last SM_LEN samples, a little per sample
-    for (int k = 0; k < 32 && cp < SM_LEN; k++, cp++) dwrite(SM_BASE + cp, dread((csrc + cp) & 0xFFFF));
+    for (int k = 0; k < 32 && cp < SM_LEN; k++, cp++) dwrite(SM_BASE + cp, dread((csrc + cp) & H_MASK));
     if (cp >= SM_LEN) cp = -1;
   }
   bool trig = false;
@@ -2305,10 +2311,10 @@ static int32_t sm_tick(int32_t in, bool rs) {
 // ---- 3 REVERSE: two heads read the past backwards, sin² windows half a length apart ----
 static int32_t rv_tick(int32_t in, bool rs) {
   static uint32_t anc[2] = {0, 0}; static int32_t t[2] = {0, 0}, p[2] = {0, 0}; static int32_t lp = 0;
-  int32_t W = rv_W; if (W < 256) W = 256; if (W > 30000) W = 30000;
+  int32_t W = rv_W; if (W < 256) W = 256; if (W > 15000) W = 15000;
   if (rs) { anc[0] = anc[1] = fx_hw; t[0] = 0; t[1] = W / 2; p[0] = 0; p[1] = (W / 2) * rv_speed; lp = 0; }
   int32_t sp = rv_speed + (int32_t)(((int64_t)rv_speed * fx_em) >> 8);    // EARTH = speed
-  if (sp < 1024) sp = 1024; if (sp > 12288) sp = 12288;
+  if (sp < 1024) sp = 1024; if (sp > 8192) sp = 8192;
   int32_t sum = 0;
   for (int k = 0; k < 2; k++) {
     if (t[k] >= W) { t[k] = 0; p[k] = 0; anc[k] = fx_hw; }
@@ -2323,37 +2329,88 @@ static int32_t rv_tick(int32_t in, bool rs) {
   return ((in * rv_dry) >> 8) + ((sum * rv_wet) >> 8);
 }
 
-// ---- 4 GLITCH: on a grid, a slice of the recent past stutters (pitch jumps, backwards, crushed) ----
+// ---- 4 GLITCH: on a grid, one of eight moves happens to the recent past ----
+//   0 STUTTER · 1 BACKWARDS · 2 RATCHET (shorter every repeat) · 3 PITCH STEPS (a fifth up every repeat)
+//   4 TAPE STOP · 5 SCATTER (a slice from further back) · 6 CHOP (gated in 1/32s) · 7 CRUSH
+// VARIETY lets more moves in, and makes everything more random: slice length, how long a move lasts,
+// when the next one comes (the grid gets skips and doubles), backwards / pitch on single repeats.
+// All the dice come from a score both Cafes share (the same after "Z").
 volatile bool gl_resync = false;
 static int32_t gl_tick(int32_t in, bool hold, bool rs) {
-  static uint32_t bc = 0, n = 0, sst = 0; static int32_t left = 0, sl = 1, pq = 0, rate = 4096, held = 0, hn = 0;
-  static bool rev = false;
-  if (rs || gl_resync) { gl_resync = false; bc = 0; n = 0; left = 0; }
-  if (++bc >= (uint32_t)gl_ev) {
+  static uint32_t bc = 0, n = 0, sst = 0, next = 5000, tq = 0;
+  static int32_t left = 0, total = 1, cur = 1, pq = 0, rate = 4096, mv = 0, held = 0, hn = 0, rr = 0;
+  if (rs || gl_resync) { gl_resync = false; bc = 0; n = 0; left = 0; next = gl_ev; }
+  if (++bc >= next) {
     bc = 0;
-    uint32_t h = mo_hash(fx_seed ^ (n * 0x9E3779B9u)); n++;
-    int32_t ch = gl_chance + fx_em * 400; if (ch < 0) ch = 0;            // EARTH = chance
+    uint32_t h = mo_hash(fx_seed ^ (n * 0x9E3779B9u)), h2 = mo_hash(h + 0x7F4A7C15u), h3 = mo_hash(h2 ^ 0x5bd1e995u);
+    n++;
+    int32_t var = gl_var;                                           // 0..256
+    // when the next one comes: on the grid, but with more VARIETY it skips, doubles and halves
+    next = gl_ev;
+    if ((int32_t)(h3 & 0xFF) < var) { static const uint8_t mul[6] = {1, 2, 3, 4, 1, 1}; next = gl_ev * mul[(h3 >> 8) % 6]; if (((h3 >> 12) & 3) == 0) next = gl_ev / 2; }
+    if (next < 128) next = 128;
+    int32_t ch = gl_chance + fx_em * 400; if (ch < 0) ch = 0;         // EARTH = chance
     if ((int32_t)(h & 0xFFFF) < ch && !(hold && left > 0)) {
-      sl = gl_slice; if (sl < 64) sl = 64; if (sl > 30000) sl = 30000;
-      sst = fx_hw - sl;
-      int32_t reps = 1 + (int32_t)((h >> 16) % (uint32_t)(gl_reps > 0 ? gl_reps : 1));
-      left = sl * reps;
+      int nm = 1 + ((var * 7) >> 8);                                // 1..8 moves allowed
+      mv = (int32_t)((h >> 16) % (uint32_t)nm);
+      int32_t len = 1 + (int32_t)((h2 & 0xFF) % (uint32_t)(gl_len > 0 ? gl_len : 1));
+      total = gl_ev * len; if (total > 24000) total = 24000; if (total < 256) total = 256;
+      left = total;
+      // slice: the SLICE setting, randomly 1/4 .. 2x of it with more variety
+      int32_t sl = gl_slice;
+      if ((int32_t)((h2 >> 8) & 0xFF) < var) { static const int16_t sm[6] = {64, 96, 128, 256, 384, 512}; sl = (sl * sm[(h2 >> 16) % 6]) >> 8; }
+      if (sl < 64) sl = 64; if (sl > 8000) sl = 8000;
+      cur = sl;
+      int32_t back = sl + 16;
+      if (mv == 5) back += (int32_t)((h3 >> 16) % 16000);           // SCATTER
+      sst = fx_hw - back;
       rate = 4096;
-      if ((int32_t)((h >> 20) & 0xFF) < gl_pitch) rate = ((h >> 28) & 1) ? 8192 : 2048;
-      rev = (int32_t)((h >> 12) & 0xFF) < gl_rev;
-      pq = 0;
+      if ((int32_t)((h >> 24) & 0xFF) < gl_pitch) { static const int32_t pr[5] = {2048, 8192, 6144, 2731, 3069}; rate = pr[(h2 >> 24) % 5]; }
+      pq = 0; rr = 0;
+      tq = (uint32_t)(fx_hw - 64) << 12;
     }
   }
   if (left <= 0) return in;
   if (!hold) left--;
-  int32_t off = pq >> 12;
-  pq += rate; if ((pq >> 12) >= sl) pq -= sl << 12;
-  int32_t o = rev ? sl - 1 - off : off;
-  int32_t v = dread((sst + o) & 0xFFFF) - 2048;
-  int32_t e = off < 32 ? off : (sl - off < 32 ? sl - off : 32);          // short fades at the slice's ends
-  v = (v * e) >> 5;
-  if (gl_crush) { if (++hn >= gl_crush) { hn = 0; held = v & ~((1 << (gl_crush >> 2)) - 1); } v = held; }
-  return in + (((v - in) * gl_wet) >> 8);
+  int32_t v;
+  switch (mv) {
+    case 4: {                                                       // TAPE STOP
+      int32_t r = (int32_t)(((int64_t)4096 * left) / total);
+      tq += (uint32_t)r; v = h_readq(tq);
+    } break;
+    case 6: {                                                       // CHOP
+      int32_t per = gl_ev / 4; if (per < 128) per = 128;
+      int32_t ph = (total - left) % per, half = per / 2, g;
+      if (ph < 32) g = ph * 8; else if (ph < half - 32) g = 256; else if (ph < half) g = (half - ph) * 8; else g = 0;
+      v = (in * g) >> 8;
+    } break;
+    case 7: {                                                       // CRUSH
+      int32_t hl = 2 + (gl_crush >> 1);
+      if (++hn >= hl) { hn = 0; held = in & ~((1 << (4 + (gl_crush >> 3))) - 1); }
+      v = held;
+    } break;
+    default: {                                                      // STUTTER · BACKWARDS · RATCHET · PITCH STEPS · SCATTER
+      int32_t off = pq >> 12;
+      pq += rate;
+      if ((pq >> 12) >= cur) {                                      // one repeat done
+        pq -= cur << 12; if (pq < 0) pq = 0;
+        rr++;
+        uint32_t hr = mo_hash(n * 131u + (uint32_t)rr);
+        if (mv == 2 && cur > 256) cur = (cur * 3) >> 2;             // RATCHET
+        if (mv == 3) { rate = (rate * 3) >> 1; if (rate > 16384) rate = 2048; }   // PITCH STEPS
+        if ((int32_t)(hr & 0xFF) < (gl_var >> 2)) rate = ((hr >> 8) & 1) ? 8192 : 2048;   // a random octave now and then
+      }
+      bool back = (mv == 1) || ((int32_t)((mo_hash(n * 77u + (uint32_t)rr) >> 4) & 0xFF) < (gl_var >> 3));
+      int32_t o = back ? cur - 1 - off : off;
+      if (o < 0) o = 0; if (o >= cur) o = cur - 1;
+      v = dread((sst + o) & H_MASK) - 2048;
+      int32_t e = off < 32 ? off : (cur - off < 32 ? cur - off : 32); if (e < 0) e = 0;
+      v = (v * e) >> 5;
+      if (gl_crush) { if (++hn >= 1 + (gl_crush >> 2)) { hn = 0; held = v; } v = held; }
+    } break;
+  }
+  int32_t fe = left < 128 ? left * 2 : 256;                          // a soft return at the end of a move
+  return in + (((v - in) * ((gl_wet * fe) >> 8)) >> 8);
 }
 
 // ---- 5 FOLD + OCTAVER: an octave down (flip-flop), an octave up (rectifier), into a wave folder ----
@@ -2375,28 +2432,45 @@ static int32_t fo_tick(int32_t in, bool rs) {
   return ((in * fo_dry) >> 8) + ((x * fo_wet) >> 8);
 }
 
-// ---- 6 REVERB: four combs (damped) + two allpasses per side, on the tape (lo-fi, 12 bits) ----
+// ---- 6 REVERB: four combs (damped, wobbling) + two allpasses per side, on the tape (lo-fi, 12 bits) ----
+// HOWL pushes the combs' feedback past unity: they sing by themselves, held by the soft clip in the loop
+// (a DC blocker keeps them from drifting). MOD wobbles each comb's length (a slow triangle, each its own phase).
 static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
-  static uint32_t idx[8]; static int32_t st[4]; static int32_t clr = 0, fade = 0;
+  static uint32_t idx[8], lph = 0; static int32_t st[4], dc[4]; static int32_t clr = 0, fade = 0;
   static int32_t base[8]; static bool based = false;
   if (!based) { int32_t o = RB_BASE; for (int k = 0; k < 8; k++) { base[k] = o; o += rb_max[k]; } based = true; }
-  if (rs) { for (int k = 0; k < 8; k++) idx[k] = 0; for (int k = 0; k < 4; k++) st[k] = 0; clr = 0; fade = 0; }
+  if (rs) { for (int k = 0; k < 8; k++) idx[k] = 0; for (int k = 0; k < 4; k++) { st[k] = 0; dc[k] = 0; } clr = 0; fade = 0; }
   if (clr < 6977) {                                               // wipe the old tail first (~10 ms)
     for (int k = 0; k < 16 && clr < 6977; k++, clr++) dwrite(RB_BASE + clr, 2048);
     return in;
   }
   if (fade < 4096) fade += 4;
   int32_t x = hold ? 0 : (in >> 2);
-  int32_t fb = hold ? 4090 : rb_fb + fx_em * 3;                      // EARTH = size
-  if (fb > 4050 && !hold) fb = 4050; if (fb < 2000) fb = 2000;
+  int32_t fb = hold ? 4090 : rb_fb + rb_howl + fx_em * 3;          // EARTH = size (and howl)
+  if (fb > 4600) fb = 4600; if (fb < 2000) fb = 2000;
   int32_t damp = hold ? 0 : rb_damp;
+  lph += rb_lfo;
   int32_t y[4];
   for (int k = 0; k < 4; k++) {
-    int32_t L = rb_len[k]; if (L > rb_max[k]) L = rb_max[k]; if (L < 16) L = 16;
+    int32_t L = rb_len[k]; if (L > rb_max[k]) L = rb_max[k]; if (L < 64) L = 64;
     if (idx[k] >= (uint32_t)L) idx[k] = 0;
-    int32_t v = dread(base[k] + idx[k]) - 2048;
+    // MOD: read a little ahead of the write (= a slightly shorter comb), wobbling
+    int32_t v;
+    if (rb_mod) {
+      uint32_t ph = lph + (uint32_t)k * 0x40000000u;
+      int32_t tri = (int32_t)(ph >> 16); tri = tri < 32768 ? tri : 65535 - tri;       // 0..32767
+      int32_t m = (int32_t)(((int64_t)tri * rb_mod) >> 15);                             // Q8 samples
+      int32_t r = (int32_t)(idx[k] << 8) + m;
+      int32_t i = (r >> 8) % L, f = r & 255, j = (i + 1) % L;
+      int32_t a = dread(base[k] + i), b = dread(base[k] + j);
+      v = a + (((b - a) * f) >> 8) - 2048;
+    } else {
+      v = dread(base[k] + idx[k]) - 2048;
+    }
     st[k] = v + (((st[k] - v) * damp) >> 12);
-    dwrite(base[k] + idx[k], soft_clip(x + ((st[k] * fb) >> 12)) + 2048);
+    dc[k] += (st[k] - dc[k]) >> 10;
+    int32_t loop = st[k] - dc[k];
+    dwrite(base[k] + idx[k], soft_clip(x + ((loop * fb) >> 12)) + 2048);
     idx[k]++;
     y[k] = v;
   }
@@ -2418,8 +2492,8 @@ static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   int32_t ol = (l * (256 + w) + r * (256 - w)) >> 9, orr = (r * (256 + w) + l * (256 - w)) >> 9;
   int32_t g = (rb_wet * fade) >> 12;
   int32_t dry = (in * rb_dry) >> 8;
-  *rout = dry + ((orr * g) >> 7);
-  return dry + ((ol * g) >> 7);
+  *rout = dry + ((orr * g) >> 8);
+  return dry + ((ol * g) >> 8);
 }
 
 static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) {
@@ -2486,7 +2560,7 @@ void IRAM_ATTR multi() {
   bool hold = (audio_frozen_state && cur != 2) || fx_hold_app;
 
   // the input's history (kept while HOLD, so reverse / glitch play the held past)
-  if (!hold) dwrite(fx_hw & 0xFFFF, gyo);
+  if (!hold) dwrite(fx_hw & H_MASK, gyo);
   fx_hw++;
 
   int32_t l, r;
@@ -2513,8 +2587,8 @@ void IRAM_ATTR multi() {
     if ((blinks & 1) == 0 && blinks > 0) { LAMP_ON; } else { LAMP_OFF; }
   } else if (hold) { LAMP_ON; } else { LAMP_OFF; }
 
-  t = fx_hw & 0xFFFF;
-  pc_wpos = fx_hw & 0xFFFF; pc_ppos = fx_hw & 0xFFFF;
+  t = fx_hw & H_MASK;
+  pc_wpos = fx_hw & H_MASK; pc_ppos = fx_hw & H_MASK;
   pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
 
   REG(I2S_CONF_REG)[0] &= ~(BIT(5));

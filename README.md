@@ -22,9 +22,9 @@ Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, 
 
 **HARMONY (7)**: three-layer harmonic delay — unison, a fifth down, a fifth up (pitch-shifted heads), fed back so the repeats climb and fall in fifths. main = down side, ASH = up side, YELLOW = click, SKIP = tap.
 
-**MULTI (10)**: seven effects in one preset (clean, stereo tap delay, one-shot sampler −1…+2 oct, reverse, glitch, fold + octaver, reverb). FLIP = next, SKIP = random (a seed shared by both Cafes), crossfaded, LOCK against fast gates, EARTH modulates each effect.
+**MULTI (10)**: seven effects in one preset (clean, stereo ping-pong echo, one-shot sampler −1…+2 oct, reverse, glitch with 8 moves, fold + octaver, howling reverb). FLIP = next, SKIP = random (a seed shared by both Cafes), crossfaded, LOCK against fast gates, EARTH modulates each effect.
 
-**ARP_DELAY (11)**: the coco duo app plays a sine arpeggiator (7 patterns, 7 chords) out of the iPhone into the Cafe's input, through MULTI's stereo tap delay. The tempo goes both ways: the app's BPM to the Cafes, a SKIP tap on a Cafe back to the arpeggio.
+**ARP_DELAY (11)**: the coco duo app plays a sine arpeggiator (7 patterns, 7 chords) out of the iPhone into the Cafe's input, through MULTI's stereo echo. The tempo goes both ways: the app's BPM to the Cafes, a SKIP tap on a Cafe back to the arpeggio.
 
 **Firmware update over BLE**: after one USB upload, *Sketch > Export Compiled Binary* and send `esp_cafe_duo.ino.bin` from the coco duo app (PRESET MANAGER > UPDATE, A / B / both) or from `web/coco-pc.html` (update button).
 

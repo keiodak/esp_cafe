@@ -150,7 +150,8 @@ private struct MultiCard: View {
                 .unlit(rig.preset[s] != Preset.multi)
             }
             HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: "LINK A+B", filled: rig.fxLink) { d.setFxLink(!rig.fxLink) }
+                ChipButton(title: "LINK FX", filled: rig.fxLink) { d.setFxLink(!rig.fxLink) }
+                ChipButton(title: "LINK PADS", filled: rig.fxPadLink) { d.setFxPadLink(!rig.fxPadLink) }
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
                 ChipButton(title: "TAKE SAMPLE", filled: false) { d.fxSetting("F 92") }
                 ChipButton(title: "TRIGGER", filled: false) { d.fxSetting("F 93") }
@@ -162,7 +163,7 @@ private struct MultiCard: View {
                                                     set: { rig.fxEarth = $0; d.fxSetting("F 95 \(Int($0 * 1000))") }))
             PanelRow(label: "LOCK", value: Binding(get: { rig.fxLock },
                                                    set: { rig.fxLock = $0; d.fxSetting("F 96 \(Int($0 * 1000))") }))
-            Text("XFADE 0.02–2 s between effects · EARTH = how much it modulates each effect (level, delay time, sampler pitch + trigger, reverse speed, glitch chance, fold drive, reverb size) · LOCK = the shortest time between two changes (0.05–5 s), so fast gates on FLIP / SKIP don't make it flutter. LINK: both Cafes on the same effect, pads together; the same gate into both Cafes then jumps the same way.")
+            Text("XFADE 0.02–2 s between effects · EARTH = how much it modulates each effect (level, delay time, sampler pitch + trigger, reverse speed, glitch chance, fold drive, reverb size) · LOCK = the shortest time between two changes (0.05–5 s), so fast gates on FLIP / SKIP don't make it flutter. LINK FX: both Cafes on the same effect (and the same random jumps). LINK PADS: the XY pads move both Cafes. Each can be on or off.")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

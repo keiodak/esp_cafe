@@ -165,7 +165,7 @@ final class Director: ObservableObject {
             let e = rig.fxLocal[row]
             let a = rig.fxAxes[row][e][k]
             var rows = [row]
-            if rig.fxLink && rig.fxLocal[1 - row] == e {             // LINK: the other Cafe's pad follows
+            if rig.fxPadLink && rig.fxLocal[1 - row] == e {          // LINK PADS: the other Cafe's pad follows
                 let b = rig.fxAxes[1 - row][e][k]
                 b.x = a.x; b.y = a.y
                 rows = [0, 1]
@@ -234,16 +234,28 @@ final class Director: ObservableObject {
         if loc != rig.fxLocal { rig.fxLocal = loc; refresh() }
     }
 
+    /// LINK FX: both Cafes on the same effect (B takes A's), and the same random order from now on
     func setFxLink(_ on: Bool) {
         rig.fxLink = on
         guard on else { return }
-        // B takes A's effect and all of A's pads
-        for e in 0..<Fx.count { for k in 0..<4 { let a = rig.fxAxes[0][e][k], b = rig.fxAxes[1][e][k]; b.x = a.x; b.y = a.y } }
-        var loc = rig.fxLocal; loc[1] = loc[0]; rig.fxLocal = loc
-        let b = units[1]
-        if b.isConnected && rig.preset[1] == Preset.multi { rig.fxAll(slot: 1).forEach(b.send) }
-        multiUnits().forEach { $0.send("Z") }                         // the same random order from now on
+        if rig.fxLocal[1] != rig.fxLocal[0] {
+            var loc = rig.fxLocal; loc[1] = loc[0]; rig.fxLocal = loc
+            let b = units[1]
+            if b.isConnected && rig.preset[1] == Preset.multi { b.send("F 90 \(loc[1])") }
+        }
+        multiUnits().forEach { $0.send("Z") }
         refresh()
+    }
+
+    /// LINK PADS: the XY pads move both Cafes (B takes all of A's pad positions)
+    func setFxPadLink(_ on: Bool) {
+        rig.fxPadLink = on
+        guard on else { return }
+        for e in 0..<Fx.count { for k in 0..<4 { let a = rig.fxAxes[0][e][k], b = rig.fxAxes[1][e][k]; b.x = a.x; b.y = a.y } }
+        let b = units[1]
+        if b.isConnected && rig.preset[1] == Preset.multi {
+            for e in 0..<Fx.count { for k in 0..<4 { rig.fxCommands(slot: 1, e: e, k: k).forEach(b.send) } }
+        }
     }
 
     func fxSetting(_ line: String) { multiUnits().forEach { $0.send(line) } }

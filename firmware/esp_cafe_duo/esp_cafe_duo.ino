@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.5"
+#define FW_VERSION "3.6"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -444,20 +444,20 @@ void co_update() {
 
 // ---- MULTI parameters (k.odk). "F <effect> <id 0..7> <0..1000>" ----
 //  0 CLEAN      0 level
-//  1 TAP DELAY  0 time (grid: 1/16 .. 1/1)  1 feedback  2 pattern (6)  3 width  4 tone  5 EARTH wow  6 wet  7 dry
+//  1 ECHO       0 time (grid: 1/16 .. 1/1)  1 feedback  2 ping-pong  3 R time vs L (0.5 .. 2x)  4 tone  5 EARTH wow  6 wet  7 dry
 //  2 SAMPLER    0 pitch (-12 .. +24 semitones)  1 length  2 start  3 decay  4 auto (0 = off, grid)  5 tone  6 wet  7 dry
 //  3 REVERSE    0 length  1 speed (0.5 .. 2x)  2 tone  6 wet  7 dry
-//  4 GLITCH     0 grid  1 chance  2 slice  3 repeats  4 pitch jumps  5 backwards  6 crush  7 wet
+//  4 GLITCH     0 grid  1 chance  2 slice  3 length (1..8 grids)  4 variety (moves + randomness)  5 pitch  6 crush  7 wet
 //  5 FOLD+OCT   0 drive  1 bias  2 octave down  3 octave up  4 tone  6 wet  7 dry
-//  6 REVERB     0 size  1 damping  2 width  3 diffusion  6 wet  7 dry
+//  6 REVERB     0 size  1 damping  2 width  3 diffusion  4 HOWL  5 MOD  6 wet  7 dry
 static const int16_t fx_default[FX_N][8] = {
   {500, 0, 0, 0, 0, 0, 0, 0},
-  {625, 400, 0, 800, 700, 0, 600, 1000},
+  {625, 550, 1000, 500, 800, 300, 900, 1000},
   {333, 400, 0, 300, 0, 1000, 700, 700},
   {400, 500, 1000, 0, 0, 0, 700, 500},
-  {300, 500, 400, 300, 200, 200, 0, 1000},
+  {300, 550, 400, 300, 750, 300, 150, 1000},
   {300, 500, 600, 200, 800, 0, 1000, 0},
-  {600, 400, 800, 500, 0, 0, 500, 1000},
+  {750, 300, 800, 500, 400, 400, 600, 1000},
 };
 static int32_t fx_lpk(float v) { return v >= 0.98f ? 4096 : (int32_t)(300.0f + v * v * 3796.0f); }
 void fx_update(int e) {
@@ -471,9 +471,9 @@ void fx_update(int e) {
       float tt = beat * beat_div[div_index(fx_p[1][0])];
       while (tt > 32000.0f) tt *= 0.5f;
       td_T = (int32_t)(tt * 256.0f);
-      td_fb = (int32_t)(p[1] * 240.0f);
-      td_pat = (int32_t)(p[2] * 5.0f + 0.5f);
-      td_width = (int32_t)(p[3] * 256.0f);
+      td_fb = (int32_t)(p[1] * 245.0f);
+      td_pp = (int32_t)(p[2] * 256.0f);
+      td_ratio = (int32_t)(4096.0f * powf(2.0f, (p[3] - 0.5f) * 2.0f));
       td_tone = fx_lpk(p[4]);
       td_wow = (int32_t)(p[5] * 600.0f);
       td_wet = (int32_t)(p[6] * 1.6f * 256.0f);
@@ -493,7 +493,7 @@ void fx_update(int e) {
       sm_dry = (int32_t)(p[7] * 256.0f);
     } break;
     case 3: {
-      float w = hz * (0.05f + p[0] * 0.7f); if (w > 30000) w = 30000;
+      float w = hz * (0.05f + p[0] * 0.5f); if (w > 15000) w = 15000;
       rv_W = (int32_t)w;
       rv_speed = (int32_t)(4096.0f * powf(2.0f, (p[1] - 0.5f) * 2.0f));
       rv_tone = fx_lpk(p[2]);
@@ -505,11 +505,11 @@ void fx_update(int e) {
       float ev = beat * beat_div[di]; if (ev < 256) ev = 256;
       gl_ev = (int32_t)ev;
       gl_chance = (int32_t)(p[1] * 65535.0f);
-      float sl = ev * (0.125f + p[2] * 0.875f); if (sl > 30000) sl = 30000;
+      float sl = ev * (0.125f + p[2] * 0.875f); if (sl > 8000) sl = 8000;
       gl_slice = (int32_t)sl;
-      gl_reps = 1 + (int32_t)(p[3] * 15.0f);
-      gl_pitch = (int32_t)(p[4] * 255.0f);
-      gl_rev = (int32_t)(p[5] * 255.0f);
+      gl_len = 1 + (int32_t)(p[3] * 7.0f);
+      gl_var = (int32_t)(p[4] * 256.0f);
+      gl_pitch = (int32_t)(p[5] * 255.0f);
       gl_crush = (int32_t)(p[6] * 32.0f);
       gl_wet = (int32_t)(p[7] * 256.0f);
     } break;
@@ -523,7 +523,10 @@ void fx_update(int e) {
       fo_dry = (int32_t)(p[7] * 256.0f);
     } break;
     default: {
-      rb_fb = (int32_t)(4096.0f * (0.70f + p[0] * 0.28f));
+      rb_fb = (int32_t)(4096.0f * (0.72f + p[0] * 0.27f));
+      rb_howl = (int32_t)(p[4] * p[4] * 0.14f * 4096.0f);               // up to +0.14 past the size: it howls
+      rb_mod = (int32_t)(p[5] * 40.0f * 256.0f);                         // up to 40 samples of wobble
+      rb_lfo = (uint32_t)((0.15f + p[5] * 1.2f) / hz * 4294967295.0f);
       rb_damp = (int32_t)(p[1] * 0.7f * 4096.0f);
       rb_width = (int32_t)(p[2] * 256.0f);
       rb_ap = (int32_t)(4096.0f * (0.3f + p[3] * 0.4f));

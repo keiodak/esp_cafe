@@ -64,7 +64,7 @@ What's in the repository:
 3. Click **Upload** (→). If it can't connect, hold the ESP32's **BOOT** button while the upload starts.
 4. Open **Tools → Serial Monitor** at **115200** baud and reset the Cafe. You should see:
    ```
-   --- BOOT START --- (esp_cafe_duo 3.5, last reset reason 1)
+   --- BOOT START --- (esp_cafe_duo 3.6, last reset reason 1)
    [1b] BLE advertising, name Cafe-XXXX ...
    -> initDEL: Allocating delay buffers...
    ```
@@ -86,7 +86,7 @@ What's in the repository:
   *Experimental Web Platform features*, and restart Chrome.
 
 **Use it:**
-- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.5 Cafe-XXXX ota`.
+- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.6 Cafe-XXXX ota`.
 - **check** → memory, Bluetooth state, packet size (`mtu`).
 - **log** → everything the Cafe answered.
 - **update** → write a new firmware over Bluetooth (next section).
@@ -153,7 +153,7 @@ The lamp blinks the number.
 | 7 | HARMONY | delay in three layers: unison, fifth down, fifth up |
 | 8 | RUNGLER | coco chopped by a shift register (FLIP = clock, SKIP = data) |
 | 9 | SELF_READ | the sound on the tape steers the play head |
-| 10 | **MULTI** | seven effects — clean · tap delay · one-shot sampler (−1…+2 oct) · reverse · glitch · fold+octaver · reverb. **FLIP = next, SKIP = random**, crossfaded, LOCK = shortest time between changes, EARTH modulates each effect. Two Cafes: LINK (same effect) or independent |
+| 10 | **MULTI** | seven effects — clean · stereo ping-pong echo · one-shot sampler (−1…+2 oct) · reverse · glitch (8 moves) · fold+octaver · howling reverb. **FLIP = next, SKIP = random**, crossfaded, LOCK = shortest time between changes, EARTH modulates each effect. Two Cafes: LINK FX (same effect) and LINK PADS (pads together), each on or off |
 | 11 | **ARP_DELAY** | the app plays a sine arpeggio (7 patterns × 7 chords) — plug the iPhone's audio out into the Cafe's input — into the Cafe's stereo tap delay. Tempo is shared both ways (SKIP = tap) |
 
 In the delays, **SKIP = tap tempo**.
