@@ -6,19 +6,23 @@ Firmware and apps for the ESP32 in the Ciat-Lonbarde Cafe: presets, a BLE link, 
 
 | folder | what it is |
 |---|---|
-| `esp_cafe_duo` | **Main one.** Presets: 1 coco · 2 echo · 3 duo. Controlled over BLE by the **coco duo** iPhone app (two Cafes). Needs the library *NimBLE-Arduino*. |
+| `esp_cafe_duo` | **Main one.** Presets: 1 coco_mod · 2 echo · 3 BLE · 4 resonator · 5 formant · 6 saturator · 7 harmony. Controlled over BLE by the **coco duo** iPhone app (two Cafes), firmware updates over BLE too. Needs the library *NimBLE-Arduino*. |
 | `esp_cafe_ble` | coco-pc over BLE *and* USB (Mac page / coco-pc iPhone app, with WAV dump). |
 | `esp_cafe_apple_pi` | coco-pc over USB serial only (no BLE). |
 | `esp_ble_min` | Minimal BLE test (no audio): checks that the phone / Mac side works. |
 
-**duo preset** (one record head, three modes switched from the phone with a ~20 ms crossfade):
-- **LOOP**: a separate play head with its own speed inside a loop (fold, bias, overdub, short delay).
-- **GRAIN**: smooth (sin²) or struck grains of the tape, on a *score* shared by both Cafes. SEPARATION pulls L and R apart (dice, tempo, pitch, length…). FREEZE holds a moment.
-- **BENJOLIN**: two triangle oscillators, a rungler, PWM into a resonant low-pass. The tape/input can feed the filter, and PRINT records the Benjolin onto the tape.
-- EARTH (AC-coupled): LOOP = speed FM · GRAIN = where grains come from · BENJOLIN = osc 1 FM.
-- Lamp: slow blink = phone not connected · off = recording · on = tape held.
+**BLE preset (3)**, four modes switched from the phone (~6 ms fade):
+- **GRAIN**: smooth (sin²) or struck grains of the tape, on a *score* shared by both Cafes. SEPARATION pulls L and R apart. FREEZE holds a moment.
+- **RUNGLER**: two triangle oscillators, a rungler, PWM into a resonant low-pass; PRINT records it onto the tape.
+- **DELAY**: stereo / ping-pong (main out = L, ASH = R), on the BPM grid, YELLOW = click, SKIP = tap tempo, FLIP / BUTTON = hold. **LINK**: two Cafes as one delay, ping-pong goes A → B; the time steps along the grid when the clock (pitch) moves.
+- **NOISE**: a Ciat-Lonbarde-ish noise machine (nothing recorded): three delay lines in a ring through soft-clip / fold / 1-bit deciders, a shift-register noise source, a gate, a filter bent by the ring. main = L, ASH = R, YELLOW = gate.
+- Lamp: slow blink = phone not connected.
 
-Text protocol (BLE, Nordic UART Service): `P Q H S L J R D X M B G Z W` — see the comments at the top of each `.ino`.
+**HARMONY (7)**: three-layer harmonic delay — unison, a fifth down, a fifth up (pitch-shifted heads), fed back so the repeats climb and fall in fifths. main = down side, ASH = up side, YELLOW = click, SKIP = tap.
+
+**Firmware update over BLE**: after one USB upload, *Sketch > Export Compiled Binary* and send `esp_cafe_duo.ino.bin` from the coco duo app (PRESET MANAGER > UPDATE, A / B / both) or from `web/coco-pc.html` (update button).
+
+Text protocol (BLE, Nordic UART Service): `P Q H R W G M B Y N V K Z U` — see the comments at the top of each `.ino`.
 
 Things learned on the way (see comments in the code):
 - The original setup reset timer group 0, which on the ESP32 also stops the system clock (`esp_timer`): BLE advertises but can't connect, and `millis()` stops. The BLE builds only reset SPI3.
@@ -30,7 +34,7 @@ Chrome page (Web Serial / Web Bluetooth): the Cafe's tape as a waveform, loop / 
 
 ### ios/
 - `coco-pc`: one Cafe over BLE (waveform, loop, speed, save & share WAV). SwiftUI, Xcode 16+.
-- `coco-duo`: two Cafes, eight XY pads (top = Cafe A, bottom = Cafe B), LOOP / GRAIN / BENJOLIN, WAVE panel with file loading onto the tape, camera mode.
+- `coco-duo`: two Cafes, HUD look. Eight XY pads for the current preset / mode, PRESET MANAGER (1–10, target A / B / both, BLE mode, tempo, firmware UPDATE), WAVE panel with file loading onto the tape, camera mode.
 
 ### Credits
 - Original Cafe firmware: Ciat-Lonbarde (Peter Blasser).

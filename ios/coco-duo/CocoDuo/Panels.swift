@@ -26,13 +26,15 @@ struct PanelCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: spacing) {
             HStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(PastelTheme.textPrimary)
+                // HUD title: a small orange block, then the name in orange with underscores
+                Rectangle().fill(PastelTheme.hudOrange).frame(width: 5, height: 5)
+                Text(title.replacingOccurrences(of: " · ", with: "_").replacingOccurrences(of: " ", with: "_"))
+                    .font(.hud(11, .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(PastelTheme.hudOrange)
                 ForEach(Array(headerChips.enumerated()), id: \.offset) { _, chip in
                     Text(chip.0)
-                        .font(.system(size: 8, weight: .medium))
+                        .font(.hud(8, .medium))
                         .foregroundStyle(PastelTheme.textPrimary)
                         .padding(.horizontal, 6)
                         .frame(height: 14)
@@ -62,19 +64,15 @@ struct PanelCard<Content: View>: View {
     }
 }
 
-/// 古いカードの枠。紙に墨の二重罫（外は太く、内は細く）
+/// the card frame, HUD style: a pale face, one thin grey rule, black corner marks
 struct LetterpressFrame: View {
-    var cornerRadius: CGFloat = 6
+    var cornerRadius: CGFloat = 0
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(PastelTheme.neumorphSurface)
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(PastelTheme.textPrimary, lineWidth: 1.4)
-            RoundedRectangle(cornerRadius: max(1, cornerRadius - 3), style: .continuous)
-                .strokeBorder(PastelTheme.textPrimary.opacity(0.75), lineWidth: 0.6)
-                .padding(3.5)
+            Rectangle().fill(PastelTheme.padScreen)
+            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
+            HudCorners(arm: 6).stroke(PastelTheme.hudBlack, lineWidth: 1.2)
         }
     }
 }
@@ -97,7 +95,7 @@ struct PanelRow: View {
     var body: some View {
         HStack(spacing: PanelMetrics.rowGap) {
             Text(label)
-                .font(.system(size: PanelMetrics.labelFont, weight: .medium))
+                .font(.hud(PanelMetrics.labelFont, .medium))
                 .foregroundStyle(PastelTheme.textPrimary)
                 .frame(width: PanelMetrics.labelWidth, alignment: .leading)
             CompactSlider(value: $value,
@@ -124,7 +122,7 @@ struct PanelChips<T: Hashable>: View {
             ForEach(options) { opt in
                 let on = selection == opt.value
                 Text(opt.label)
-                    .font(.system(size: PanelMetrics.chipFont, weight: .medium))
+                    .font(.hud(PanelMetrics.chipFont, .medium))
                     .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(height: PanelMetrics.chipHeight)
@@ -147,13 +145,11 @@ struct PanelScaffold<Content: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .tracking(1.5)
-                        .foregroundStyle(PastelTheme.textPrimary)
+                    HudTag(text: title.replacingOccurrences(of: " ", with: "_"), size: 11)
+                    Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
                     Spacer()
                     Button("Done") { dismiss() }
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.hud(10, .medium))
                         .foregroundStyle(PastelTheme.textPrimary)
                 }
                 content
@@ -210,7 +206,7 @@ struct DiagRow: View {
     var body: some View {
         HStack(spacing: PanelMetrics.rowGap) {
             Text(label)
-                .font(.system(size: PanelMetrics.labelFont, weight: .medium))
+                .font(.hud(PanelMetrics.labelFont, .medium))
                 .foregroundStyle(PastelTheme.textPrimary)
                 .frame(width: 58, alignment: .leading)
             Text(value)
@@ -229,7 +225,7 @@ struct ChipButton: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: PanelMetrics.chipFont, weight: .medium))
+            .font(.hud(PanelMetrics.chipFont, .medium))
             .foregroundStyle(filled ? PastelTheme.selectionText : PastelTheme.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: PanelMetrics.chipHeight)
@@ -249,7 +245,7 @@ struct MeterBar: View {
     var body: some View {
         HStack(spacing: PanelMetrics.rowGap) {
             Text(label)
-                .font(.system(size: PanelMetrics.labelFont, weight: .medium))
+                .font(.hud(PanelMetrics.labelFont, .medium))
                 .foregroundStyle(PastelTheme.textPrimary)
                 .frame(width: compact ? 22 : PanelMetrics.labelWidth, alignment: .leading)
             GeometryReader { geo in

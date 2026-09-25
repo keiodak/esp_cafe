@@ -1,39 +1,18 @@
 // ContentView.swift — coco duo (k.odk)
-// Top row = Cafe A, bottom row = Cafe B. Four pads each:
-//   LOOP   X = where the loop starts      Y = how long it is (short = scratchy)
-//   SPEED  X = speed (centre = stop, right = forward, left = backward)   Y = overdub
-//   FOLD   X = fold amount                Y = bias
-//   DELAY  X = time                       Y = amount (feedback + wet)
+// HUD layout: top bar = Cafe A, eight XY pads, bottom bar = Cafe B.
+// What the pads are depends on the preset the TARGET Cafe is on (see Modes.swift):
+//   BLE preset  GRAIN / RUNGLER / NOISE: the 8 pads go to every Cafe on that mode
+//               DELAY: top row = Cafe A's delay, bottom row = Cafe B's (LINK = both rows move together)
+//   HARMONY     like DELAY (top row A, bottom row B)
+//   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR): a placard, the Cafe is played with its own controls
+// Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
+//        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
+//   GRAIN   freeze · percussion · mark · sync          RUNGLER  rec · lock · sync · new pattern
+//   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
+//   NOISE   dice · sync
 
 import SwiftUI
 import UIKit
-
-enum PadKind: Int, CaseIterable {
-    case loop, speed, fold, delay
-    var title: String { ["LOOP", "SPEED", "FOLD", "DELAY"][rawValue] }
-    /// where the pointer sits before you touch it
-    var start: (Double, Double) { [(0, 1), (0.75, 0), (0, 0.5), (0.3, 0)][rawValue] }
-
-    /// pad position -> lines for the Cafe
-    func commands(_ x: Double, _ y: Double) -> [String] {
-        switch self {
-        case .loop:
-            let len = 512 + Int(y * y * Double(TAPE - 512))
-            var a = Int(x * Double(TAPE))
-            let b = min(TAPE, a + len)
-            if b - a < 512 { a = b - 512 }
-            return ["L \(a) \(b)"]
-        case .speed:
-            let v = (x - 0.5) * 2
-            let milli = abs(v) < 0.04 ? 0 : Int((v < 0 ? -1 : 1) * 4000 * v * v)   // 1x at three quarters
-            return ["S \(milli)", "X 2 \(Int(y * 1000))"]
-        case .fold:
-            return ["X 0 \(Int(x * 1000))", "X 1 \(Int((y * 2 - 1) * 1000))"]
-        case .delay:
-            return ["X 3 \(Int(x * 1000))", "X 4 \(Int(y * 1000))"]
-        }
-    }
-}
 
 final class PadAxis: ObservableObject {
     @Published var x: Double
@@ -41,42 +20,241 @@ final class PadAxis: ObservableObject {
     init(_ p: (Double, Double)) { x = p.0; y = p.1 }
 }
 
+/// Everything the keys and pads do. Owns the Bluetooth hub and the models.
+final class Director: ObservableObject {
+    let hub = CafeHub()
+    let rig = Rig()
+    let grain = GrainMode()
+    let camera = CameraRig()
+    var units: [CafeUnit] { hub.units }
+    private var started = false
+
+    /// connected Cafes that are on what the screen shows
+    func ctxUnits() -> [CafeUnit] { units.filter { $0.isConnected && rig.inCtx($0.slot) } }
+
+    func start() {
+        guard !started else { return }
+        started = true
+        for u in units {
+            u.onReady = { [weak self, weak u] in
+                guard let self, let u else { return }
+                self.sendAll(to: u)
+                self.syncIfPair()
+            }
+            u.onBpm = { [weak self, weak u] b in
+                guard let self, let u else { return }
+                self.tempoFromCafe(b, slot: u.slot)
+            }
+        }
+        camera.axes = axes()
+        camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
+        camera.warm()
+    }
+
+    /// the 8 pads of the current set (the camera moves these)
+    func axes() -> [PadAxis] {
+        switch rig.padSet {
+        case .grain: return grain.axes
+        case .rungler: return grain.bjAxes
+        case .delay: return rig.dlAxes
+        case .noise: return rig.nzAxes
+        case .harmony: return rig.hdAxes
+        case .knob: return []
+        }
+    }
+
+    func refresh() { camera.axes = axes() }
+
+    // MARK: presets
+
+    /// put a Cafe on its preset (and mode), then give it every pad
+    func sendAll(to u: CafeUnit) {
+        let s = u.slot
+        u.send("G \(rig.preset[s])")
+        u.send("K \(Int((rig.bpm * 10).rounded()))")
+        switch rig.preset[s] {
+        case Preset.ble:
+            u.send("M 25 \(rig.mode[s])")
+            switch rig.mode[s] {
+            case 0: grain.allCommands(slot: s).forEach(u.send)
+            case 1: grain.bjAllCommands(slot: s).forEach(u.send)
+            case 2: rig.dlAll(slot: s).forEach(u.send)
+            default: rig.nzAll(slot: s).forEach(u.send)
+            }
+        case Preset.harmony:
+            rig.hdAll(slot: s).forEach(u.send)
+        default:
+            break
+        }
+    }
+
+    func setPreset(_ n: Int) {
+        guard n >= 0 && n < Preset.count else { return }
+        var p = rig.preset
+        for s in rig.slots { p[s] = n }
+        rig.preset = p
+        for s in rig.slots where units[s].isConnected { sendAll(to: units[s]) }
+        refresh()
+        syncIfPair()
+    }
+
+    func setMode(_ m: Int) {
+        var md = rig.mode
+        for s in rig.slots where rig.preset[s] == Preset.ble { md[s] = m }
+        rig.mode = md
+        for s in rig.slots where rig.preset[s] == Preset.ble && units[s].isConnected { sendAll(to: units[s]) }
+        refresh()
+        syncIfPair()
+    }
+
+    func cycleMode() { if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % 4) } }
+
+    func setTarget(_ t: Int) { rig.target = t; refresh() }
+
+    /// both Cafes on the same thing: start them together (grain score / rungler / the click)
+    func syncIfPair() {
+        let u = ctxUnits()
+        if u.count == 2 && rig.padSet != .knob && rig.padSet != .noise { u.forEach { $0.send("Z") } }
+    }
+    func sync() { ctxUnits().forEach { $0.send("Z") } }
+
+    // MARK: pads
+
+    func padMoved(_ i: Int) {
+        switch rig.padSet {
+        case .grain:
+            let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
+            for u in ctxUnits() { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
+            if resync { sync() }
+        case .rungler:
+            for u in ctxUnits() { grain.bjCommands(pad: i, slot: u.slot).forEach(u.send) }
+        case .noise:
+            for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
+        case .delay, .harmony:
+            let delay = rig.padSet == .delay
+            let axes = delay ? rig.dlAxes : rig.hdAxes
+            let row = i / 4, k = i % 4
+            var rows = [row]
+            if rig.link {                                   // LINK: the other row follows
+                let j = (1 - row) * 4 + k
+                axes[j].x = axes[i].x; axes[j].y = axes[i].y
+                rows = [0, 1]
+            }
+            for r in rows where rig.inCtx(r) && units[r].isConnected {
+                let cmds = delay ? rig.dlCommands(pad: r * 4 + k) : rig.hdCommands(pad: r * 4 + k)
+                cmds.forEach(units[r].send)
+            }
+        case .knob:
+            break
+        }
+    }
+
+    // MARK: keys
+
+    func toggleHold() {
+        if rig.padSet == .delay {
+            rig.dlHold.toggle()
+            ctxUnits().forEach { $0.send("Y 10 \(rig.dlHold ? 1000 : 0)") }
+        } else if rig.padSet == .harmony {
+            rig.hdHold.toggle()
+            ctxUnits().forEach { $0.send("V 13 \(rig.hdHold ? 1000 : 0)") }
+        }
+    }
+
+    func toggleGrid() {
+        rig.grid.toggle()
+        let v = rig.grid ? 1000 : 0
+        if rig.padSet == .delay { ctxUnits().forEach { $0.send("Y 8 \(v)") } }
+        if rig.padSet == .harmony { ctxUnits().forEach { $0.send("V 11 \(v)") } }
+    }
+
+    /// LINK: the two Cafes as one. DELAY: one line per Cafe, ping-pong goes A -> B. Both rows take A's pads.
+    func toggleLink() {
+        rig.link.toggle()
+        let delay = rig.padSet == .delay
+        let axes = delay ? rig.dlAxes : rig.hdAxes
+        if rig.link { for k in 0..<4 { axes[4 + k].x = axes[k].x; axes[4 + k].y = axes[k].y } }
+        let b = Int((rig.bpm * 10).rounded())
+        for u in ctxUnits() {
+            u.send("K \(b)")
+            if delay {
+                u.send("Y 12 \(u.slot == 1 ? 1000 : 0)")
+                u.send("Y 11 \(rig.link ? 1000 : 0)")
+            }
+            for k in 0..<4 {
+                let cmds = delay ? rig.dlCommands(pad: u.slot * 4 + k) : rig.hdCommands(pad: u.slot * 4 + k)
+                cmds.forEach(u.send)
+            }
+        }
+        sync()
+    }
+
+    func tapTempo() { if let b = rig.tap() { setBpm(b) } }
+
+    func setBpm(_ b: Double) {
+        rig.bpm = min(max(b, 30), 300)
+        let v = Int((rig.bpm * 10).rounded())
+        units.filter { $0.isConnected }.forEach { $0.send("K \(v)") }
+    }
+
+    /// SKIP was tapped on a Cafe: that is everyone's tempo now
+    func tempoFromCafe(_ b: Double, slot: Int) {
+        guard abs(b - rig.bpm) > 0.3 else { return }
+        rig.bpm = b
+        let v = Int((b * 10).rounded())
+        for u in units where u.slot != slot && u.isConnected { u.send("K \(v)") }
+        if rig.link { sync() }
+    }
+
+    func toggleRec() {
+        let r = units[rig.focus].recording ? 0 : 1
+        ctxUnits().forEach { $0.send("R \(r)") }
+    }
+
+    func noiseDice() {
+        rig.nzDice()
+        for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }
+    }
+
+    // MARK: firmware update
+
+    func update(_ data: [UInt8]) {
+        let t = rig.updTarget == 2 ? [0, 1] : [rig.updTarget]
+        for s in t { units[s].startUpdate(data) }
+    }
+}
+
 struct ContentView: View {
-    @StateObject private var hub = CafeHub()
-    /// 8 pads: 0–3 = Cafe A, 4–7 = Cafe B
-    @StateObject private var padBank = PadBank()
-    @StateObject private var camera = CameraRig()
-    /// the preset from the phone, and inside duo: LOOP or GRAIN (each has its own 8 pads)
-    @StateObject private var grain = GrainMode()
+    @StateObject private var d = Director()
+
+    var body: some View {
+        MainScreen(d: d, hub: d.hub, rig: d.rig, grain: d.grain, camera: d.camera)
+    }
+}
+
+private struct MainScreen: View {
+    let d: Director
+    @ObservedObject var hub: CafeHub
+    @ObservedObject var rig: Rig
+    @ObservedObject var grain: GrainMode
+    @ObservedObject var camera: CameraRig
     @State private var padHeight: CGFloat = 122
     @State private var showCafes = false
     @State private var showWave = false
+    @State private var showPresets = false
     @State private var safeLeading: CGFloat = 0
     @State private var safeTrailing: CGFloat = 0
-    private let rowHeight: CGFloat = 22
+    private let barHeight: CGFloat = 24
 
     var body: some View {
-        VStack(spacing: 8) {
-            CafeRow(unit: hub.units[0], camera: camera, grain: grain, hub: hub, showCafes: $showCafes, showWave: $showWave,
-                    toggleMode: { Self.setMode((grain.mode + 1) % 3, hub: hub, bank: padBank, grain: grain, camera: camera) })
-                .frame(height: rowHeight)
-
-            VStack(spacing: 6) {
-                HStack(spacing: 6) { ForEach(0..<4, id: \.self) { pad($0) } }
-                HStack(spacing: 6) { ForEach(4..<8, id: \.self) { pad($0) } }
-            }
-            .frame(maxHeight: .infinity)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { padHeight = max(60, (geo.size.height - 6) / 2) }
-                        .onChange(of: geo.size) { _, s in padHeight = max(60, (s.height - 6) / 2) }
-                }
-            )
-
-            CafeRow(unit: hub.units[1], camera: camera, grain: grain, hub: hub, showCafes: $showCafes, showWave: $showWave,
-                    toggleMode: { Self.setMode((grain.mode + 1) % 3, hub: hub, bank: padBank, grain: grain, camera: camera) })
-                .frame(height: rowHeight)
+        VStack(spacing: 7) {
+            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera,
+                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                .frame(height: barHeight)
+            pads
+            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
+                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                .frame(height: barHeight)
         }
         .padding(8)
         .padding(.leading, max(0, safeTrailing - safeLeading))
@@ -96,117 +274,61 @@ struct ContentView: View {
         )
         .persistentSystemOverlays(.hidden)
         .defersSystemGestures(on: .all)
-        .sheet(isPresented: $showCafes) {
-            CafesView(hub: hub, camera: camera, grain: grain,
-                      setMode: { on in Self.setMode(on, hub: hub, bank: padBank, grain: grain, camera: camera) },
-                      setPreset: { n in Self.setPreset(n, hub: hub, bank: padBank, grain: grain) })
-        }
+        .sheet(isPresented: $showCafes) { CafesView(hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
+        .sheet(isPresented: $showPresets) {
+            PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
+        }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
-            // when a Cafe (re)connects, give it the pads' current positions
-            let bank = padBank
-            let mo = grain
-            let both = hub.units
-            for u in hub.units {
-                // (re)connected: put the Cafe on the right preset, then give it every pad's position.
-                // In GRAIN, once both are there, start their score together.
-                u.onReady = { [weak u] in
-                    guard let u else { return }
-                    Self.sendAll(to: u, bank: bank, grain: mo)
-                    if mo.mode != 0 && both.allSatisfy({ $0.isConnected }) { mo.sync(both) }
-                }
+            d.start()
+        }
+        .onChange(of: rig.target) { _, _ in d.refresh() }
+    }
+
+    @ViewBuilder private var pads: some View {
+        if rig.padSet == .knob {
+            KnobPlacard(rig: rig, a: hub.units[0], b: hub.units[1])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) { ForEach(0..<4, id: \.self) { pad($0) } }
+                HStack(spacing: 6) { ForEach(4..<8, id: \.self) { pad($0) } }
             }
-            // camera mode moves the pads of the current mode: send each move
-            let units = hub.units
-            camera.axes = Self.axes(for: grain, bank: bank)
-            camera.onPadMoved = { i in Self.padMoved(i, bank: bank, grain: mo, units: units) }
-            camera.warm()
+            .frame(maxHeight: .infinity)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { padHeight = max(60, (geo.size.height - 6) / 2) }
+                        .onChange(of: geo.size) { _, s in padHeight = max(60, (s.height - 6) / 2) }
+                }
+            )
+        }
+    }
+
+    private func info(_ i: Int) -> (PadAxis, String) {
+        switch rig.padSet {
+        case .grain: return (grain.axes[i], GrainPad(rawValue: i)!.title)
+        case .rungler: return (grain.bjAxes[i], BjPad(rawValue: i)!.title)
+        case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
+        case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
+        case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
+        case .knob: return (rig.nzAxes[i], "")
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        let bank = padBank, mo = grain, units = hub.units
-        if grain.isBj {
-            DuoPad(axis: grain.bjAxes[i], title: BjPad(rawValue: i)!.title,
-                   send: { _, _ in Self.padMoved(i, bank: bank, grain: mo, units: units) },
-                   trace: nil,
-                   cam: camera.state, cameraMode: camera.enabled, index: i,
-                   padHeight: padHeight, corners: Self.corners(i))
-                .frame(height: padHeight)
-                .id("bj\(i)")
-        } else if grain.on {
-            DuoPad(axis: grain.axes[i], title: GrainPad(rawValue: i)!.title,
-                   send: { _, _ in Self.padMoved(i, bank: bank, grain: mo, units: units) },
-                   trace: nil,
-                   cam: camera.state, cameraMode: camera.enabled, index: i,
-                   padHeight: padHeight, corners: Self.corners(i))
-                .frame(height: padHeight)
-                .id("grain\(i)")
-        } else {
-            let kind = PadKind(rawValue: i % 4)!
-            let unit = hub.units[i / 4]
-            DuoPad(axis: padBank.axes[i], title: kind.title,
-                   send: { _, _ in Self.padMoved(i, bank: bank, grain: mo, units: units) },
-                   trace: kind == .loop ? AnyView(LoopTrace(scope: unit.scope, unit: unit)) : nil,
-                   cam: camera.state, cameraMode: camera.enabled, index: i,
-                   padHeight: padHeight, corners: Self.corners(i))
-                .frame(height: padHeight)
-                .id("duo\(i)")
-        }
-    }
-
-    /// a pad moved (finger or camera): DUO pads go to their own Cafe, GRAIN pads to both
-    static func padMoved(_ i: Int, bank: PadBank, grain: GrainMode, units: [CafeUnit]) {
-        if grain.isBj {
-            for u in units { grain.bjCommands(pad: i, slot: u.slot).forEach(u.send) }
-        } else if grain.on {
-            let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
-            for u in units { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
-            if resync { grain.sync(units) }                 // separation back to 0: L and R in step again
-        } else {
-            let k = PadKind(rawValue: i % 4)!
-            let a = bank.axes[i]
-            k.commands(a.x, a.y).forEach(units[i / 4].send)
-        }
-    }
-
-    /// the right preset first; on duo also its mode (LOOP / GRAIN) and all pads of that mode
-    static func sendAll(to u: CafeUnit, bank: PadBank, grain: GrainMode) {
-        u.send("G \(grain.preset)")
-        guard grain.preset == 2 else { return }          // coco / echo don't listen to the pads
-        u.send("M 25 \(grain.mode)")
-        if grain.isBj {
-            grain.bjAllCommands(slot: u.slot).forEach(u.send)
-        } else if grain.on {
-            grain.allCommands(slot: u.slot).forEach(u.send)
-        } else {
-            for k in PadKind.allCases {
-                let a = bank.axes[u.slot * 4 + k.rawValue]
-                k.commands(a.x, a.y).forEach(u.send)
-            }
-        }
-    }
-
-    /// LOOP / GRAIN / BENJOLIN (inside the duo preset): switch both Cafes and the camera's pads
-    static func setMode(_ m: Int, hub: CafeHub, bank: PadBank, grain: GrainMode, camera: CameraRig) {
-        grain.mode = m
-        grain.preset = 2
-        camera.axes = axes(for: grain, bank: bank)
-        for u in hub.units where u.isConnected { sendAll(to: u, bank: bank, grain: grain) }
-        if m != 0 { grain.sync(hub.units) }                 // both start together (grain score / benjolin)
-    }
-
-    /// the 8 pads the camera moves in the current mode
-    static func axes(for grain: GrainMode, bank: PadBank) -> [PadAxis] {
-        grain.isBj ? grain.bjAxes : (grain.on ? grain.axes : bank.axes)
-    }
-
-    /// a preset for both Cafes, from the phone (1 coco · 2 echo · 3 duo)
-    static func setPreset(_ n: Int, hub: CafeHub, bank: PadBank, grain: GrainMode) {
-        grain.preset = n
-        for u in hub.units where u.isConnected { sendAll(to: u, bank: bank, grain: grain) }
-        if n == 2 && grain.mode != 0 { grain.sync(hub.units) }
+        let item = info(i)
+        let live = rig.perRow ? rig.inCtx(i / 4) : true
+        let tag = rig.perRow ? (i < 4 ? "A" : "B") + String(format: ".%02ld", i % 4 + 1) : String(format: "%02ld", i + 1)
+        let director = d
+        HudPad(axis: item.0, title: item.1, tag: tag,
+               send: { director.padMoved(i) },
+               cam: camera.state, cameraMode: camera.enabled, index: i, padHeight: padHeight)
+            .frame(height: padHeight)
+            .opacity(live ? 1 : 0.35)
+            .allowsHitTesting(live)
+            .id("\(rig.padSet)\(i)")
     }
 
     private func readSafeArea() {
@@ -218,36 +340,20 @@ struct ContentView: View {
         safeLeading = i.left
         safeTrailing = i.right
     }
-
-    /// 8 pads as 4 × 2: round only the outer corners
-    static func corners(_ i: Int) -> RectangleCornerRadii {
-        let r: CGFloat = 16
-        let col = i % 4, row = i / 4
-        return .init(topLeading: (col == 0 && row == 0) ? r : 0,
-                     bottomLeading: (col == 0 && row == 1) ? r : 0,
-                     bottomTrailing: (col == 3 && row == 1) ? r : 0,
-                     topTrailing: (col == 3 && row == 0) ? r : 0)
-    }
-}
-
-final class PadBank: ObservableObject {
-    let axes: [PadAxis] = (0..<8).map { PadAxis(PadKind(rawValue: $0 % 4)!.start) }
 }
 
 // MARK: - one pad
 
-private struct DuoPad: View {
+private struct HudPad: View {
     @ObservedObject var axis: PadAxis
     let title: String
-    let send: (Double, Double) -> Void
-    let trace: AnyView?
+    let tag: String
+    let send: () -> Void
     @ObservedObject var cam: CameraState
     let cameraMode: Bool
     let index: Int
     let padHeight: CGFloat
-    let corners: RectangleCornerRadii
 
-    /// edge darkens with movement in front of the camera (same as Þunresdæg)
     private var edgeGlow: Double {
         guard cameraMode else { return 0 }
         return min(max((cam.cameraMotion - 0.05) / 0.22, 0), 1)
@@ -267,188 +373,236 @@ private struct DuoPad: View {
             x: $axis.x, y: $axis.y,
             padHeight: padHeight,
             interactionEnabled: !cameraMode,
-            onDrag: { x, y in send(x, y) },
-            cornerRadii: corners,
-            trace: cameraMode ? nil : trace,
+            onDrag: { _, _ in send() },
+            cornerRadii: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0),
+            trace: nil,
             mosaic: cameraMode ? block : nil,
             edgeGlow: edgeGlow,
             cameraMode: cameraMode
         )
         .overlay(alignment: .topLeading) {
-            Text(title)
-                .font(.system(size: 7, weight: .medium))
-                .tracking(1.0)
-                .foregroundStyle(PastelTheme.textPrimary.opacity(0.55))
-                .padding(.leading, corners.topLeading > 0 || corners.bottomLeading > 0 ? 12 : 8)
-                .padding(.top, 7)
-                .allowsHitTesting(false)
+            HStack(spacing: 4) {
+                HudTag(text: tag, size: 7)
+                Text(title.replacingOccurrences(of: " · ", with: "_").replacingOccurrences(of: " ", with: "_"))
+                    .font(.hud(8, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(PastelTheme.hudOrange)
+            }
+            .padding(.leading, 7)
+            .padding(.top, 6)
+            .allowsHitTesting(false)
         }
     }
 }
 
-/// Inside the LOOP pad: the Cafe's tape (left = start of the buffer), the loop, and the play head.
-private struct LoopTrace: View {
-    @ObservedObject var scope: CafeScope
-    @ObservedObject var unit: CafeUnit
+/// knob presets: nothing to play here, the Cafe is played with its own controls
+private struct KnobPlacard: View {
+    @ObservedObject var rig: Rig
+    @ObservedObject var a: CafeUnit
+    @ObservedObject var b: CafeUnit
 
     var body: some View {
-        Canvas { ctx, size in
-            let inset = XYPad.pointerInset
-            let w = size.width - inset * 2, h = size.height
-            let x = { (s: Int) -> CGFloat in inset + CGFloat(s) / CGFloat(TAPE) * w }
-            // loop band
-            let lx = x(unit.ls), rx = x(unit.le)
-            ctx.fill(Path(CGRect(x: lx, y: 0, width: max(1, rx - lx), height: h)),
-                     with: .color(PastelTheme.textPrimary.opacity(0.10)))
-            // tape overview
-            let bw = w / CGFloat(BINS)
-            var wave = Path()
-            for i in 0..<BINS {
-                let top = h * 0.5 - (CGFloat(scope.maxs[i]) - 128) / 128 * h * 0.42
-                let bot = h * 0.5 - (CGFloat(scope.mins[i]) - 128) / 128 * h * 0.42
-                wave.addRect(CGRect(x: inset + CGFloat(i) * bw, y: min(top, bot),
-                                    width: max(0.6, bw * 0.8), height: max(0.6, abs(bot - top))))
+        let n = rig.ctxPreset
+        ZStack {
+            Rectangle().fill(PastelTheme.padScreen)
+            HudDots(step: 12)
+            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
+            HudCorners(arm: 12).stroke(PastelTheme.hudBlack, lineWidth: 1.4).padding(4)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    HudTag(text: "KNOB_CONTROL", size: 9)
+                    HudTag(text: rig.target == 2 ? "A+B" : (rig.target == 0 ? "A" : "B"), fill: PastelTheme.hudOrange, size: 9)
+                }
+                Text(Preset.tag(n))
+                    .font(.hudBig(46))
+                    .foregroundStyle(PastelTheme.hudBlack)
+                Rectangle().fill(PastelTheme.hudOrange).frame(width: 120, height: 3)
+                Text(n >= 0 && n < Preset.notes.count ? Preset.notes[n].uppercased() : "")
+                    .font(.hud(11, .medium))
+                    .tracking(0.8)
+                    .foregroundStyle(PastelTheme.textSecondary)
+                HStack(spacing: 14) {
+                    side("A", a)
+                    side("B", b)
+                }
+                .padding(.top, 6)
             }
-            ctx.fill(wave, with: .color(PastelTheme.textPrimary.opacity(0.30)))
-            // heads: record (thin, faint) and play (full ink)
-            ctx.fill(Path(CGRect(x: x(scope.rec) - 0.5, y: 0, width: 1, height: h)),
-                     with: .color(PastelTheme.recording.opacity(0.7)))
-            ctx.fill(Path(CGRect(x: x(scope.play) - 0.75, y: 0, width: 1.5, height: h)),
-                     with: .color(PastelTheme.textPrimary.opacity(0.8)))
+            .padding(.horizontal, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func side(_ name: String, _ u: CafeUnit) -> some View {
+        HStack(spacing: 5) {
+            HudTag(text: name, fill: u.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 8)
+            Text(u.isConnected ? Preset.tag(u.preset) : "NO_LINK")
+                .font(.hud(9, .semibold))
+                .foregroundStyle(PastelTheme.hudBlack)
         }
     }
 }
 
-// MARK: - top / bottom row (one Cafe each)
+// MARK: - top / bottom bar (one Cafe each)
 
-private struct CafeRow: View {
+private struct HudBar: View {
+    let d: Director
     @ObservedObject var unit: CafeUnit
-    @ObservedObject var camera: CameraRig
+    @ObservedObject var rig: Rig
     @ObservedObject var grain: GrainMode
-    let hub: CafeHub
+    @ObservedObject var camera: CameraRig
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
-    /// LOOP <-> GRAIN (the bottom-left key)
-    let toggleMode: () -> Void
+    @Binding var showPresets: Bool
+
+    private var top: Bool { unit.slot == 0 }
 
     var body: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 16) {
-                if unit.slot == 0 {
-                    // top-left: connected? (tap = the Cafes panel)
-                    iconButton("dot.radiowaves.left.and.right", on: unit.isConnected) { showCafes = true }
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                if top {
+                    key("dot.radiowaves.left.and.right", on: unit.isConnected) { showCafes = true }
                 } else {
-                    // bottom-left: the mode. The picture shows the mode you're in
-                    iconButton(GrainMode.modeIcons[grain.mode]) { toggleMode() }
+                    key(Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
+                        enabled: rig.ctxPreset == Preset.ble) { d.cycleMode() }
                 }
-                if grain.isBj {
-                    // BENJOLIN: top = hold / record the tape (both Cafes), bottom = LOCK the rungler's pattern
-                    if unit.slot == 0 {
-                        iconButton("record.circle", on: unit.isConnected && unit.recording) {
-                            let r = unit.recording ? 0 : 1
-                            hub.units.forEach { $0.send("R \(r)") }
-                        }
-                    } else { iconButton("lock", on: grain.bjLock) { grain.setBjLock(!grain.bjLock, hub.units) } }
-                } else if grain.on {
-                    // GRAIN: top = FREEZE (hold this moment), bottom = PERCUSSION (struck grains)
-                    if unit.slot == 0 { iconButton("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, hub.units) } }
-                    else { iconButton("metronome", on: grain.perc) { grain.setPerc(!grain.perc, hub.units) } }
-                } else {
-                    // DUO: this Cafe's recording on / off
-                    iconButton("record.circle", on: unit.isConnected && unit.recording) {
-                        unit.send("R \(unit.recording ? 0 : 1)")
-                    }
-                }
+                contextKey(top ? 0 : 1)
             }
-            PositionBar(scope: unit.scope, unit: unit)
-            HStack(spacing: 16) {
-                // LOOP: play head back to the loop start / GRAIN: mark · sync / BENJOLIN: sync · new pattern
-                if grain.isBj {
-                    if unit.slot == 0 { iconButton("arrow.triangle.2.circlepath") { grain.sync(hub.units) } }
-                    else { iconButton("dice") { grain.bjKick(hub.units) } }
-                } else if grain.on {
-                    // top: keep the place of the grain just played (a mark) / bottom: put L and R back in step
-                    if unit.slot == 0 { iconButton("bookmark", on: grain.useMarks) { grain.mark(hub.units) } }
-                    else { iconButton("arrow.triangle.2.circlepath") { grain.sync(hub.units) } }
-                } else {
-                    iconButton("backward.end") { unit.send("J \(unit.ls)") }
-                }
-                // top row: the WAVE panel (both tapes) / bottom row: camera mode on / off
-                if unit.slot == 0 { iconButton("waveform") { showWave = true } }
-                else { iconButton("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
+            Button { showPresets = true } label: { status }
+                .buttonStyle(.plain)
+            HStack(spacing: 8) {
+                contextKey(top ? 2 : 3)
+                if top { key("waveform") { showWave = true } }
+                else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
     }
 
-    private func iconButton(_ name: String, on: Bool = false, action: @escaping () -> Void) -> some View {
+    /// A · name · preset · mode · tempo · clock ··· (tap = the preset manager)
+    private var status: some View {
+        let p = unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[unit.slot]
+        let m = unit.isConnected ? unit.mode : rig.mode[unit.slot]
+        let inView = rig.inCtx(unit.slot)
+        return HStack(spacing: 6) {
+            HudTag(text: top ? "A" : "B", fill: unit.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 9)
+            Text((unit.name ?? "NO_LINK").uppercased().replacingOccurrences(of: "-", with: "_"))
+                .font(.hud(9, .semibold))
+                .foregroundStyle(PastelTheme.hudBlack)
+                .lineLimit(1)
+            HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 8)
+            if p == Preset.ble {
+                Text(Preset.modeNames[min(max(m, 0), 3)])
+                    .font(.hud(10, .semibold))
+                    .tracking(1)
+                    .foregroundStyle(PastelTheme.hudOrange)
+            }
+            if (p == Preset.ble && m == 2) || p == Preset.harmony {
+                Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
+                    .font(.hudBig(14))
+                    .foregroundStyle(PastelTheme.hudBlack)
+                Text("BPM").font(.hud(7, .medium)).foregroundStyle(PastelTheme.textSecondary)
+                if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
+            }
+            Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
+            if let o = unit.ota {
+                HudTag(text: String(format: "UPD_%02ld%%", Int(o * 100)), fill: PastelTheme.hudOrange, size: 8)
+            }
+            Text(unit.hz > 0 ? String(format: "%.1fK", unit.hz / 1000) : "—")
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(PastelTheme.textSecondary)
+            Rectangle()
+                .fill(unit.isConnected ? PastelTheme.hudOrange : Color.clear)
+                .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+                .frame(width: 7, height: 7)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    /// the two keys that change with the pads (0/2 on the top bar, 1/3 on the bottom)
+    @ViewBuilder private func contextKey(_ n: Int) -> some View {
+        switch rig.padSet {
+        case .grain:
+            switch n {
+            case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
+            case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
+            case 2: key("bookmark", on: grain.useMarks) { grain.mark(d.ctxUnits()) }
+            default: key("arrow.triangle.2.circlepath") { d.sync() }
+            }
+        case .rungler:
+            switch n {
+            case 0: key("record.circle", on: d.units[rig.focus].recording) { d.toggleRec() }
+            case 1: key("lock", on: grain.bjLock) { grain.setBjLock(!grain.bjLock, d.ctxUnits()) }
+            case 2: key("arrow.triangle.2.circlepath") { d.sync() }
+            default: key("dice") { grain.bjKick(d.ctxUnits()) }
+            }
+        case .delay, .harmony:
+            switch n {
+            case 0: key("pause.circle", on: rig.padSet == .delay ? rig.dlHold : rig.hdHold) { d.toggleHold() }
+            case 1: key("link", on: rig.link) { d.toggleLink() }
+            case 2: key("squareshape.split.3x3", on: rig.grid) { d.toggleGrid() }
+            default: key("hand.tap") { d.tapTempo() }
+            }
+        case .noise:
+            switch n {
+            case 0: key("dice") { d.noiseDice() }
+            case 1: key("arrow.triangle.2.circlepath") { d.sync() }
+            default: blank
+            }
+        case .knob:
+            blank
+        }
+    }
+
+    private var blank: some View {
+        Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1).frame(width: 21, height: 21)
+    }
+
+    private func key(_ name: String, on: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: name)
-                .font(.system(size: 11))
-                .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.iconColor)
-                .frame(width: 19, height: 19)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
+                .frame(width: 21, height: 21)
                 .background(IconSquare(filled: on))
         }
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
     }
 }
 
-/// The bar between the keys: where the play head is. Drag it to jump.
-private struct PositionBar: View {
-    @ObservedObject var scope: CafeScope
-    @ObservedObject var unit: CafeUnit
-
-    var body: some View {
-        CompactSlider(value: Binding(get: { Double(scope.play) / Double(TAPE) },
-                                     set: { unit.send("J \(Int($0 * Double(TAPE - 1)))") }),
-                      fillColor: PastelTheme.sliderFill,
-                      knobColor: PastelTheme.knobColor, thinLine: true)
-            .opacity(unit.isConnected ? 1 : 0.35)
-    }
-}
-
-/// The four corner keys' square (same as the weekday apps).
+/// a key's square: a thin black frame, orange when it is on
 struct IconSquare: View {
     var filled: Bool = false
 
     var body: some View {
         Rectangle()
-            .fill(filled ? PastelTheme.selection : PastelTheme.buttonBackground)
-            .overlay(Rectangle().strokeBorder(PastelTheme.textPrimary, lineWidth: 1))
-            .overlay(
-                Rectangle()
-                    .strokeBorder(filled ? PastelTheme.selectionText.opacity(0.75)
-                                         : PastelTheme.textPrimary.opacity(0.55),
-                                  lineWidth: 0.5)
-                    .padding(2)
-            )
+            .fill(filled ? PastelTheme.hudOrange : PastelTheme.padScreen)
+            .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
     }
 }
 
-// MARK: - the Cafes panel
+// MARK: - the Cafes panel (connection + camera)
 
 struct CafesView: View {
     @ObservedObject var hub: CafeHub
     @ObservedObject var camera: CameraRig
-    @ObservedObject var grain: GrainMode
-    let setMode: (Int) -> Void
-    let setPreset: (Int) -> Void
 
     var body: some View {
         PanelScaffold(title: "CAFES") {
             PanelColumns {
-                ModeCard(hub: hub, grain: grain, setMode: setMode, setPreset: setPreset)
                 CafeCard(hub: hub, unit: hub.units[0])
                 CafeCard(hub: hub, unit: hub.units[1])
             } right: {
                 PanelCard(title: "NEARBY", note: hub.bluetoothReady ? "searching" : "bluetooth off") {
                     if hub.found.isEmpty {
-                        Text("Turn the Cafe on (esp_cafe_duo, preset 3).")
-                            .font(.system(size: PanelMetrics.labelFont))
+                        Text("Turn the Cafe on (esp_cafe_duo).")
+                            .font(.hud(PanelMetrics.labelFont))
                             .foregroundStyle(PastelTheme.textSecondary)
                     }
                     ForEach(hub.found) { f in
                         HStack(spacing: PanelMetrics.rowGap) {
                             Text(f.name)
-                                .font(.system(size: PanelMetrics.labelFont, weight: .medium))
+                                .font(.hud(PanelMetrics.labelFont, .medium))
                                 .foregroundStyle(PastelTheme.textPrimary)
                             Spacer(minLength: 0)
                             ChipButton(title: "→ A", filled: hub.units[0].savedID == f.id) { hub.assign(f, to: 0) }
@@ -475,7 +629,7 @@ private struct CafeCard: View {
             DiagRow("NAME", unit.name ?? "—")
             DiagRow("STATE", unit.state)
             DiagRow("CLOCK", unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")
-            DiagRow("PRESET", unit.preset < 0 ? "—" : (unit.preset < 3 ? GrainMode.presetNames[unit.preset].lowercased() : "\(unit.preset + 1)"))
+            DiagRow("PRESET", unit.preset < 0 ? "—" : Preset.tag(unit.preset))
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "DISCONNECT", filled: false) { hub.disconnect(unit.slot) }
                 ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }
@@ -484,7 +638,7 @@ private struct CafeCard: View {
     }
 }
 
-/// Camera settings (same rows as Þunresdæg's CAMERA). MODE cycles MOTION / BRIGHT / DARK.
+/// Camera settings. MODE cycles MOTION / BRIGHT / DARK.
 private struct CameraCard: View {
     @ObservedObject var camera: CameraRig
 
@@ -515,59 +669,8 @@ private struct CameraCard: View {
 
     private func label(_ t: String) -> some View {
         Text(t)
-            .font(.system(size: PanelMetrics.labelFont, weight: .medium))
+            .font(.hud(PanelMetrics.labelFont, .medium))
             .foregroundStyle(PastelTheme.textPrimary)
             .frame(width: PanelMetrics.labelWidth, alignment: .leading)
-    }
-}
-
-/// presets from the phone; inside DUO: LOOP / GRAIN, and GRAIN's marks
-private struct ModeCard: View {
-    @ObservedObject var hub: CafeHub
-    @ObservedObject var grain: GrainMode
-    let setMode: (Int) -> Void
-    let setPreset: (Int) -> Void
-
-    var body: some View {
-        PanelCard(title: "PRESET", note: "both Cafes") {
-            // the Cafes' presets, from the phone (same as the button menu on the Cafe)
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(0..<3, id: \.self) { n in
-                    ChipButton(title: GrainMode.presetNames[n], filled: grain.preset == n) { setPreset(n) }
-                }
-            }
-            // inside DUO: play the tape as a LOOP, as GRAINS, or play the BENJOLIN (switches with a short crossfade)
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(0..<3, id: \.self) { m in
-                    ChipButton(title: GrainMode.modeNames[m], filled: grain.preset == 2 && grain.mode == m) { setMode(m) }
-                }
-            }
-            if grain.on && grain.preset == 2 {
-                HStack(spacing: PanelMetrics.rowGap) {
-                    Text("MARKS")
-                        .font(.system(size: PanelMetrics.labelFont, weight: .medium))
-                        .foregroundStyle(PastelTheme.textPrimary)
-                        .frame(width: PanelMetrics.labelWidth, alignment: .leading)
-                    ForEach(0..<8, id: \.self) { i in
-                        Rectangle()
-                            .fill(i < grain.marks ? PastelTheme.textPrimary : Color.clear)
-                            .overlay(Rectangle().strokeBorder(PastelTheme.textPrimary, lineWidth: 1))
-                            .frame(width: 8, height: 8)
-                    }
-                    Spacer(minLength: 0)
-                }
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    ChipButton(title: "SYNC L·R", filled: false) { grain.sync(hub.units) }
-                }
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    ChipButton(title: "MARK", filled: false) { grain.mark(hub.units) }
-                    ChipButton(title: "ONLY MARKS", filled: grain.useMarks) { grain.setUseMarks(!grain.useMarks, hub.units) }
-                    ChipButton(title: "CLEAR", filled: false) { grain.clearMarks(hub.units) }
-                }
-                Text("L input -> Cafe A, R input -> Cafe B. Only the grains come out (no dry sound). Both play one score; L · R pulls them apart.")
-                    .font(.system(size: PanelMetrics.valueFont))
-                    .foregroundStyle(PastelTheme.textSecondary)
-            }
-        }
     }
 }

@@ -1,5 +1,5 @@
 // GrainMode.swift — coco duo (k.odk)
-// GRAIN mode: both Cafes run the "grain" preset (preset 4 of esp_cafe_duo). Left input -> Cafe A, right -> Cafe B.
+// GRAIN mode of the BLE preset (preset 3 of esp_cafe_duo). Left input -> Cafe A, right -> Cafe B.
 // Each Cafe keeps recording its input and plays smooth, overlapping grains of it (granular).
 // Both follow ONE score (grain n gets the same time / pitch / place on both), synced by "Z",
 // so L and R move together; the L · R pad pulls them apart gradually and shifts one in time.
@@ -45,14 +45,6 @@ enum GrainPad: Int, CaseIterable {
 }
 
 final class GrainMode: ObservableObject {
-    /// the mode inside the duo preset: 0 = LOOP, 1 = GRAIN, 2 = BENJOLIN
-    @Published var mode: Int = UserDefaults.standard.integer(forKey: "duo.mode") {
-        didSet { UserDefaults.standard.set(mode, forKey: "duo.mode") }
-    }
-    var on: Bool { mode == 1 }                     // GRAIN
-    var isBj: Bool { mode == 2 }                   // BENJOLIN
-    static let modeNames = ["LOOP", "GRAIN", "BENJOLIN"]
-    static let modeIcons = ["rectangle.split.2x1", "circle.grid.3x3", "waveform.path.ecg"]
     // BENJOLIN's own pads and LOCK (see Benjolin.swift)
     let bjAxes: [PadAxis] = BjPad.allCases.map { PadAxis($0.start) }
     @Published var bjLock = false
@@ -63,12 +55,6 @@ final class GrainMode: ObservableObject {
     private var nextMark = 0
 
     let axes: [PadAxis] = GrainPad.allCases.map { PadAxis($0.start) }
-
-    /// the preset (0-based) the app keeps both Cafes on: 0 coco · 1 echo · 2 duo (LOOP / GRAIN live inside duo)
-    @Published var preset: Int = (UserDefaults.standard.object(forKey: "cafe.preset") as? Int) ?? 2 {
-        didSet { UserDefaults.standard.set(preset, forKey: "cafe.preset") }
-    }
-    static let presetNames = ["1 COCO", "2 ECHO", "3 DUO"]
 
     /// one parameter for one side (slot 0 = A = left, 1 = B = right)
     func value(_ id: Int, slot: Int) -> Double {

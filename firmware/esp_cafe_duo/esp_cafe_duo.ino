@@ -178,26 +178,28 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // LINK (k.odk) --- text protocol, over BLE only in this build
 // ==========================================
 // REQUEST / REPLY only: the Cafe never talks unless asked (the HELLO path is the one that proved to work).
-// computer -> Cafe (one line each):
-//   P            ping            -> "HELLO coco-pc 2"
+// phone -> Cafe (one line each):
+//   P            ping            -> "HELLO coco-duo 3 <name> ota"
 //   Q            poll            -> one status line "T ..." and one overview chunk "O <bin> <hex>"
-//   S <milli>    play speed x1000 (1000 = 1x, -500 = half speed backwards), -8000..8000
-//   L <a> <b>    loop region in samples, 0..131072
-//   J <pos>      jump the play head
-//   R <0|1>      recording off/on
+//   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
-//   G <n>        switch to preset n (0-based: 0 = coco, 1 = echo, 2 = duo)
-//   M <id> <v>   grain parameter (see mo_update)
-//   Z            grain: restart the grain score / benjolin: same start (both Cafes at once = in step)
-//   B <id> <v>   benjolin parameter (see bj_update)
-//   X <id> <v>   sound: 0 fold 0..1000, 1 bias -1000..1000, 2 overdub 0..1000, 3 delay time 0..1000, 4 delay amount 0..1000
-// T wpos ppos rec ls le speed earth flip skip button samples preset
+//   G <n>        switch to preset n (0-based, see the playlist)
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..3> = BLE preset mode GRAIN / RUNGLER / DELAY / NOISE
+//   B <id> <v>   rungler parameter (see bj_update)
+//   Y <id> <v>   delay parameter (see dl_update)
+//   N <id> <v>   noise parameter (see nz_update)
+//   V <id> <v>   harmony parameter (see hd_update)
+//   K <bpm x10>  the shared tempo (DELAY, HARMONY)
+//   Z            sync: grain score / rungler start / the click (send to both Cafes at once = in step)
+//   U ...        firmware update (see ota_cmd)
+// T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10
 void pc_status() {
   char tb[128];
-  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d",
+  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
-    (int)pc_earth, (int)pc_flip, (int)pc_skip, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset);
+    (int)pc_earth, (int)pc_flip, (int)pc_skip, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset,
+    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f));
   pc_out(tb);
 }
 void pc_overview() {
@@ -309,6 +311,100 @@ void bj_update() {
 }
 void bj_fill_table() { for (int i = 0; i < 256; i++) bj_exp[i] = (uint32_t)(65536.0f * powf(2.0f, i / 256.0f)); }
 
+// ---- tempo helpers ----
+// divisions of a beat: 1/16, 1/8T, 1/8, 1/4T, 1/8., 1/4, 1/4., 1/2, 1/1
+static const float beat_div[9] = {0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 0.75f, 1.0f, 1.5f, 2.0f, 4.0f};
+static inline int div_index(int v) { int i = (v * 8 + 500) / 1000; return i < 0 ? 0 : (i > 8 ? 8 : i); }
+static inline float clock_hz() { return mo_hz > 1000 ? mo_hz : 32000; }
+
+// ---- DELAY parameters (k.odk). "Y <id> <0..1000>" ----
+//  0 time (free: 10 ms .. 1.5 s; SYNC / LINK: steps through the divisions)  1 R time vs L (0.5x .. 2x, 500 = same)
+//  2 feedback  3 ping-pong  4 wet  5 tone  6 wow (EARTH)  7 division (SYNC)  8 sync  9 dry  10 hold
+//  11 LINK (two Cafes = one delay)  12 which side (0 = A, 1 = B)
+static const int16_t dl_default[13] = {450, 500, 450, 1000, 600, 700, 0, 625, 1000, 1000, 0, 0, 0};
+void dl_update() {
+  float hz = clock_hz(), p[13];
+  for (int i = 0; i < 13; i++) p[i] = dl_p[i] / 1000.0f;
+  bool link = dl_p[11] > 0, sync = link || dl_p[8] >= 500;
+  float beat = hz * 60.0f / cafe_bpm;
+  float tl;
+  if (link) tl = beat * beat_div[div_index(dl_p[0])];            // linked: the TIME pad steps the grid
+  else if (sync) tl = beat * beat_div[div_index(dl_p[7])];
+  else tl = hz * 0.010f * powf(150.0f, p[0]);
+  float lim = link ? 65000.0f : 65000.0f;
+  while (tl > lim) tl *= 0.5f;                                   // too long for the tape: half of it
+  float tr = tl * powf(2.0f, (p[1] - 0.5f) * 2.0f);
+  if (tr > 65000.0f) tr = 65000.0f;
+  dl_tl = (int32_t)(tl * 256.0f); dl_tr = (int32_t)(tr * 256.0f);
+  dl_fb = (int32_t)(p[2] * 245.0f);
+  dl_pp = (int32_t)(p[3] * 256.0f);
+  dl_wet = (int32_t)(p[4] * 1.6f * 256.0f);
+  dl_tone = (int32_t)(300.0f + p[5] * p[5] * 3796.0f);
+  dl_wow = (int32_t)(p[6] * 600.0f);
+  dl_dry = (int32_t)(p[9] * 256.0f);
+  dl_hold = dl_p[10] > 0;
+  int pair = link ? (dl_p[12] > 0 ? 2 : 1) : 0;
+  if (pair != dl_pair) { dl_pair = pair; dl_reset = true; }
+  float b = sync ? beat : tl;
+  dl_beat = (int32_t)(b > 64 ? b : 64);
+}
+
+// ---- NOISE parameters (k.odk). "N <id> <0..1000>" ----
+//  0 size (line length)  1 spread (between the three lines)  2 feedback (ring gain)  3 grit (soft .. fold .. 1-bit)
+//  4 shift clock  5 loop (0 = free noise .. short loop = pitched)  6 gate rate  7 gate open (share)  8 cutoff
+//  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)
+static const int16_t nz_default[13] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 500, 0};
+void nz_update() {
+  float hz = clock_hz(), p[13];
+  for (int i = 0; i < 13; i++) p[i] = nz_p[i] / 1000.0f;
+  float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
+  float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
+  for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
+  nz_fb = (int32_t)(p[2] * 270.0f);
+  nz_grit = (int32_t)(p[3] * 4096.0f);
+  float fs = 20.0f * powf(2.0f, p[4] * 11.0f); if (fs > hz * 0.5f) fs = hz * 0.5f;
+  nz_sinc = (uint32_t)(fs / hz * 4294967295.0f);
+  nz_loop = nz_p[5] > 0 ? 2 + (int32_t)((1.0f - p[5]) * (1.0f - p[5]) * 1000.0f) : 0;
+  float fg = 0.1f * powf(400.0f, p[6]);                          // 0.1 .. 40 Hz
+  nz_ginc = (uint32_t)(fg / hz * 4294967295.0f);
+  nz_duty = (uint32_t)(p[7] * 4294967295.0f);
+  nz_fc = (int32_t)(p[8] * 9.5f * 256.0f);
+  nz_q = (int32_t)(4096.0f * (1.0f - 0.93f * p[9]));
+  nz_self = (int32_t)(p[10] * 4.0f * 256.0f);
+  nz_gain = (int32_t)(p[11] * 2.0f * 256.0f);
+  nz_in = (int32_t)(p[12] * 256.0f);
+}
+
+// ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
+//  0 time (free)  1 feedback  2 dry  3 unison  4 fifth down  5 fifth up  6 spread (the fifths later)  7 tone
+//  8 window (shifter grain 15 .. 120 ms)  9 width  10 division  11 sync  12 level  13 hold
+static const int16_t hd_default[14] = {450, 380, 1000, 550, 600, 600, 200, 650, 400, 1000, 625, 1000, 700, 0};
+void hd_update() {
+  float hz = clock_hz(), p[14];
+  for (int i = 0; i < 14; i++) p[i] = hd_p[i] / 1000.0f;
+  bool sync = hd_p[11] >= 500;
+  float beat = hz * 60.0f / cafe_bpm;
+  float tt = sync ? beat * beat_div[div_index(hd_p[10])] : hz * 0.010f * powf(150.0f, p[0]);
+  float win = hz * (0.015f + 0.105f * p[8]);
+  float sp = p[6] * 0.5f;
+  while (tt * (1.0f + 2.0f * sp) + win > 125000.0f) tt *= 0.5f;
+  hd_t = (int32_t)(tt * 256.0f);
+  hd_fb = (int32_t)(p[1] * 240.0f);
+  hd_dry = (int32_t)(p[2] * 256.0f);
+  hd_lv[0] = (int32_t)(p[3] * 256.0f); hd_lv[1] = (int32_t)(p[4] * 256.0f); hd_lv[2] = (int32_t)(p[5] * 256.0f);
+  hd_spread = (int32_t)(sp * 4096.0f);
+  hd_tone = (int32_t)(300.0f + p[7] * p[7] * 3796.0f);
+  hd_win = (int32_t)win;
+  hd_sdn = (uint32_t)(int32_t)((1.0f / 3.0f) / win * 4294967296.0f);      // a fifth down: the delay grows 1/3 per sample
+  hd_sup = (uint32_t)(int32_t)(-0.5f / win * 4294967296.0f);              // a fifth up: it shrinks 1/2 per sample
+  hd_width = (int32_t)(p[9] * 256.0f);
+  hd_gain = (int32_t)(p[12] * 1.5f * 256.0f);
+  hd_hold = hd_p[13] > 0;
+  float b = sync ? beat : tt;
+  hd_beat = (int32_t)(b > 64 ? b : 64);
+}
+void all_update() { mo_update(); bj_update(); dl_update(); nz_update(); hd_update(); }
+
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
 void ota_cmd(char *s);
@@ -316,19 +412,12 @@ void pc_line(char *s) {
   if (s[0] == 'U') { ota_cmd(s); return; }
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
-    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo 2 %s ota", ble_name); pc_out(hb); } break;
+    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo 3 %s ota", ble_name); pc_out(hb); } break;
     case 'H': { char hb[128]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
                 (unsigned long)(esp_timer_get_time() / 1000));
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
-    case 'S': { long m = atol(s + 1); if (m > 8000) m = 8000; if (m < -8000) m = -8000;
-                pc_speed = (int32_t)((m * 4096) / 1000); } break;
-    case 'L': { long a = 0, b = 0; sscanf(s + 1, "%ld %ld", &a, &b);
-                if (a < 0) a = 0; if (b > 131072) b = 131072; if (b - a < 512) b = a + 512;
-                if (b > 131072) { b = 131072; a = b - 512; }
-                pc_ls = a; pc_le = b; } break;
-    case 'J': { long p = atol(s + 1); if (p < 0) p = 0; if (p > 131071) p = 131071; pc_jump = p; } break;
     case 'R': pc_rec = atol(s + 1) != 0; break;
     case 'G': { long n = atol(s + 1); if (n >= 0 && n < active_preset_count) pc_goto = (int)n; } break;
     case 'M': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
@@ -340,9 +429,18 @@ void pc_line(char *s) {
                 else if (id == 22) { mo_usemarks = val != 0; }
                 else if (id == 23) { mo_freeze = val != 0; }
                 else if (id == 24) { mo_perc = val != 0; }
-                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 2 ? 2 : (int)val); }
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
               } break;
-    case 'Z': mo_sync = true; bj_sync = true; break;
+    case 'Z': mo_sync = true; bj_sync = true; dl_align = true; hd_align = true; break;
+    case 'Y': case 'N': case 'V': {
+                long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
+                if (val < 0) val = 0; if (val > 1000) val = 1000;
+                if (s[0] == 'Y' && id >= 0 && id < 13) { dl_p[id] = (int16_t)val; dl_update(); }
+                if (s[0] == 'N' && id >= 0 && id < 13) { nz_p[id] = (int16_t)val; nz_update(); }
+                if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
+              } break;
+    case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
+                cafe_bpm = b / 10.0f; dl_update(); hd_update(); } break;
     case 'B': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // benjolin parameter
                 if (id >= 0 && id < 16) { if (val < 0) val = 0; if (val > 1000) val = 1000; bj_p[id] = (int16_t)val; bj_update(); }
                 else if (id == 16) bj_kick = true;                            // a new pattern (same as SKIP)
@@ -358,17 +456,6 @@ void pc_line(char *s) {
                   q += 2; n++;
                 }
                 char hb[24]; snprintf(hb, sizeof(hb), "w %ld", st); pc_out(hb);
-              } break;
-    case 'X': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);      // sound shaping, val 0..1000
-                if (val < -1000) val = -1000; if (val > 1000) val = 1000;
-                long u = val < 0 ? 0 : val;
-                switch (id) {
-                  case 0: pc_fold_g = 256 + (u * 1792) / 1000; break;           // fold 1x..8x
-                  case 1: pc_bias = (val * 2048) / 1000; break;                 // bias -1000..1000
-                  case 2: pc_dub = 256 - (u * 224) / 1000; break;               // 0 = replace .. 1000 = keep most of the old sound
-                  case 3: pc_dt = 8 + (u * (PC_DLEN - 16)) / 1000; break;        // delay time
-                  case 4: pc_dfb = (u * 235) / 1000; pc_dwet = u ? 96 + (u * 160) / 1000 : 0; break;   // delay amount
-                }
               } break;
   }
 }
@@ -452,13 +539,17 @@ void ota_service() {                      // loop() while updating: ring -> flas
 // ------------------------------------------
 // PRESET PLAYLIST
 // ------------------------------------------
-// Three presets. Long-press the button, tap N times (count from 0), long-press again.
-// The lamp blinks the number (1-3) in the menu and right after a preset is loaded.
+// Seven presets. Long-press the button, tap N times (count from 0), long-press again.
+// The lamp blinks the number (1-7) in the menu and right after a preset is loaded. The phone switches with "G <n>".
 //   1 = coco_mod  (startup preset)
 //   2 = echo_og   (4-tap echo, organ on YELLOW with EARTH FM, FLIP deeper, SKIP wobble)
-//   3 = duo       (coco_pc: remote-controlled from the iPhone over BLE. Modes: LOOP, GRAIN, BENJOLIN)
+//   3 = BLE       (coco_pc: played from the phone. Modes: GRAIN / RUNGLER / DELAY / NOISE)
+//   4 = resonator
+//   5 = formant   (ieat31415)
+//   6 = saturator (ieat31415: BUTTON = next kind)
+//   7 = harmony   (three-layer harmonic delay: unison, fifth down, fifth up)
 void (*playlist_main[])() = {
-    coco_mod, echo_og, coco_pc
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony
 };
 
 // ------------------------------------------
@@ -549,6 +640,10 @@ void setup() {
      for (int i = 0; i < 16; i++) bj_p[i] = bj_default[i];
      bj_fill_table();
      bj_update();
+     for (int i = 0; i < 13; i++) dl_p[i] = dl_default[i];
+     for (int i = 0; i < 13; i++) nz_p[i] = nz_default[i];
+     for (int i = 0; i < 14; i++) hd_p[i] = hd_default[i];
+     all_update();
      PRESETTER(presets[0])
   // ------------------------------------------
   // ------------------------------------------
@@ -594,7 +689,19 @@ void loop() {
     uint32_t n = pc_samples;
     float hz = (n - hz_n) * 1000.0f / (float)(millis() - hz_t);
     hz_t = millis(); hz_n = n;
-    if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; mo_update(); bj_update(); }
+    if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
+  }
+  // SKIP was tapped twice (DELAY / HARMONY): that is the tempo now, and the delay follows it
+  if (tap_samples > 0) {
+    int32_t d = tap_samples; tap_samples = 0;
+    float bpm = 60.0f * clock_hz() / d;
+    while (bpm < 40.0f) bpm *= 2.0f;
+    while (bpm > 240.0f) bpm *= 0.5f;
+    cafe_bpm = bpm;
+    if (dl_p[8] < 500) dl_p[8] = 1000;
+    if (hd_p[11] < 500) hd_p[11] = 1000;
+    dl_update(); hd_update();
+    Serial.printf("[tap] %.1f bpm\n", bpm);
   }
 
   // the phone switched presets ("G <n>"): load it the same way the menu does

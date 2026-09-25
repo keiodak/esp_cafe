@@ -5,22 +5,32 @@ import SwiftUI
 /// オレンジはアクセント。中央の月と、パネル内の選択中のチップにだけ使う。
 /// 面と地の明度が離れたので、ニューモーフィズムの両側影はやめて落ち影だけにしてある。
 /// 面は「浮き出る」ニューモーフィズム、トーンはニュートラルなグレー。
+/// coco duo HUD: light grey ground, black ink, one orange. Thin lines, square corners, condensed type.
 enum PastelTheme {
+    /// the orange (tags, pointer, selection)
+    static let hudOrange = Color(hex: 0xFF6A13)
+    /// black blocks with white letters
+    static let hudBlack = Color(hex: 0x161616)
+    /// the thin grey rules
+    static let hudLine = Color(hex: 0xB4B4AF)
+    /// the dot grid
+    static let hudDot = Color(hex: 0x9E9E99)
+
     // MARK: - ニューモーフィズム(柔らかい影で凹凸を表現するスタイル)基本カラー
     /// 画面全体の背景。ニューモーフィズムの土台になるニュートラルグレー。
-    static let screenBackground = Color(hex: 0x1D3E63)
+    static let screenBackground = Color(hex: 0xE2E2DE)
 
     /// カード・ボタンなど「面」の背景色。背景よりわずかに明るくして浮き出て見せる。
-    static let neumorphSurface = Color(hex: 0x1D3E63)
+    static let neumorphSurface = Color(hex: 0xE2E2DE)
 
     /// 面の上ふち側。ごくわずかに明るくして、板ではなく緩いドームに見せる。
-    static let neumorphSurfaceHigh = Color(hex: 0x24497A)
+    static let neumorphSurfaceHigh = Color(hex: 0xD3D3CE)
 
     /// チップの形。角丸の四角で共通化しておくと、当たり判定(contentShape)も
     /// 同じものを渡せて、見た目と押せる範囲がずれない。
-    static let chipShape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+    static let chipShape = RoundedRectangle(cornerRadius: 0, style: .continuous)
     /// 紙の色。モザイクの上に引く罫用
-    static let paperTone = Color(hex: 0x1D3E63)
+    static let paperTone = Color(hex: 0xE2E2DE)
     /// 明るさ 0…1 を、墨（0）から紙（1）までの色にする。カメラのモザイク用
     static func inkTone(_ v: Double) -> Color {
         let t = min(max(v, 0), 1)
@@ -33,55 +43,55 @@ enum PastelTheme {
 
     /// パネルの中のボタン(チップ)の、押されていないときのくぼみの地。
     /// 面より一段沈めた色。この上に選択色を載せても凹みの陰影は残す。
-    static let chipWell = Color(hex: 0x1D3E63)
+    static let chipWell = Color(hex: 0xE2E2DE)
 
     /// ニューモーフィズムの明るい側の影(左上)。黄色はほとんど残していない。
-    static let neumorphShadowLight = Color(hex: 0x1D3E63)
+    static let neumorphShadowLight = Color(hex: 0xE2E2DE)
 
     /// ニューモーフィズムの暗い側の影(右下)。
-    static let neumorphShadowDark = Color(hex: 0xEAF0F4)
+    static let neumorphShadowDark = Color(hex: 0x161616)
 
     /// XYパッドのスクリーン地色。4パッドとも同じトーンで、面から浮き出させる。
-    static let padScreen = Color(hex: 0x1D3E63)      // パッドはパネルと同じ色
+    static let padScreen = Color(hex: 0xEBEBE8)      // パッドはパネルと同じ色
 
     /// 月(ドローン)がONのときのスクリーン地色。一段落として、月あかりの下の面にする。
-    static let padScreenMoon = Color(hex: 0x173353)
+    static let padScreenMoon = Color(hex: 0xD8D8D3)
 
     /// 凹んだ溝の「明るい側」。面より明るい=ほぼ白でないと凹んで見えない。
-    static let padGrooveLight = Color(hex: 0x1D3E63)
+    static let padGrooveLight = Color(hex: 0xE2E2DE)
 
     /// 地より明るいので、浮き出た面の左上のふちに置く「月あかりの縁」。
-    static let neumorphRimLight = Color(hex: 0x1D3E63)
+    static let neumorphRimLight = Color(hex: 0xE2E2DE)
 
     /// パッド内のグリッド線
-    static let gridLine = Color(hex: 0xEAF0F4).opacity(0.25)
+    static let gridLine = Color(hex: 0x161616).opacity(0.18)
 
     /// スライダーの線。掠れた黒(単色ではなく、下のグラデーションで濃淡を付ける)。
-    static let sliderFill = Color(hex: 0xEAF0F4)
+    static let sliderFill = Color(hex: 0x161616)
 
     /// 選択状態やアクティブを立てるときだけ使う明るいブルー。
-    static let highlight = Color(hex: 0xEAF0F4)
+    static let highlight = Color(hex: 0xFF6A13)
 
     /// スライダーの線。一色だと帯に見えるので、濃淡をわずかに流す。
     static var slideInk: LinearGradient {
-        LinearGradient(colors: [Color(hex: 0xEAF0F4), Color(hex: 0xEAF0F4)],
+        LinearGradient(colors: [Color(hex: 0x161616), Color(hex: 0x161616)],
                        startPoint: .leading, endPoint: .trailing)
     }
 
     /// 目盛り(XYパッドの十字・スライダーのドット)と、スライダーのつまみに使う一色。
     /// 「測るもの」と「指すもの」を同じ色で揃える。
-    static let tickColor = Color(hex: 0xEAF0F4).opacity(0.55)
+    static let tickColor = Color(hex: 0x161616).opacity(0.55)
 
     /// XYパッドのポインターだけは少し白い側に置く(4枚のパッドで一番見たいものなので)。
-    static let padPointer = Color(hex: 0xEAF0F4)
+    static let padPointer = Color(hex: 0xFF6A13)
 
     /// スライダーのつまみ。目盛りの薄いグレーではなく、線と同じ「黒い方」に合わせる。
-    static let knobColor = Color(hex: 0xEAF0F4)
+    static let knobColor = Color(hex: 0x161616)
 
     /// メイン画面のスライダーのつまみと目盛りに使う白。面(#EDE9DF)より一段明るくして、
     /// 明るいパッドの上でも濃い地の上でも同じように見えるようにする。
     /// 値の外側の目盛りは、この色を薄く落として描く(sunnandægと同じ考え方)。
-    static let knobLight = Color(hex: 0xEAF0F4)
+    static let knobLight = Color(hex: 0x161616)
     /// 目盛りのうち、まだ届いていない側の薄さ。地に沈むくらいまで落とす。
     static let tickOffOpacity: Double = 0.20
 
@@ -93,25 +103,25 @@ enum PastelTheme {
 
     // ON状態・強調用のモノトーン(濃さの違いだけで区別する)。
     // OFFのアイコンがほぼ白なので、ONは濃いグレーではっきり分かれる。
-    static let pink = Color(hex: 0xEAF0F4)
-    static let peach = Color(hex: 0xEAF0F4)
-    static let lavender = Color(hex: 0xEAF0F4)
-    static let aqua = Color(hex: 0xEAF0F4)
-    static let skyBlue = Color(hex: 0xEAF0F4)
-    static let yellow = Color(hex: 0xEAF0F4)
-    static let violet = Color(hex: 0xEAF0F4)
-    static let rose = Color(hex: 0xEAF0F4)
-    static let teal = Color(hex: 0xEAF0F4)
-    static let indigo = Color(hex: 0xEAF0F4)
+    static let pink = Color(hex: 0x161616)
+    static let peach = Color(hex: 0x161616)
+    static let lavender = Color(hex: 0x161616)
+    static let aqua = Color(hex: 0x161616)
+    static let skyBlue = Color(hex: 0x161616)
+    static let yellow = Color(hex: 0x161616)
+    static let violet = Color(hex: 0x161616)
+    static let rose = Color(hex: 0x161616)
+    static let teal = Color(hex: 0x161616)
+    static let indigo = Color(hex: 0x161616)
 
     /// 選択中のチップ・スイッチの塗り。アクセントのオレンジ。
     /// 上に載る文字は白より黒のほうが小さい字で読めるので textPrimary を使う。
-    static let selection = Color(hex: 0xEAF0F4)
+    static let selection = Color(hex: 0xFF6A13)
 
     /// 変調先を反転(-X / -Y / -Z)で挿したときの塗り。
     /// オレンジと並んでも一目で違うと分かるよう、明度と彩度はそのままに
     /// 色相だけ黄へ寄せた濃い黄色。文字はオレンジのときと同じ textPrimary。
-    static let selectionInverted = Color(hex: 0x98B3CC)
+    static let selectionInverted = Color(hex: 0x7A7A76)
 
     // MARK: - XYパッド4象限用パレット
     // 1枚のパッドの中を、ごく薄いトーン差だけで4分割する。
@@ -122,19 +132,19 @@ enum PastelTheme {
     static let monoQuadrant4 = Color.clear
 
     /// ジェスチャー再生中などの状態色
-    static let mint = Color(hex: 0xEAF0F4)
+    static let mint = Color(hex: 0x161616)
 
     /// 音の詰まり具合を示す3色。ここだけは色そのものが意味なので、
     /// 単色のパレットから外して素の緑・黄・赤を使う(彩度は少し落としてある)。
-    static let meterGreen = Color(hex: 0xEAF0F4).opacity(0.45)
-    static let meterYellow = Color(hex: 0xEAF0F4).opacity(0.7)
-    static let meterRed = Color(hex: 0xEAF0F4)
+    static let meterGreen = Color(hex: 0x161616).opacity(0.45)
+    static let meterYellow = Color(hex: 0x161616).opacity(0.7)
+    static let meterRed = Color(hex: 0x161616)
 
     /// 録音中などの状態色(最も濃く出す)
-    static let coral = Color(hex: 0xEAF0F4)
+    static let coral = Color(hex: 0x161616)
 
     /// スライダー/スイッチのOFF・未塗り部分
-    static let trackOff = Color(hex: 0xEAF0F4).opacity(0.18)
+    static let trackOff = Color(hex: 0x161616).opacity(0.18)
 
     /// 小さいボタンの背景(ニューモーフィズムの面と同じ色に統一)
     static let buttonBackground = neumorphSurface
@@ -145,18 +155,18 @@ enum PastelTheme {
 
     /// パッド内ボタンの影の暗い側。参考図の #AEAEC0 にあたる、ベージュ寄りの中間グレー。
     /// 真っ黒だと硬くなるので、彩度を面に寄せてある。
-    static let padButtonShade = Color(hex: 0xEAF0F4)
+    static let padButtonShade = Color(hex: 0x161616)
     /// 同じく明るい側。ほぼ白。
-    static let padButtonLight = Color(hex: 0x1D3E63)
+    static let padButtonLight = Color(hex: 0xE2E2DE)
 
     /// 穴の底。面より一段暗い。内側の影だけだと「くぼみ」が弱いので、
     /// 面そのものに左上→右下の傾斜を付けて、穴の底が沈んで見えるようにする。
-    static let padButtonHollow = Color(hex: 0x1D3E63)
+    static let padButtonHollow = Color(hex: 0xE2E2DE)
     /// 穴の底の明るい側(右下)。面よりわずかに明るい。
-    static let padButtonHollowLit = Color(hex: 0x1D3E63)
+    static let padButtonHollowLit = Color(hex: 0xE2E2DE)
 
     /// パッド内の図柄。白地の上なのでグレー(=選ばれていない状態)。
-    static let padIconOn = Color(hex: 0xEAF0F4).opacity(0.45)
+    static let padIconOn = Color(hex: 0x161616).opacity(0.45)
     /// 選ばれている(入っている)ときはオレンジ。パネルのタイトルと同じ色。
     static let padIconActive = indigo
     /// 旧名。いまは padIconActive を使う。
@@ -167,23 +177,23 @@ enum PastelTheme {
 
     /// 丸ボタンのアイコンの色。マニュアルもMODもドローンも全部この一色で固定。
     /// オレンジ(indigo)に変わるのは中央の月だけ。
-    static let iconColor = Color(hex: 0xEAF0F4).opacity(0.55)
+    static let iconColor = Color(hex: 0x161616).opacity(0.55)
 
     /// ボタンの背景円の色。ほぼ白。
-    static let iconButtonBackground = Color(hex: 0x1D3E63)
+    static let iconButtonBackground = Color(hex: 0xE2E2DE)
 
     /// 補助テキスト用。目盛り/ポインターより気持ち濃いところに置く。
-    static let textSecondary = Color(hex: 0x98B3CC)
+    static let textSecondary = Color(hex: 0x7A7A76)
 
     /// 見出しなど。
-    static let textPrimary = Color(hex: 0xEAF0F4)
+    static let textPrimary = Color(hex: 0x161616)
 
     /// 録りに行っているあいだだけ使う色。全体が線画の一色なので、
     /// 「いま入力を開けている」ことだけはひと目で分かるようにする。
-    static let recording = Color(hex: 0xF2A65A)
+    static let recording = Color(hex: 0xFF6A13)
 
     /// 選択中のチップの上に載る文字。塗りが黒なので白で抜く。
-    static let selectionText = Color(hex: 0x1D3E63)
+    static let selectionText = Color(hex: 0xFFFFFF)
 }
 
 extension PastelTheme {
@@ -191,7 +201,7 @@ extension PastelTheme {
     /// 単色のべた塗りだとニューモーフィズムの面が浮いて見えないので、
     /// 面より少しだけざらつかせておく。
     /// 掠れの明るい筋も、白ではなく月の灯り寄りにする。
-    static let moonlight = Color(hex: 0x24497A)
+    static let moonlight = Color(hex: 0xD3D3CE)
 
     /// パネルとメイン画面の地。単色。光もグラデーションも置かない。
     static var panelBackdrop: some View { screenBackground }
@@ -320,5 +330,70 @@ extension View {
                         .strokeBorder(PastelTheme.textPrimary.opacity(0.4), lineWidth: 1)
                 )
         )
+    }
+}
+
+
+// MARK: - HUD type
+extension Font {
+    /// condensed letters (Avenir Next Condensed ships with iOS)
+    static func hud(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        let name: String
+        switch weight {
+        case .semibold, .bold, .heavy, .black: name = "AvenirNextCondensed-DemiBold"
+        case .medium: name = "AvenirNextCondensed-Medium"
+        default: name = "AvenirNextCondensed-Regular"
+        }
+        return .custom(name, size: size + 1.5)
+    }
+    /// big numbers and names (DIN Condensed)
+    static func hudBig(_ size: CGFloat) -> Font { .custom("DINCondensed-Bold", size: size) }
+}
+
+/// a black block with white letters ("SAT.3")
+struct HudTag: View {
+    let text: String
+    var fill: Color = PastelTheme.hudBlack
+    var ink: Color = .white
+    var size: CGFloat = 8
+    var body: some View {
+        Text(text)
+            .font(.hud(size, .semibold))
+            .tracking(0.6)
+            .foregroundStyle(ink)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Rectangle().fill(fill))
+    }
+}
+
+/// four short L-shaped corner marks, like a viewfinder
+struct HudCorners: Shape {
+    var arm: CGFloat = 7
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY + arm)); p.addLine(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.minX + arm, y: r.minY))
+        p.move(to: CGPoint(x: r.maxX - arm, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY + arm))
+        p.move(to: CGPoint(x: r.maxX, y: r.maxY - arm)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.maxX - arm, y: r.maxY))
+        p.move(to: CGPoint(x: r.minX + arm, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY - arm))
+        return p
+    }
+}
+
+/// a faint dot grid (the HUD's graph paper)
+struct HudDots: View {
+    var step: CGFloat = 12
+    var body: some View {
+        Canvas { ctx, size in
+            var p = Path()
+            var y = step / 2
+            while y < size.height {
+                var x = step / 2
+                while x < size.width { p.addRect(CGRect(x: x - 0.5, y: y - 0.5, width: 1, height: 1)); x += step }
+                y += step
+            }
+            ctx.fill(p, with: .color(PastelTheme.hudDot.opacity(0.55)))
+        }
+        .allowsHitTesting(false)
     }
 }

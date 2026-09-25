@@ -847,41 +847,26 @@ void IRAM_ATTR selfread() {
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
 
 // ==========================================
-// COCO-PC --- NEW PRESET (k.odk)
+// COCO-PC / BLE SYSTEM --- NEW PRESET (k.odk)
 // ==========================================
-// DUO preset: one record head, played three ways (switched from the phone, "M 25 <0|1|2>", ~20 ms crossfade):
-//   LOOP  = a play head with its own speed inside a loop (below)
-//   GRAIN = smooth or struck grains of the tape on a shared score (grain_tick above)
-//   BENJOLIN = two oscillators + rungler + filter, linked to the tape (bj_tick above)
-// EARTH (AC-coupled): LOOP = play-speed FM · GRAIN = where grains come from · BENJOLIN = osc 1 FM
-// coco with SEPARATE record and play heads, remote-controlled from a computer over USB serial
-// (see pc_service() in the .ino and coco-pc.html).
-// record head : writes the input around the whole buffer, 1 sample per clock (off when frozen)
-// play head   : reads at its own speed (-8x .. +8x, fractional), inside a loop region,
-//               jumps and loop wraps are crossfaded (~6ms)
-// BUTTON = freeze (stop recording), FLIP = reverse the play head (while HIGH),
-// SKIP   = trigger: jump the play head to the loop start
-// EARTH  = not used here (its value is sent to the computer)
-// ASH + main out = the play head.  YELLOW = pulse at every loop wrap
+// Preset 3, played from the phone (coco duo app over BLE). Four modes ("M 25 <0..3>", ~12 ms fade between them):
+//   0 GRAIN   = smooth or struck grains of the tape on a shared score (grain_tick)
+//   1 RUNGLER = two oscillators + rungler + filter, linked to the tape (bj_tick)
+//   2 DELAY   = stereo / ping-pong delay: main out = L, ASH = R, YELLOW = click on the beat (dl_tick)
+//   3 NOISE   = a noise machine: a ring of three delay lines through deciders, shift-register noise,
+//               a gate and a filter bent by the ring (nz_tick). Nothing is recorded.
+// GRAIN / RUNGLER keep a record head on the tape (BUTTON = hold). DELAY / NOISE use the tape as their own memory.
 
-volatile int32_t  pc_speed = 4096;          // play speed, Q12 (4096 = 1x)
-volatile int32_t  pc_ls = 0, pc_le = 131072; // loop region [start, end) in samples
-volatile int32_t  pc_jump = -1;             // requested jump (sample), -1 = none
-volatile bool     pc_rec = true;            // recording enabled from the computer
+volatile int32_t  pc_speed = 4096;          // (kept for the status line)
+volatile int32_t  pc_ls = 0, pc_le = 131072;
+volatile bool     pc_rec = true;            // recording enabled from the phone
 volatile uint32_t pc_wpos = 0, pc_ppos = 0; // heads, for the status line
 volatile uint32_t pc_samples = 0;           // counts interrupts -> clock rate
 volatile uint8_t  pc_earth = 0, pc_flip = 0, pc_skip = 0;
-volatile bool     pc_link = false;          // coco duo: the phone is connected (set by the BLE callbacks)
+volatile bool     pc_link = false;          // the phone is connected (set by the BLE callbacks)
 volatile uint32_t preset_gen = 0;           // +1 at every preset load (menu or phone): presets wake up on a change
-// sound shaping from the phone (k.odk). Set by "X <id> <0..1000>" in the .ino (derived values, no division here)
-//   fold / bias act on the PLAY sound only (the tape keeps the clean recording)
-volatile int32_t  pc_fold_g = 256;          // fold input gain, Q8 (256 = 1x .. 2048 = 8x)
-volatile int32_t  pc_bias = 0;              // offset before folding, -2048..2048
-volatile int32_t  pc_dub = 256;             // record strength, Q8: 256 = replace, lower = overdub (old sound stays)
-volatile int32_t  pc_dt = 400;              // short delay time in samples
-volatile int32_t  pc_dfb = 0, pc_dwet = 0;  // short delay feedback / wet, Q8
-#define PC_DLEN 2048                        // short delay buffer (4 KB; heap is tight with BLE)
-RTC_DATA_ATTR static uint16_t pc_dbuf[PC_DLEN];  // in the ESP32's separate RTC memory: the main heap is full (tape + BLE)
+volatile float    cafe_bpm = 120.0f;        // shared tempo (DELAY and HARMONY), "K <bpm x10>", SKIP = tap
+volatile int32_t  tap_samples = 0;          // set by a preset when SKIP was tapped twice: samples between the taps
 
 static inline int32_t IRAM_ATTR pc_read(int32_t pq) {        // pq = position Q12, interpolated read
   int32_t i = (pq >> 12) & 0x1FFFF;
@@ -945,7 +930,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int      pc_mode = 0;               // duo: 0 = LOOP, 1 = GRAIN, 2 = BENJOLIN ("M 25 <0|1|2>")
+volatile int      pc_mode = 0;               // BLE preset: 0 = GRAIN, 1 = RUNGLER, 2 = DELAY, 3 = NOISE ("M 25 <0..3>")
 volatile int32_t  pc_emod = 0;               // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool     mo_reset = true;           // set when the preset wakes up: the grain engine starts clean
 volatile int      mo_pulse = 0;              // YELLOW pulse length after a grain (read by coco_pc)
@@ -1143,21 +1128,237 @@ static int32_t IRAM_ATTR bj_tick(int32_t in) {
   return out;
 }
 
-#define PC_XF 256
+// ---- shared by the BLE preset and HARMONY (k.odk) ----
+/// EARTH, AC-coupled: only its movement counts, so an empty jack does nothing. Sets pc_emod (-128..127).
+static inline void IRAM_ATTR earth_ac() {
+  static int32_t eavg = 128 << 8;
+  int32_t ev = (int32_t)(EARTHREAD);
+  eavg += ((ev << 8) - eavg) >> 11;
+  int32_t em = ev - (eavg >> 8);
+  if (em > -3 && em < 3) em = 0;                  // a little dead zone for the noise of an empty jack
+  if (em > 127) em = 127; if (em < -128) em = -128;
+  pc_emod = em;
+}
+/// SKIP, debounced: true once on each press
+static inline bool IRAM_ATTR skip_press() {
+  static int s = 0; static bool latch = true;
+  if (SKIPPERAT) { if (s < 2000) s += 500; } else { if (s > 0) s -= 50; }
+  if (s > 1500) { if (!latch) { latch = true; return true; } }
+  else if (s < 100) latch = false;
+  return false;
+}
+/// SKIP as TAP TEMPO: two presses 0.1 .. 3.5 s apart -> tap_samples (loop() turns it into BPM)
+static inline void IRAM_ATTR tap_note() {
+  static uint32_t last = 0; static bool have = false;
+  uint32_t d = pc_samples - last;
+  if (have && d > 3000 && d < 150000) tap_samples = (int32_t)d;
+  last = pc_samples; have = true;
+}
+static inline int32_t IRAM_ATTR soft_clip(int32_t x) {
+  if (x > 1500) x = 1500 + ((x - 1500) >> 2);
+  if (x < -1500) x = -1500 + ((x + 1500) >> 2);
+  if (x > 2047) x = 2047; if (x < -2047) x = -2047;
+  return x;
+}
 
+// ==========================================
+// DELAY --- mode 2 of the BLE preset (k.odk): stereo / ping-pong
+// ==========================================
+// main out = L, ASH = R. The tape is the memory: L line = its first half, R line = its second half
+// (up to 65000 samples each, ~1.5 s). Times glide like tape when they change.
+// PING-PONG 0 = each side repeats itself, 1000 = the repeats cross L -> R -> L (input goes in on the left).
+// SYNC: the time is a division of the shared BPM. YELLOW = a click on every beat (patch it to other gear).
+// SKIP = tap tempo · FLIP / BUTTON / HOLD key = hold (the repeats go on forever, the input is kept out)
+// LINK (two Cafes as one delay, "Y 11 1" + "Y 12 <0 = A | 1 = B>"): each Cafe is one side and the whole tape is
+// one line. PING-PONG then goes across the Cafes: A plays the odd repeats (T, 3T, ..), B the even ones (2T, 4T, ..).
+// Linked, the time is always on the beat grid (the TIME pad steps through divisions), and when the Cafe's clock
+// (its pitch) moves, the time is re-set to the same division — it jumps along the grid instead of drifting.
+// EARTH (AC) = wow on the time.  Parameters: "Y <id> <0..1000>" (see dl_update), tempo "K <bpm x10>"
+volatile int16_t  dl_p[12];
+volatile int32_t  dl_tl = 16000 << 8, dl_tr = 16000 << 8;   // target times, samples Q8
+volatile int32_t  dl_fb = 100, dl_pp = 256;                 // feedback Q8, ping-pong Q8
+volatile int32_t  dl_wet = 256, dl_dry = 256;               // Q8
+volatile int32_t  dl_tone = 2800;                           // low-pass in the loop, Q12 (4096 = open)
+volatile int32_t  dl_wow = 0;                               // EARTH -> time, Q8 samples per step
+volatile int32_t  dl_beat = 16000;                          // samples per click
+volatile bool     dl_hold = false;                          // the phone's HOLD key
+volatile int      dl_pair = 0;                              // LINK: 0 = off, 1 = this Cafe is A, 2 = B
+volatile bool     dl_reset = true, dl_align = false;
+volatile int      dl_click = 0;                             // YELLOW click length left
+volatile uint32_t dl_wpos = 0, dl_rpos = 0;                 // for the status line
+
+/// one sample of the stereo delay. in = centred. Returns L, *rout = R.
+static int32_t IRAM_ATTR dl_tick(int32_t in, int32_t *rout, bool hold) {
+  static uint32_t w = 0, fill = 0, bc = 0, pw = 0;
+  static int32_t cl = 16000 << 8, cr = 16000 << 8;           // current times (they glide)
+  static int32_t lpl = 0, lpr = 0;
+  if (dl_reset) { dl_reset = false; w = 0; pw = 0; fill = 0; bc = 0; cl = dl_tl; cr = dl_tr; lpl = lpr = 0; }
+  if (dl_align) { dl_align = false; bc = 0; dl_click = 300; }  // a tap puts the click on the beat
+  cl += (dl_tl - cl) >> 11; cr += (dl_tr - cr) >> 11;
+  int32_t wob = pc_emod * dl_wow;
+  if (dl_pair) {                                             // LINK: one line over the whole tape
+    int32_t T = cl + wob;
+    if (T < (16 << 8)) T = 16 << 8; if (T > (65000 << 8)) T = 65000 << 8;
+    int32_t loop = T + (int32_t)(((int64_t)T * dl_pp) >> 8);    // ping-pong: the loop is 2T, each Cafe hears half
+    int32_t tap = (dl_pair == 1) ? T : loop;
+    int32_t rq = (int32_t)(pw << 8) - loop;
+    int32_t i = (rq >> 8) & 0x1FFFF, f = rq & 255;
+    int32_t a = dread(i), b = dread((i + 1) & 0x1FFFF);
+    int32_t vf = a + (((b - a) * f) >> 8) - 2048;               // what goes round
+    rq = (int32_t)(pw << 8) - tap;
+    i = (rq >> 8) & 0x1FFFF; f = rq & 255;
+    a = dread(i); b = dread((i + 1) & 0x1FFFF);
+    int32_t vo = a + (((b - a) * f) >> 8) - 2048;               // what this Cafe plays
+    dl_rpos = (uint32_t)i;
+    if (fill < 140000) fill++;
+    if (fill <= (uint32_t)((loop >> 8) + 2)) { vf = 0; vo = 0; }
+    if (fill <= (uint32_t)((tap >> 8) + 2)) vo = 0;
+    lpl += ((vf - lpl) * dl_tone) >> 12;
+    int32_t fb = hold ? 256 : dl_fb;
+    int32_t x = hold ? vf : lpl;
+    dwrite(pw, soft_clip((hold ? 0 : in) + ((x * fb) >> 8)) + 2048);
+    dl_wpos = pw;
+    pw = (pw + 1) & 0x1FFFF;
+    if (++bc >= (uint32_t)dl_beat) { bc = 0; dl_click = 300; }
+    int32_t out = ((in * dl_dry) >> 8) + ((vo * dl_wet) >> 8);
+    *rout = out;
+    return out;
+  }
+  int32_t tl = cl + wob, tr = cr - wob;
+  if (tl < (16 << 8)) tl = 16 << 8; if (tl > (65000 << 8)) tl = 65000 << 8;
+  if (tr < (16 << 8)) tr = 16 << 8; if (tr > (65000 << 8)) tr = 65000 << 8;
+
+  int32_t rq = (int32_t)(w << 8) - tl;                       // interpolated reads
+  int32_t i = (rq >> 8) & 0xFFFF, f = rq & 255;
+  int32_t a = dread(i), b = dread((i + 1) & 0xFFFF);
+  int32_t vl = a + (((b - a) * f) >> 8) - 2048;
+  rq = (int32_t)(w << 8) - tr;
+  i = (rq >> 8) & 0xFFFF; f = rq & 255;
+  a = dread(65536 + i); b = dread(65536 + ((i + 1) & 0xFFFF));
+  int32_t vr = a + (((b - a) * f) >> 8) - 2048;
+  dl_rpos = (uint32_t)i;
+  // right after a start the lines still hold old tape: keep them silent until they were written once
+  if (fill < 65536) fill++;
+  if (fill <= (uint32_t)(((tl > tr ? tl : tr) >> 8) + 2)) { vl = 0; vr = 0; }
+
+  lpl += ((vl - lpl) * dl_tone) >> 12;
+  lpr += ((vr - lpr) * dl_tone) >> 12;
+  int32_t pp = dl_pp, fb = hold ? 256 : dl_fb;
+  int32_t xl = hold ? vl : lpl, xr = hold ? vr : lpr;         // hold: no filter, no loss, no input
+  int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
+  int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
+  int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
+  dwrite(w, soft_clip(wl) + 2048);
+  dwrite(65536 + w, soft_clip(wr) + 2048);
+  dl_wpos = w;
+  w = (w + 1) & 0xFFFF;
+
+  if (++bc >= (uint32_t)dl_beat) { bc = 0; dl_click = 300; }
+  int32_t dry = (in * dl_dry) >> 8;
+  *rout = dry + ((vr * dl_wet) >> 8);
+  return dry + ((vl * dl_wet) >> 8);
+}
+
+// ==========================================
+// NOISE --- mode 3 of the BLE preset (k.odk): a Ciat-Lonbarde-ish noise machine
+// ==========================================
+// Nothing is recorded (the tape is only its scratch memory). Three short delay lines in a ring
+// (A -> B -> C -> A, with a little A -> C across, Fyrall-like), each through a DECIDER:
+// soft clip .. wave fold .. 1-bit comparator. The ring is excited by a 16-bit shift register (noise,
+// clocked at its own rate; LOOP makes it repeat = pitched), opened by a GATE (Rollz-like pulses).
+// A resonant filter follows, its cutoff flipped by the ring's own comparator (SELF).
+// main out = A + B (L), ASH = C - B (R), YELLOW = the gate.
+// SKIP = open the gate (burst) · FLIP = freeze the shift register · BUTTON = 1-bit everywhere
+// EARTH (AC) = bends the line lengths.  Parameters: "N <id> <0..1000>" (see nz_update)
+volatile int16_t  nz_p[14];
+volatile int32_t  nz_len[3] = {701, 1103, 1597};
+volatile int32_t  nz_fb = 230;               // ring gain Q8 (above 256 = it screams by itself)
+volatile int32_t  nz_grit = 1000;            // 0 soft clip .. 2048 fold .. 4096 1-bit
+volatile uint32_t nz_sinc = 1u << 28;        // shift clock step (Q32 per sample)
+volatile int32_t  nz_loop = 0;               // 0 = free, n = the register restarts every n steps
+volatile uint32_t nz_ginc = 1u << 18;        // gate phase step (Q32 per sample)
+volatile uint32_t nz_duty = 0x80000000u;     // gate open while phase < duty
+volatile int32_t  nz_fc = 1800, nz_q = 2000; // cutoff (1/256 oct above 20 Hz), resonance Q12
+volatile int32_t  nz_self = 300;             // ring -> cutoff, 1/256 oct
+volatile int32_t  nz_gain = 256, nz_in = 0;  // output Q8, live input into the ring Q8
+volatile int32_t  nz_emod = 64;              // EARTH -> lengths
+volatile bool     nz_reset = true, nz_burst = false;
+volatile int      nz_gate = 0;
+
+static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
+  int32_t s = soft_clip(x);
+  if (grit <= 0) return s;
+  int32_t g = (x * (256 + (grit >> 2))) >> 8;                // fold: up to 5x into a triangle
+  int32_t tf = (g + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
+  int32_t fo = tf - 2048;
+  if (grit <= 2048) return s + (((fo - s) * grit) >> 11);
+  int32_t bit = x >= 0 ? 1800 : -1800;                        // the comparator
+  return fo + (((bit - fo) * (grit - 2048)) >> 11);
+}
+
+static int32_t IRAM_ATTR nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
+  static uint32_t w = 0, sph = 0, gph = 0;
+  static uint16_t lfsr = 0xACE1;
+  static int32_t steps = 0, val = 0, env = 0;
+  static int32_t la = 0, ba = 0, lb = 0, bb = 0;
+  static int32_t lastc = 0;
+  if (nz_reset) { nz_reset = false; w = 0; sph = gph = 0; lfsr = 0xACE1; steps = 0; val = 0; env = 0; la = ba = lb = bb = 0; lastc = 0; }
+
+  // shift register noise (SELF also speeds its clock up while the ring is high)
+  uint32_t os = sph;
+  sph += nz_sinc + ((lastc > 0 && nz_self) ? (nz_sinc >> 1) : 0);
+  if (sph < os) {
+    if (!freeze) {
+      lfsr = (lfsr >> 1) ^ (uint16_t)(-(int16_t)(lfsr & 1) & 0xB400);
+      if (nz_loop && ++steps >= nz_loop) { steps = 0; lfsr = 0xACE1; }
+    }
+    val = (int32_t)(lfsr & 0xFFF) - 2048;
+  }
+  // gate
+  gph += nz_ginc;
+  bool open = nz_burst || gph < nz_duty;
+  env += ((open ? 4096 : 0) - env) >> 7;
+  nz_gate = open ? 1 : 0;
+  int32_t ex = ((val * env) >> 12) + ((in * nz_in) >> 8);
+
+  // the ring
+  int32_t em = (pc_emod * nz_emod) >> 6;
+  int32_t l0 = nz_len[0] + em, l1 = nz_len[1] - em, l2 = nz_len[2] + (em >> 1);
+  if (l0 < 8) l0 = 8; if (l0 > 8000) l0 = 8000;
+  if (l1 < 8) l1 = 8; if (l1 > 8000) l1 = 8000;
+  if (l2 < 8) l2 = 8; if (l2 > 8000) l2 = 8000;
+  uint32_t wi = w & 8191;
+  int32_t a = dread((wi - l0) & 8191) - 2048;
+  int32_t b = dread(8192 + ((wi - l1) & 8191)) - 2048;
+  int32_t c = dread(16384 + ((wi - l2) & 8191)) - 2048;
+  int32_t grit = onebit ? 4096 : nz_grit;
+  int32_t na = nz_decide(ex + ((c * nz_fb) >> 8), grit);
+  int32_t nb = nz_decide(((a * nz_fb) >> 8) + (ex >> 2), grit);
+  int32_t nc = nz_decide(((b * nz_fb) >> 8) - (a >> 3), grit);
+  dwrite(wi, na + 2048); dwrite(8192 + wi, nb + 2048); dwrite(16384 + wi, nc + 2048);
+  w++;
+  lastc = c;
+
+  // filter (two: L and R), cutoff flipped by the ring
+  int32_t oc = nz_fc + (c > 0 ? nz_self : -nz_self);
+  if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
+  int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
+  if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
+  int32_t xl = (a + b) >> 1, xr = (c - b) >> 1;
+  la += (fq * ba) >> 12; int32_t hl = xl - la - ((nz_q * ba) >> 12); ba += (fq * hl) >> 12;
+  lb += (fq * bb) >> 12; int32_t hr = xr - lb - ((nz_q * bb) >> 12); bb += (fq * hr) >> 12;
+  if (la > 32767) la = 32767; if (la < -32768) la = -32768; if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;
+  if (lb > 32767) lb = 32767; if (lb < -32768) lb = -32768; if (bb > 32767) bb = 32767; if (bb < -32768) bb = -32768;
+  *rout = (lb * nz_gain) >> 8;
+  return (la * nz_gain) >> 8;
+}
 
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
-  static int32_t pq = 0;                    // play position, Q12 (0 .. 131072<<12)
-  static int32_t tq = 0;                    // tail (old head) position, Q12
-  static int xf = 0;
-  static int xfl = PC_XF;                   // length of the running crossfade
-  static int32_t rg = 256;
-  static int32_t pend = -1;                 // jump waiting for the crossfade to end
-  static int skip_int = 0;
-  static bool skip_latch = true;
-  static int ypulse = 0;
+  static int32_t rg = 256;                  // record gain ramp
   static uint32_t gen_seen = 0xFFFFFFFF;
+  static int cur = -1;                      // the mode that is sounding
+  static int32_t mg = 0;                    // its fade, 0..4096
 
   static bool was_in_menu = true;
   if (preset_mode) {
@@ -1166,166 +1367,87 @@ void IRAM_ATTR coco_pc() {
     gen_seen = preset_gen;
     was_in_menu = false;
     wpos = t & 0x1FFFF;
-    pq = (int32_t)(t & 0x1FFFF) << 12;
-    skip_int = SKIPPERAT ? 2000 : 0;  skip_latch = SKIPPERAT ? true : false;
-    // the preset menu leaves every preset frozen; coco-pc starts RECORDING instead
+    // the preset menu leaves every preset frozen; this one starts RECORDING instead
     audio_frozen_state = false; lamp = false;
     pc_rec = true;
-    rg = 0;                                   // ramps up over ~6ms
-    xf = 0; pend = -1;
-    for (int i = 0; i < PC_DLEN; i++) pc_dbuf[i] = 2048;   // silent delay line
-    mo_reset = true;                                        // grains start clean too
+    rg = 0;
+    cur = -1; mg = 0;
   }
   int64_t now = esp_timer_get_time();
-  int mode = pc_mode;
-  bool gmode = mode == 1, bmode = mode == 2;
-  bool frz = gmode && mo_freeze;              // FREEZE only exists in GRAIN mode
 
   DACWRITER(pout)
   gyo = ADCREADER
   pc_samples++;
+  earth_ac();
 
-  // --- EARTH, AC-coupled: only its movement counts, so an empty jack does nothing ---
-  static int32_t eavg = 128 << 8;
-  int32_t ev = (int32_t)(EARTHREAD);
-  eavg += ((ev << 8) - eavg) >> 11;
-  int32_t em = ev - (eavg >> 8);
-  if (em > -3 && em < 3) em = 0;                  // a little dead zone for the noise of an empty jack
-  if (em > 127) em = 127; if (em < -128) em = -128;
-  pc_emod = em;
+  // --- MODE: fade the old one out, start the new one, fade it in (~6 ms each way) ---
+  int want = pc_mode;
+  if (cur < 0) {
+    cur = want;
+    if (cur == 0) mo_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true;
+  }
+  if (want != cur) {
+    if (mg > 0) mg -= 16;
+    else { cur = want; if (cur == 0) mo_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true; }
+  } else if (mg < 4096) mg += 16;
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3;
+  bool frz = gmode && mo_freeze;              // FREEZE only exists in GRAIN mode
 
-  // --- RECORD HEAD ---
-  bool rec = pc_rec && !audio_frozen_state && !frz;
+  // --- SKIP: GRAIN = restart the score · RUNGLER = a new pattern · DELAY = tap tempo · NOISE = burst (held) ---
+  bool press = skip_press();
+  bool g_restart = false;
+  if (press) {
+    if (gmode) g_restart = true;
+    else if (bmode) bj_kick = true;
+    else if (dmode) { tap_note(); dl_align = true; }
+  }
+  nz_burst = nmode && SKIPPERAT;
+
+  // --- RECORD HEAD (GRAIN / RUNGLER only: the other two use the tape themselves) ---
+  bool rec = (gmode || bmode) && pc_rec && !audio_frozen_state && !frz;
   if (rec) { if (rg < 256) rg++; } else { if (rg > 0) rg--; }
-  if (rg) {
+  if (rg && (gmode || bmode)) {
     int32_t old = dread(wpos);
     int32_t src = gyo;
-    if (bmode && bj_print) src = gyo + (((bj_last + 2048) - gyo) * bj_print >> 8);   // PRINT: the Benjolin onto the tape
-    dwrite(wpos, old + (((src - old) * ((rg * pc_dub) >> 8)) >> 8));
+    if (bmode && bj_print) src = gyo + (((bj_last + 2048) - gyo) * bj_print >> 8);   // PRINT: the Rungler onto the tape
+    dwrite(wpos, old + (((src - old) * rg) >> 8));
   }
-  wpos = (wpos + 1) & 0x1FFFF;
+  if (gmode || bmode) wpos = (wpos + 1) & 0x1FFFF;
 
-  // --- JUMPS: from the computer, or SKIP -> loop start ---
-  int32_t j = pc_jump;
-  if (j >= 0) { pc_jump = -1; pend = j & 0x1FFFF; }
-  // crossfade length that fits the loop: never longer than half a loop pass at the current speed
-  int32_t spd = pc_speed; if (spd < 0) spd = -spd; if (spd < 256) spd = 256;
-  int32_t lenS = pc_le - pc_ls; if (lenS < 512) lenS = 512;
-  int32_t fit = (int32_t)(((int64_t)lenS << 11) / spd);          // (len/2) / (speed)
-  if (fit > PC_XF) fit = PC_XF; if (fit < 16) fit = 16;
-  if (SKIPPERAT) { if (skip_int < 2000) skip_int += 500; }
-  else           { if (skip_int > 0) skip_int -= 50; }
-  bool g_restart = false;
-  if (skip_int > 1500) {                     // SKIP: LOOP = back to the loop start / GRAIN = restart the score
-    if (!skip_latch) { skip_latch = true; if (gmode) g_restart = true; else if (bmode) bj_kick = true; else pend = pc_ls; }
-  } else if (skip_int < 100) skip_latch = false;
-  if (pend >= 0 && xf == 0) {
-    int32_t p = pend;                       // keep jumps inside the loop region
-    if (p < pc_ls || p >= pc_le) p = pc_ls;
-    tq = pq; xf = xfl = fit;
-    pq = p << 12;
-    pend = -1;
-  }
-
-  // --- PLAY HEAD ---
-  int32_t sp = pc_speed;
-  if (FLIPPERAT && !bmode) sp = -sp;               // (in BENJOLIN, FLIP locks the rungler instead)
-  sp += (sp * pc_emod) >> 8;                        // EARTH = FM of the play speed, up to ±50 %
-  int32_t v = pc_read(pq);
-  if (xf > 0) {
-    int32_t w = pc_read(tq);
-    v = (v * (xfl - xf) + w * xf) / xfl;
-    tq += sp;
-    if (tq < 0) tq += (131072 << 12);
-    if (tq >= (131072 << 12)) tq -= (131072 << 12);
-    xf--;
-  }
-  pq += sp;
-  // loop region (crossfaded wrap)
-  int32_t ls = pc_ls, le = pc_le;
-  if (le - ls < 512) le = ls + 512;
-  int32_t lsq = ls << 12, leq = le << 12, lenq = (le - ls) << 12;
-  int32_t asp = sp < 0 ? -sp : sp;
-  bool far_out = (pq >= leq + asp + 4096) || (pq < lsq - asp - 4096);
-  if (far_out) {                                    // region moved away from the head: crossfaded jump
-    if (pend < 0) pend = ls;
-    if (xf == 0) { tq = pq; xf = xfl = fit; pq = lsq; pend = -1; }
-  } else if (pq >= leq || pq < lsq) {
-    int32_t np = pq;
-    if (pq >= leq) np = lsq + ((pq - leq) % lenq);
-    else           np = leq - ((lsq - pq) % lenq) - 1;
-    if (xf == 0) { tq = pq; xf = xfl = fit; }
-    if (tq < 0) tq += (131072 << 12);
-    if (tq >= (131072 << 12)) tq -= (131072 << 12);
-    pq = np;
-    ypulse = 1500;
-  }
-  // seam: where the play head crosses the record head, the tape jumps from "one lap ago" to "just now".
-  // near the crossing, lean on the live input instead, so the crossing is smooth
-  if (rg) {
-    int32_t d = ((pq >> 12) - (int32_t)wpos) & 0x1FFFF;
-    if (d >= 65536) d -= 131072;
-    int32_t ad = d < 0 ? -d : d;
-    if (ad < 256) {
-      int32_t g = ((256 - ad) * rg) >> 8;              // 0..256 weight of the live input
-      v = (v * (256 - g) + gyo * g) >> 8;
-    }
-  }
-  // --- FOLD (play sound only): gain, offset, triangle fold back into range ---
-  static int32_t fgs = 256 << 6, dts = 400 << 6;
-  fgs += ((pc_fold_g << 6) - fgs) >> 7;             // smoothed, no zipper
-  dts += ((pc_dt << 6) - dts) >> 9;                 // delay time glides (tape-like)
-  int32_t x = (((v - 2048) * (fgs >> 6)) >> 8) + pc_bias;
-  int32_t tf = (x + 2048) & 8191;
-  if (tf >= 4096) tf = 8191 - tf;
-  x = tf - 2048;
-  // --- SHORT DELAY (after the fold) ---
-  static int dw = 0;
-  int32_t dsm = dts >> 6; if (dsm < 8) dsm = 8; if (dsm > PC_DLEN - 2) dsm = PC_DLEN - 2;
-  int rdp = dw - dsm; if (rdp < 0) rdp += PC_DLEN;
-  int32_t dv = (int32_t)pc_dbuf[rdp] - 2048;
-  int32_t din = x + ((dv * pc_dfb) >> 8);
-  if (din > 2047) din = 2047; if (din < -2048) din = -2048;
-  pc_dbuf[dw] = (uint16_t)(din + 2048);
-  if (++dw >= PC_DLEN) dw = 0;
-  x += (dv * pc_dwet) >> 8;
-  // --- LOOP / GRAIN / BENJOLIN: one record head, three ways of playing. Switching = ~20 ms crossfade ---
-  static int32_t xm = 0, xb = 0;               // weights of GRAIN and BENJOLIN (LOOP gets the rest)
-  if (gmode) { if (xm < 4096) xm += 8; } else { if (xm > 0) xm -= 8; }
-  if (bmode) { if (xb < 4096) xb += 8; } else { if (xb > 0) xb -= 8; }
-  if (xm + xb > 4096) { if (gmode) xb = 4096 - xm; else xm = 4096 - xb; }
-  int32_t mix = (x * (4096 - xm - xb)) >> 12;
-  if (xm > 0 || gmode) {
-    int32_t gs = grain_tick(wpos, now, frz, g_restart);   // each engine runs only when it is heard
-    mix += (gs * xm) >> 12;
-  } else if (g_restart) {
-    mo_sync = true;
-  }
-  if (xb > 0 || bmode) {
-    int32_t bs = bj_tick(gyo - 2048);
-    mix += (bs * xb) >> 12;
-  }
-  x = mix;
-  v = x + 2048;
-  if (v > 4095) v = 4095; if (v < 0) v = 0;
+  // --- THE SOUND ---
+  int32_t l = 0, r = 0;
+  if (gmode) { l = grain_tick(wpos, now, frz, g_restart); r = l; }
+  else if (bmode) { l = bj_tick(gyo - 2048); r = l; }
+  else if (dmode) { bool hold = dl_hold || FLIPPERAT || audio_frozen_state; l = dl_tick(gyo - 2048, &r, hold); }
+  else { l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT); }
+  if (!gmode && g_restart) mo_sync = true;
+  l = (l * mg) >> 12; r = (r * mg) >> 12;
+  int32_t v = l + 2048; if (v > 4095) v = 4095; if (v < 0) v = 0;
   pout = v;
-  ASHWRITER(pout);
+  int32_t vr = r + 2048; if (vr > 4095) vr = 4095; if (vr < 0) vr = 0;
+  ASHWRITER(vr);                              // ASH = R (the same as L in GRAIN / RUNGLER)
 
-  // --- YELLOW: LOOP = pulse at every loop wrap / GRAIN = pulse at every grain ---
-  if (gmode) { if (mo_pulse > 0) { mo_pulse--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); } }
-  else if (bmode) { if (bj_pulse > 0) { bj_pulse--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); } }
-  else if (ypulse > 0) { ypulse--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
+  // --- YELLOW: GRAIN = a pulse at every grain · RUNGLER = its clock · DELAY = the click · NOISE = the gate ---
+  bool y = false;
+  if (gmode) { if (mo_pulse > 0) { mo_pulse--; y = true; } }
+  else if (bmode) { if (bj_pulse > 0) { bj_pulse--; y = true; } }
+  else if (dmode) { if (dl_click > 0) { dl_click--; y = true; } }
+  else y = nz_gate;
+  if (y) { YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
 
-  // --- LAMP (coco duo) ---
+  // --- LAMP ---
   //   phone not connected : slow blink (about once a second)
-  //   connected           : OFF while recording, ON while the tape is held (button / REC key / FREEZE)
+  //   GRAIN / RUNGLER     : OFF while recording, ON while the tape is held
+  //   DELAY               : ON while held, else a flash on every click
+  //   NOISE               : the gate
   if (!pc_link) { if ((now >> 19) & 1) { LAMP_ON; } else { LAMP_OFF; } }
+  else if (dmode) { if (dl_hold || FLIPPERAT || audio_frozen_state || dl_click > 150) { LAMP_ON; } else { LAMP_OFF; } }
+  else if (nmode) { if (nz_gate) { LAMP_ON; } else { LAMP_OFF; } }
   else if (rec) { LAMP_OFF; } else { LAMP_ON; }
 
   // --- report ---
-  t = wpos;
-  pc_wpos = wpos;
-  pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : ((pq >> 12) & 0x1FFFF);
+  if (dmode) { pc_wpos = dl_wpos; pc_ppos = dl_rpos; }
+  else { t = wpos; pc_wpos = wpos; pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : wpos; }
   pc_earth = EARTHREAD;
   pc_flip = FLIPPERAT ? 1 : 0;
   pc_skip = SKIPPERAT ? 1 : 0;
@@ -1336,4 +1458,599 @@ void IRAM_ATTR coco_pc() {
   REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
+
+// ==========================================
+// HARMONY --- NEW PRESET 7 (k.odk): a three-layer harmonic delay
+// ==========================================
+// One tape line, three voices reading it: UNISON, a FIFTH DOWN, a FIFTH UP. The fifths are pitch-shifted
+// with two crossfading heads each (window = the grain of the shifter). Their sum goes back into the tape,
+// so the repeats climb and fall in fifths (a fifth of a fifth = a ninth ...).
+// main out = dry + unison + fifth down (+ some up), ASH = dry + unison + fifth up (+ some down), WIDTH sets how apart.
+// YELLOW = a click on the beat. SKIP = tap tempo · FLIP / BUTTON / HOLD key = hold (no input, no loss)
+// EARTH (AC) = wow on the time. Works from the Cafe alone (defaults below); the phone sets "V <id> <0..1000>".
+volatile int16_t  hd_p[14];
+volatile int32_t  hd_t = 16000 << 8;          // base time target, samples Q8
+volatile int32_t  hd_fb = 90, hd_dry = 256;   // Q8
+volatile int32_t  hd_lv[3] = {150, 150, 150}; // unison, down, up, Q8
+volatile int32_t  hd_spread = 0;              // Q12: down at T(1+s), up at T(1+2s)
+volatile int32_t  hd_tone = 3000;             // Q12 low-pass in the loop
+volatile int32_t  hd_win = 2400;              // shifter window, samples
+volatile uint32_t hd_sdn = 0, hd_sup = 0;     // phase steps (Q32) of the two shifted voices
+volatile int32_t  hd_width = 256;             // 0 = both sides the same, 256 = down left / up right
+volatile int32_t  hd_gain = 256;              // Q8
+volatile int32_t  hd_wow = 0;
+volatile int32_t  hd_beat = 16000;
+volatile bool     hd_hold = false, hd_reset = true, hd_align = false;
+volatile int      hd_click = 0;
+
+static inline int32_t IRAM_ATTR hd_read(uint32_t w, int32_t dq) {   // tape, dq = delay Q8 behind w
+  int32_t rq = (int32_t)(w << 8) - dq;
+  int32_t i = (rq >> 8) & 0x1FFFF, f = rq & 255;
+  int32_t a = dread(i), b = dread((i + 1) & 0x1FFFF);
+  return a + (((b - a) * f) >> 8) - 2048;
+}
+/// a pitch-shifted voice: two heads 180° apart sweeping a window behind the base delay dq, triangle fades
+static inline int32_t IRAM_ATTR hd_shift(uint32_t w, int32_t dq, uint32_t ph, int32_t win) {
+  uint32_t p1 = ph >> 16, p2 = (ph + 0x80000000u) >> 16;
+  int32_t d1 = dq + (int32_t)((p1 * (uint32_t)win) >> 8);
+  int32_t d2 = dq + (int32_t)((p2 * (uint32_t)win) >> 8);
+  int32_t g1 = p1 < 32768 ? (int32_t)p1 * 2 : (int32_t)(65535 - p1) * 2;
+  int32_t g2 = 65535 - g1;
+  return (int32_t)(((int64_t)hd_read(w, d1) * g1 + (int64_t)hd_read(w, d2) * g2) >> 16);
+}
+
+void IRAM_ATTR harmony() {
+  static uint32_t w = 0, fill = 0, bc = 0;
+  static uint32_t phd = 0, phu = 0;
+  static int32_t ct = 16000 << 8, lp = 0;
+  static uint32_t gen_seen = 0xFFFFFFFF;
+  static bool was_in_menu = true;
+  if (preset_mode) {
+    was_in_menu = true;
+  } else if (was_in_menu || gen_seen != preset_gen) {
+    gen_seen = preset_gen; was_in_menu = false;
+    audio_frozen_state = false; lamp = false;
+    hd_reset = true;
+  }
+  if (hd_reset) { hd_reset = false; w = 0; fill = 0; bc = 0; phd = 0; phu = 0x40000000u; ct = hd_t; lp = 0; }
+  if (hd_align) { hd_align = false; bc = 0; hd_click = 300; }
+
+  DACWRITER(pout)
+  gyo = ADCREADER
+  pc_samples++;
+  earth_ac();
+  if (skip_press()) { tap_note(); hd_align = true; }
+  bool hold = hd_hold || FLIPPERAT || audio_frozen_state;
+
+  ct += (hd_t - ct) >> 11;                                  // the time glides (tape-like)
+  int32_t T = ct + pc_emod * hd_wow;
+  if (T < (64 << 8)) T = 64 << 8; if (T > (80000 << 8)) T = 80000 << 8;
+  int32_t win = hd_win;
+  int32_t td = T + (int32_t)(((int64_t)T * hd_spread) >> 12);
+  int32_t tu = T + (int32_t)(((int64_t)T * hd_spread) >> 11);
+
+  int32_t v0 = hd_read(w, T);
+  int32_t v1 = hd_shift(w, td, phd, win);
+  int32_t v2 = hd_shift(w, tu, phu, win);
+  phd += hd_sdn; phu += hd_sup;
+  if (fill < 140000) fill++;
+  if (fill <= (uint32_t)((tu >> 8) + win + 2)) { v0 = v1 = v2 = 0; }   // the line still holds old tape
+
+  v0 = (v0 * hd_lv[0]) >> 8; v1 = (v1 * hd_lv[1]) >> 8; v2 = (v2 * hd_lv[2]) >> 8;
+  int32_t sum = v0 + v1 + v2;
+  lp += ((sum - lp) * hd_tone) >> 12;
+  int32_t fb = hold ? 256 : hd_fb;
+  int32_t x = hold ? sum : lp;
+  dwrite(w, soft_clip((hold ? 0 : (gyo - 2048)) + ((x * fb) >> 8)) + 2048);
+  w = (w + 1) & 0x1FFFF;
+  t = w;
+
+  if (++bc >= (uint32_t)hd_beat) { bc = 0; hd_click = 300; }
+  int32_t dry = ((gyo - 2048) * hd_dry) >> 8;
+  int32_t cross = 256 - hd_width;
+  int32_t l = dry + v0 + v1 + ((v2 * cross) >> 8);
+  int32_t r = dry + v0 + v2 + ((v1 * cross) >> 8);
+  l = (l * hd_gain) >> 8; r = (r * hd_gain) >> 8;
+  int32_t o = l + 2048; if (o > 4095) o = 4095; if (o < 0) o = 0;
+  pout = o;
+  int32_t orr = r + 2048; if (orr > 4095) orr = 4095; if (orr < 0) orr = 0;
+  ASHWRITER(orr);
+
+  if (hd_click > 0) { hd_click--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
+  if (hold || hd_click > 150) { LAMP_ON; } else { LAMP_OFF; }
+
+  pc_wpos = w; pc_ppos = ((int32_t)w - (T >> 8)) & 0x1FFFF;
+  pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
+
+  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= (BIT(5));
+}
+/////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
+
+// ==========================================
+// FORMANT (Vowel Filter) --- from ieat31415's Apple Pi (ported, k.odk)
+// ==========================================
+// based on the coco preset with a formant filter added
+// earth modulates the vowels
+// ash is wet signal at line level 
+// yellow is buffer position
+
+// 3 filters, each has 2 state variables (Band, Low)
+// Values are scaled up by 4096 (12 bits) to simulate decimals and eliminate floating point computation
+int f1_band=0, f1_low=0;
+int f2_band=0, f2_low=0;
+int f3_band=0, f3_low=0;
+
+// State Variable Filter (high performance with ints)
+// input: Audio sample
+// f: Frequency coefficient (0.01 to 0.5)
+// q: Resonance (Damping), lower is more resonant (0.05 to 0.5)
+// f and q are fixed-point integers (1.0 = 4096)
+int svf_bandpass_int(int input, int f, int q, int *band, int *low) {
+    // low += f * band
+    *low += (*band * f) >> 12;
+    
+    // high = input - low - q * band
+    int high = input - *low - ((*band * q) >> 12);
+    
+    // band += f * high
+    *band += (high * f) >> 12;
+    
+    return *band;
+}
+
+void IRAM_ATTR formant() {
+
+ 
+ // read inputs
+ int audio_in = ADCREADER;      // audio input
+ int earth_cv = EARTHREAD;      // earth
+
+ // get audio from delay
+ //int raw_audio = dellius(t, audio_in, lamp); //TO BE REPLACED BELOW TO ALLOW FOR BUFFER TRANSFER
+ int raw_audio = dellius(t, audio_in, audio_frozen_state);
+ 
+// Center the audio (0-4095 -> -2048 to +2048)
+ int signal = raw_audio - 2048;
+
+ // FORMANT FILTER BANK
+ // map earth_cv (0-255) to frequency coefficients (0.0 to 1.0)
+ // these numbers tune the vowels
+ 
+// quantized earth (0 to 255)
+ int cv = earth_cv;
+
+ // Formant 1 (Throat): Slides 200Hz -> 800Hz
+ // Base 80 + (cv * 0.5) -> Range ~80 to 200
+ int f1_freq = 80 + (cv >> 1);
+ 
+ // Formant 2 (Mouth): Slides 800Hz -> 2200Hz
+ // Base 300 + (cv * 1.5) -> Range ~300 to 700
+ int f2_freq = 300 + ((cv * 3) >> 1);
+ 
+ // Formant 3 (Teeth): Slides 2200Hz -> 3000Hz
+ // Base 800 + (cv * 1.0) -> Range ~800 to 1055
+ int f3_freq = 800 + cv;
+
+ // Q Factor (Resonance): Fixed at 0.1 (approx 400 in 12-bit scale)
+ int q = 400;
+
+ // Apply the 3 Filters in Parallel
+int out1 = svf_bandpass_int(signal, f1_freq, q, &f1_band, &f1_low);
+ int out2 = svf_bandpass_int(signal, f2_freq, q, &f2_band, &f2_low);
+ int out3 = svf_bandpass_int(signal, f3_freq, q, &f3_band, &f3_low);
+
+ // Sum them up and scale back to integer
+ // We multiply by 1.5 to boost the resonance volume
+int filtered_mix = (out1 + out2 + out3);
+ filtered_mix = filtered_mix + (filtered_mix >> 1);
+ 
+ // Clip and re-center to 0-4095 for output
+ int final_out = (int)filtered_mix + 2048;
+ if (final_out > 4095) final_out = 4095;
+ if (final_out < 0) final_out = 0;
+
+ // Update Global Output
+ pout = final_out;
+
+ // 5. TIMING & OUTPUTS
+ if (FLIPPERAT) t--;
+ else t++; 
+ t=t&0x1FFFF;
+ 
+ if (SKIPPERAT)  {
+  if (lastskp==0) delayskp = t;
+  lastskp = 1;
+ } else {
+  if (lastskp) t=delayskp;
+  lastskp = 0;
+ } 
+ 
+ DACWRITER(pout); // Send the "Talking" audio to speakers
+ CLEAN_ASHWRITER(pout); // Monitor the Vowel Control on Ash
+ YELLOW_BINARY(t) // Buffer position encoded
+
+  // HEARTBEAT
+ REG(I2S_CONF_REG)[0] &= ~(BIT(5)); 
+ REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+ REG(I2S_CONF_REG)[0] |= (BIT(5)); //start rx 
+}
+
+// ==========================================
+// SATURATOR --- from ieat31415's Apple Pi (ported, k.odk: tape_flange in its own buffer)
+// ==========================================
+// BUTTON = next of 8 kinds (blinks 1-8): tube, fuzz, fold, tape, vinyl, mp3, radio, rat
+// FLIP / SKIP = two switches (latched) that change each kind, EARTH = drive
+void IRAM_ATTR saturator() { 
+    
+    // --- MIXING CONSOLE  ---
+    // 128 = 1.0x (Unity) 
+    // 256 = 2.0x (Boost)
+    // 64  = 0.5x (Cut)
+    const int16_t gain_compensation[8] = { 
+        96,  // 1. Tube  
+        72,  // 2. Fuzz  
+        64,  // 3. Fold  
+        256, // 4. Tape  
+        320, // 5. Vinyl 
+        200, // 6. MP3   
+        384, // 7. Radio 
+        72   // 8. RAT  
+    };
+
+    // --- STATE ---
+    static int dist_mode = 0;   
+    static bool last_frozen = false; 
+    static int blink_queue = 0;
+    static int blink_timer = 0;
+    static int blink_state = 0;
+    
+    static int32_t dc_slow = 0; 
+    static bool servo_ready = false;
+
+    static int32_t dist_lpf = 0; 
+    static uint32_t t = 0; 
+    static int hp_mem = 0;
+    static int lp_mem = 0;
+    
+    // TAPE STATE 
+    //static int16_t tape_flange[256]; //replaced below by putting this buffer in a specified memory ppol
+    static int16_t tape_flange[256];                 // (k.odk: its own buffer here)
+    static uint8_t tape_f_ptr = 0;
+
+    // RADIO STATE
+    static int32_t svf_low = 0;
+    static int32_t svf_band = 0;
+
+    // RAT STATE
+    static int32_t rat_slew = 0;
+    static int32_t rat_tone = 0;
+
+    // Earth Auto-Calibration States
+    static int cal_min = 255;
+    static int cal_max = 0;
+
+    // Stompbox State
+    static int flip_latched = 0; 
+    static int skip_latched = 0;
+    static bool flip_was_high = false;
+    static bool skip_was_high = false;
+
+    // INPUTS
+    int audio_in = ADCREADER; 
+    t++; 
+
+    // --- EARTH AUTO-CALIBRATION ---
+    int earth_raw = EARTHREAD; 
+    
+    if (earth_raw < cal_min) cal_min = earth_raw;
+    if (earth_raw > cal_max) cal_max = earth_raw;
+    
+    int spread = cal_max - cal_min;
+    int cv = earth_raw;
+    
+    if (spread > 10) {
+        cv = ((earth_raw - cal_min) * 255) / spread;
+    }
+
+    // DC SERVO
+    if (!servo_ready || dc_slow == 0) {
+        dc_slow = audio_in << 12;
+        servo_ready = true;
+    } else {
+        dc_slow += (audio_in << 12) - dc_slow >> 10;
+    }
+    int32_t signal = audio_in - (dc_slow >> 12);
+
+    // MODE SELECTOR 
+    if (audio_frozen_state != last_frozen) {
+        last_frozen = audio_frozen_state;
+        
+        dist_mode++;
+        if (dist_mode > 7) dist_mode = 0;
+        
+        blink_queue = dist_mode + 1;
+        blink_timer = 0; blink_state = 0;
+    }
+
+    // STOMPBOX LOGIC
+    bool flip_is_high = FLIPPERAT;
+    if (flip_is_high && !flip_was_high) flip_latched = !flip_latched;
+    flip_was_high = flip_is_high;
+
+    bool skip_is_high = SKIPPERAT;
+    if (skip_is_high && !skip_was_high) skip_latched = !skip_latched;
+    skip_was_high = skip_is_high;
+
+    // WAKE UP BLOCK
+    static bool was_in_menu = false;
+    if (preset_mode) {
+        was_in_menu = true;
+    } else if (was_in_menu) {
+        was_in_menu = false;
+        last_frozen = audio_frozen_state;
+        flip_was_high = FLIPPERAT;
+        skip_was_high = SKIPPERAT;
+        cal_min = 255;
+        cal_max = 0;
+    }
+
+    int32_t out = 0;
+    bool flip_active = flip_latched; 
+    bool skip_active = skip_latched; 
+
+    switch (dist_mode) {
+        
+        // MODE 0: TUBE
+        case 0: {
+            int64_t gain = 256 + (cv * 150); 
+            int64_t driven = (signal * gain) >> 8;
+            int64_t limit = 1950; 
+            int64_t abs_d = (driven > 0) ? driven : -driven;
+            int64_t stage1 = (driven * limit) / (limit + abs_d);
+
+            if (flip_active) {
+                int64_t turbo = stage1 * 3; 
+                if (turbo > 2000) turbo = 2000;
+                if (turbo < -2000) turbo = -2000;
+                out = (int32_t)turbo;
+            } else {
+                out = (int32_t)stage1;
+            }
+            if (skip_active) { lp_mem += (out - lp_mem) >> 2; out = lp_mem; }
+            break;
+        }
+
+        // MODE 1: FUZZ
+        case 1: {
+            if (skip_active) { lp_mem += (signal - lp_mem) >> 3; signal = signal + lp_mem; }
+            int bias = (cv - 128) * 32; 
+            int fuzz_sig = (signal * 32) + bias; 
+            int limit = 2048; 
+            if (fuzz_sig > limit) fuzz_sig = limit;
+            if (fuzz_sig < -limit) fuzz_sig = -limit;
+            
+            if (flip_active) { 
+                if (fuzz_sig < 0) fuzz_sig = -fuzz_sig; 
+                fuzz_sig -= 1024;  
+                fuzz_sig = (fuzz_sig * 3) >> 1;   
+            }
+            out = fuzz_sig;
+            break;
+        }
+
+        // MODE 2: FOLD
+        case 2: {
+            int drive = 256 + (cv * 64);
+            int folded = (signal * drive) >> 8;
+            int threshold = 2000; 
+            for (int i=0; i<2; i++) {
+                if (folded > threshold) folded = threshold - (folded - threshold); 
+                if (folded < -threshold) folded = -threshold - (folded + threshold);
+            }
+            if (flip_active) folded = folded ^ ((cv << 4) & 0xFFF); 
+            if (skip_active) { 
+                if (folded > 500) folded = 1000; 
+                else if (folded < -500) folded = -1000; 
+                else folded = 0; 
+            }
+            out = folded;
+            break;
+        }
+
+        // MODE 3: TAPE 
+        case 3: {
+            signal = signal << 1; 
+            int drive = 300 + cv;
+            int tape_sig = (signal * drive) >> 8;
+            
+            if (tape_sig > 1500) tape_sig = 1500 + ((tape_sig - 1500) >> 2);
+            if (tape_sig < -1500) tape_sig = -1500 + ((tape_sig + 1500) >> 2);
+            
+            if (skip_active) {
+                int lfo = (t >> 10) & 0xFF; 
+                if ((t >> 18) & 1) lfo = 255 - lfo; 
+                int drop_gain = 256 - (lfo >> 1); 
+                tape_sig = (tape_sig * drop_gain) >> 8; 
+            }
+            if (flip_active) { 
+                tape_flange[tape_f_ptr] = (int16_t)tape_sig;
+                tape_f_ptr++; 
+                int lfo = (t >> 9) & 0xFF;
+                if ((t >> 17) & 1) lfo = 255 - lfo;
+                uint8_t read_ptr = tape_f_ptr - (lfo >> 1); 
+                int delayed = tape_flange[read_ptr];
+                tape_sig = (tape_sig + delayed) >> 1; 
+            }
+            dist_lpf += (tape_sig - dist_lpf) >> 2;
+            out = dist_lpf;
+            break;
+        }
+
+        // MODE 4: VINYL
+        case 4: {
+            int vinyl_sig = signal;
+            int threshold = 4095 - (cv >> 2); 
+            if (skip_active) threshold -= 500; 
+            
+            int crackle_vol = 32; 
+            if ((rand() & 4095) > threshold) { 
+                int raw_crackle = (rand() & 1024) - 512;
+                vinyl_sig += (raw_crackle * crackle_vol) >> 7; 
+            }
+
+            if (flip_active) { 
+                hp_mem += (vinyl_sig - hp_mem) >> 2; 
+                int32_t hp_sig = vinyl_sig - hp_mem;
+                lp_mem += (hp_sig - lp_mem) >> 1; 
+                vinyl_sig = lp_mem;
+                
+                vinyl_sig = (vinyl_sig * 3) >> 1; 
+                if (vinyl_sig > 1500) vinyl_sig = 1500 + ((vinyl_sig - 1500) >> 3);
+                if (vinyl_sig < -1500) vinyl_sig = -1500 - ((vinyl_sig + 1500) >> 3);
+                
+                vinyl_sig *= 4; 
+            } else {
+                hp_mem += (vinyl_sig - hp_mem) >> 4; vinyl_sig = vinyl_sig - hp_mem;
+                lp_mem += (vinyl_sig - lp_mem) >> 2; vinyl_sig = lp_mem;
+            }
+
+            out = vinyl_sig * 2; 
+            break;
+        }
+
+        // MODE 5: MP3
+        case 5: {
+            static int hold_sample = 0;
+            static int timer = 0;
+            static int packet_loss_timer = 0;
+            static int16_t micro_buffer[3]; 
+            static uint8_t micro_ptr = 0;
+
+            int rate = 1 + (cv >> 5); 
+            
+            if (skip_active) {
+                if (packet_loss_timer > 0) {
+                    packet_loss_timer--;
+                    micro_ptr = (micro_ptr + 1) % 3; 
+                    out = micro_buffer[micro_ptr] >> 1; 
+                    break; 
+                } else if ((rand() & 255) < 3) { 
+                    packet_loss_timer = 100 + (rand() & 2000); 
+                }
+            }
+
+            timer++;
+            if (timer >= rate) {
+                hold_sample = signal;
+                if (flip_active) hold_sample = (hold_sample / 64) * 64; 
+                micro_buffer[micro_ptr] = hold_sample; 
+                micro_ptr = (micro_ptr + 1) % 3;
+                timer = 0;
+            }
+            out = hold_sample * 2; 
+            break;
+        }
+
+        // MODE 6: RADIO
+        case 6: {
+            int32_t noisy_input = signal;
+
+            if (flip_active) {
+                noisy_input *= 16; 
+                if (noisy_input > 3000) noisy_input = 3000;
+                if (noisy_input < -3000) noisy_input = -3000;
+                if (noisy_input > -800 && noisy_input < 800) noisy_input = 0; 
+                noisy_input = noisy_input >> 2;
+            }
+
+            int tuning = 150 + (cv * 4); 
+            int damp = 40; 
+            
+            svf_low  += (tuning * svf_band) >> 12;
+            int32_t svf_high = noisy_input - svf_low - ((damp * svf_band) >> 8);
+            svf_band += (tuning * svf_high) >> 12;
+
+            int32_t radio_out = svf_band * 2; 
+
+            if (skip_active) {
+                if ((rand() & 255) > 230) {
+                    radio_out += ((rand() & 4095) - 2048) >> 2; 
+                }
+            }
+
+            out = radio_out;
+            break;
+        }
+
+        // MODE 7: RAT
+        case 7: {
+            int32_t gain = 20 + (cv >> 4); 
+            int32_t target = signal * gain;
+
+            int32_t max_slew = 2000; 
+            int32_t delta = target - rat_slew;
+            if (delta > max_slew) delta = max_slew;
+            if (delta < -max_slew) delta = -max_slew;
+            
+            int32_t op_amp_out = rat_slew + delta;
+            rat_slew = op_amp_out; 
+
+            int32_t threshold = flip_active ? 6000 : 2048;
+            
+            if (op_amp_out > threshold) op_amp_out = threshold;
+            if (op_amp_out < -threshold) op_amp_out = -threshold;
+
+            if (skip_active) {
+                rat_tone += (op_amp_out - rat_tone) >> 3; 
+                op_amp_out = rat_tone;
+            }
+
+            // Removed the `out = out * 2` blowout logic here!
+            out = op_amp_out;
+            break;
+        }
+    }
+
+    // MIXING STAGE
+    int32_t compensated = (out * gain_compensation[dist_mode]) >> 7;
+
+    // OUTPUT CLIPPING
+    int32_t wet_out_dac = compensated + 2048;
+    if (wet_out_dac > 4095) wet_out_dac = 4095;
+    if (wet_out_dac < 0) wet_out_dac = 0;
+
+    // LAMP
+    bool lamp_busy = false;
+    if (blink_queue > 0) {
+        lamp_busy = true;
+        blink_timer++;
+        if (blink_state == 0) { 
+             if (blink_timer > 3000) { blink_state = 1; blink_timer = 0; LAMP_ON; } 
+             else { LAMP_OFF; }
+        } else { 
+             if (blink_timer > 3000) { blink_state = 0; blink_timer = 0; LAMP_OFF; blink_queue--; } 
+             else { LAMP_ON; }
+        }
+    }
+    
+    if (!lamp_busy) {
+        if (flip_latched) {
+            LAMP_ON;
+        } else if (abs(out) > 500) {
+            LAMP_ON;
+        } else {
+            LAMP_OFF;
+        }
+    }
+
+    DACWRITER(wet_out_dac);   
+    CLEANER_ASHWRITER(wet_out_dac); 
+    YELLOW_AUDIO(wet_out_dac); 
+    
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5)); 
+    REG(I2S_INT_CLR_REG)[0]=0xFFFFFFFF;
+    REG(I2S_CONF_REG)[0] |= (BIT(5)); 
+}
 

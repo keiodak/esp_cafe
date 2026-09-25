@@ -84,13 +84,25 @@ struct XYPad: View {
                 // ポジションインジケーター: 影を一切かけない、クッキリした点。
                 // 端の値(0/1)でも縁ギリギリまで行かないよう、内側マージン分を縮めて配置する。
                 if showsPointer {
-                    Circle()
+                    // HUD pointer: faint tracking lines across the pad, an orange square with a black ring
+                    let px = pointerInset + CGFloat(x) * (geo.size.width - pointerInset * 2)
+                    let py = pointerInset + CGFloat(1.0 - y) * (geo.size.height - pointerInset * 2)
+                    Path { p in
+                        p.move(to: CGPoint(x: px, y: 0)); p.addLine(to: CGPoint(x: px, y: geo.size.height))
+                        p.move(to: CGPoint(x: 0, y: py)); p.addLine(to: CGPoint(x: geo.size.width, y: py))
+                    }
+                    .stroke(PastelTheme.hudOrange.opacity(isTouching ? 0.55 : 0.28), lineWidth: 0.7)
+                    .allowsHitTesting(false)
+                    Rectangle()
                         .fill(PastelTheme.padPointer)
-                        .frame(width: 9, height: 9)
-                        .position(
-                            x: pointerInset + CGFloat(x) * (geo.size.width - pointerInset * 2),
-                            y: pointerInset + CGFloat(1.0 - y) * (geo.size.height - pointerInset * 2)
-                        )
+                        .frame(width: 8, height: 8)
+                        .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1).padding(-3))
+                        .position(x: px, y: py)
+                    Text(String(format: "%03ld·%03ld", Int(x * 999), Int(y * 999)))
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundStyle(PastelTheme.hudBlack.opacity(0.6))
+                        .position(x: min(max(px + 26, 26), geo.size.width - 26), y: max(py - 11, 8))
+                        .allowsHitTesting(false)
                 }
             }
             .contentShape(Rectangle())
@@ -142,30 +154,22 @@ private struct PadSurface: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // 紙に墨の二重罫。カメラのときは紙の代わりに 4 マスのモザイクが面になり、
-                // 内側の罫が映像の動きに合わせて息をする（動くほど内へ寄る）
-                let breathe = cameraMode ? CGFloat(edgeGlow) * 5 : 0
+                // HUD: pale face, dot grid, one grey rule, black corner marks, ticks and a small centre cross
                 padShape
                     .fill(PastelTheme.padScreen)
                     .overlay {
                         if cameraMode, let mosaic {
                             MosaicGridView(brightness: mosaic)
                                 .clipShape(padShape)
+                        } else {
+                            HudDots(step: 12)
                         }
                     }
-                    .overlay(padShape.strokeBorder(PastelTheme.textPrimary, lineWidth: 1.4))
-                    .overlay(
-                        UnevenRoundedRectangle(cornerRadii: .init(
-                            topLeading: max(1, cornerRadii.topLeading - 3 - breathe),
-                            bottomLeading: max(1, cornerRadii.bottomLeading - 3 - breathe),
-                            bottomTrailing: max(1, cornerRadii.bottomTrailing - 3 - breathe),
-                            topTrailing: max(1, cornerRadii.topTrailing - 3 - breathe)), style: .continuous)
-                            .strokeBorder(cameraMode ? PastelTheme.paperTone : PastelTheme.textPrimary.opacity(0.7),
-                                          lineWidth: cameraMode ? 1.0 : 0.6)
-                            .padding(3.5 + breathe)
-                    )
+                    .overlay(padShape.strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+                HudCorners(arm: 8)
+                    .stroke(PastelTheme.hudBlack, lineWidth: cameraMode ? 1.2 + CGFloat(edgeGlow) * 1.5 : 1.2)
+                    .padding(3)
 
-                // 4象限の薄い塗り(左上/右上/左下/右下)
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         Rectangle().fill(quadrantTopLeft)
@@ -178,14 +182,18 @@ private struct PadSurface: View {
                 }
                 .clipShape(padShape)
 
-                // グリッド線
                 Path { path in
-                    path.move(to: CGPoint(x: geo.size.width / 2, y: 0))
-                    path.addLine(to: CGPoint(x: geo.size.width / 2, y: geo.size.height))
-                    path.move(to: CGPoint(x: 0, y: geo.size.height / 2))
-                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height / 2))
+                    let w = geo.size.width, h = geo.size.height
+                    let cx = w / 2, cy = h / 2
+                    path.move(to: CGPoint(x: cx - 5, y: cy)); path.addLine(to: CGPoint(x: cx + 5, y: cy))
+                    path.move(to: CGPoint(x: cx, y: cy - 5)); path.addLine(to: CGPoint(x: cx, y: cy + 5))
+                    for k in 1...3 {                              // ruler ticks along the bottom and the left edge
+                        let fx = w * CGFloat(k) / 4, fy = h * CGFloat(k) / 4
+                        path.move(to: CGPoint(x: fx, y: h)); path.addLine(to: CGPoint(x: fx, y: h - (k == 2 ? 6 : 3)))
+                        path.move(to: CGPoint(x: 0, y: fy)); path.addLine(to: CGPoint(x: k == 2 ? 6 : 3, y: fy))
+                    }
                 }
-                .stroke(cameraMode ? PastelTheme.paperTone.opacity(0.6) : PastelTheme.gridLine, lineWidth: 1)
+                .stroke(cameraMode ? PastelTheme.paperTone.opacity(0.8) : PastelTheme.hudBlack.opacity(0.55), lineWidth: 0.8)
             }
         }
     }
