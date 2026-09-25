@@ -1150,6 +1150,8 @@ static inline void IRAM_ATTR earth_ac() {
   // only a constant level (e.g. an empty jack) is taken away
   static int32_t eavg = 0; static bool first = true;
   int32_t ev = (int32_t)(EARTHREAD);
+  pc_earth = (uint8_t)ev;                          // what the phone shows (EARTH is read ONCE per sample:
+                                                   //  a second read of the I2S FIFO gets another entry)
   if (first) { first = false; eavg = ev << 16; }
   eavg += ((ev << 16) - eavg) >> 16;
   int32_t em = ev - (eavg >> 16);
@@ -1564,7 +1566,6 @@ void IRAM_ATTR coco_pc() {
   if (dmode) { pc_wpos = dl_wpos; pc_ppos = dl_rpos; }
   else { t = wpos; pc_wpos = wpos; pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : co_ppos; }
   if (bmode) { pc_ls = (co_ls + co_loff) & 0x1FFFF; pc_le = pc_ls + co_len; }
-  pc_earth = EARTHREAD;
   pc_flip = FLIPPERAT ? 1 : 0;
   pc_skip = SKIPPERAT ? 1 : 0;
 
@@ -1676,7 +1677,7 @@ void IRAM_ATTR harmony() {
   if (hold || hd_click > 150) { LAMP_ON; } else { LAMP_OFF; }
 
   pc_wpos = w; pc_ppos = ((int32_t)w - (T >> 8)) & 0x1FFFF;
-  pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
+  pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
 
   REG(I2S_CONF_REG)[0] &= ~(BIT(5));
   REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
@@ -2589,7 +2590,7 @@ void IRAM_ATTR multi() {
 
   t = fx_hw & H_MASK;
   pc_wpos = fx_hw & H_MASK; pc_ppos = fx_hw & H_MASK;
-  pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
+  pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
 
   REG(I2S_CONF_REG)[0] &= ~(BIT(5));
   REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
@@ -2632,7 +2633,7 @@ void IRAM_ATTR arpdelay() {
   if (click > 0) { click--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
   if (hold || click > 200) { LAMP_ON; } else { LAMP_OFF; }
   pc_wpos = 0; pc_ppos = 0;
-  pc_earth = EARTHREAD; pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
+  pc_flip = FLIPPERAT ? 1 : 0; pc_skip = SKIPPERAT ? 1 : 0;
   REG(I2S_CONF_REG)[0] &= ~(BIT(5));
   REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
   REG(I2S_CONF_REG)[0] |= (BIT(5));
