@@ -51,6 +51,9 @@ final class CafeUnit: ObservableObject {
     @Published var bpm: Double = 0
     /// the Cafe's tempo changed by itself (SKIP was tapped): new BPM
     var onBpm: ((Double) -> Void)?
+    /// MULTI: the effect the Cafe is on (it can change it itself: FLIP / SKIP)
+    @Published var fx = -1
+    var onFx: ((Int) -> Void)?
     /// firmware update: 0…1 while it goes, nil otherwise; and what happened
     @Published var ota: Double? = nil
     @Published var otaNote = ""
@@ -100,12 +103,17 @@ final class CafeUnit: ObservableObject {
         guard rx != nil, let k = s.first else { return }
         if k == "Q" && !out.isEmpty { waitingQ = false; return }
         let key = Self.key(s)
-        if "SLJKXMBYNVC".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
+        if "SLJKXMBYNVCF".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
         out.append(s)
         pump()
     }
 
     private static func key(_ s: String) -> Substring {
+        if s.first == "F" {                                // "F <effect> <id> <v>": effect and id are the key
+            let parts = s.split(separator: " ", maxSplits: 3)
+            if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
+            return Substring(s)
+        }
         if let f = s.first, "XMBYNVC".contains(f) {     // "M 12", "Y 3", …: the id is part of the key
             let parts = s.split(separator: " ", maxSplits: 2)
             if parts.count >= 2 { return s.prefix(parts[0].count + 1 + parts[1].count) }
@@ -187,6 +195,7 @@ final class CafeUnit: ObservableObject {
                 let m = Int(a[13]) ?? 0
                 if mode != m { mode = m }
                 let b = (Double(a[14]) ?? 0) / 10
+                if a.count >= 16, let e = Int(a[15]), e != fx { fx = e; onFx?(e) }
                 if abs(b - bpm) > 0.05 {
                     let first = bpm == 0
                     bpm = b
@@ -368,7 +377,7 @@ final class CafeUnit: ObservableObject {
         rx = nil; peri = nil; name = nil
         out.removeAll(); inbuf.removeAll()
         waitingQ = false; lastSmp = nil; polls = 0
-        hz = 0; preset = -1; bpm = 0
+        hz = 0; preset = -1; bpm = 0; fx = -1
         state = why
     }
 }

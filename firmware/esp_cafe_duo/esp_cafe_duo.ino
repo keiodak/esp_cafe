@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.3"
+#define FW_VERSION "3.4"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -158,7 +158,7 @@ void ble_begin() {
   ble_ok = adv->start();
 }
 void ble_line(const char *s) {                     // one text line -> notifications of (MTU-3) bytes
-  static char tmp[320];                            // (the longest reply is ~130 characters)
+  RTC_DATA_ATTR static char tmp[320];                            // (the longest reply is ~130 characters)
   if (!ble_conn || !ble_tx) return;
   size_t len = strlen(s);
   if (len > sizeof(tmp) - 2) len = sizeof(tmp) - 2;
@@ -194,14 +194,15 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 //   K <bpm x10>  the shared tempo (DELAY, HARMONY)
 //   Z            sync: grain score / coco loop start / the click (send to both Cafes at once = in step)
 //   U ...        firmware update (see ota_cmd)
-// T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10
+// T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10 multi_effect
+//   F …          MULTI (see the top of multi() in synths.h)
 void pc_status() {
   char tb[128];
-  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d",
+  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
     (int)pc_earth, (int)pc_flip, (int)pc_skip, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset,
-    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f));
+    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now);
   pc_out(tb);
 }
 void pc_overview() {
@@ -441,7 +442,100 @@ void co_update() {
   co_loff = (int32_t)(p[15] * co_len);
 }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); hd_update(); }
+// ---- MULTI parameters (k.odk). "F <effect> <id 0..7> <0..1000>" ----
+//  0 CLEAN      0 level
+//  1 TAP DELAY  0 time (grid: 1/16 .. 1/1)  1 feedback  2 pattern (6)  3 width  4 tone  5 EARTH wow  6 wet  7 dry
+//  2 SAMPLER    0 pitch (-12 .. +24 semitones)  1 length  2 start  3 decay  4 auto (0 = off, grid)  5 tone  6 wet  7 dry
+//  3 REVERSE    0 length  1 speed (0.5 .. 2x)  2 tone  6 wet  7 dry
+//  4 GLITCH     0 grid  1 chance  2 slice  3 repeats  4 pitch jumps  5 backwards  6 crush  7 wet
+//  5 FOLD+OCT   0 drive  1 bias  2 octave down  3 octave up  4 tone  6 wet  7 dry
+//  6 REVERB     0 size  1 damping  2 width  3 diffusion  6 wet  7 dry
+static const int16_t fx_default[FX_N][8] = {
+  {500, 0, 0, 0, 0, 0, 0, 0},
+  {625, 400, 0, 800, 700, 0, 600, 1000},
+  {333, 400, 0, 300, 0, 1000, 700, 700},
+  {400, 500, 1000, 0, 0, 0, 700, 500},
+  {300, 500, 400, 300, 200, 200, 0, 1000},
+  {300, 500, 600, 200, 800, 0, 1000, 0},
+  {600, 400, 800, 500, 0, 0, 500, 1000},
+};
+static int32_t fx_lpk(float v) { return v >= 0.98f ? 4096 : (int32_t)(300.0f + v * v * 3796.0f); }
+void fx_update(int e) {
+  float hz = clock_hz(), p[8];
+  for (int i = 0; i < 8; i++) p[i] = fx_p[e][i] / 1000.0f;
+  float beat = hz * 60.0f / cafe_bpm;
+  fx_beat = (int32_t)(beat > 64 ? beat : 64);
+  switch (e) {
+    case 0: cl_g = (int32_t)(p[0] * 512.0f); break;
+    case 1: {
+      float tt = beat * beat_div[div_index(fx_p[1][0])];
+      while (tt > 32000.0f) tt *= 0.5f;
+      td_T = (int32_t)(tt * 256.0f);
+      td_fb = (int32_t)(p[1] * 240.0f);
+      td_pat = (int32_t)(p[2] * 5.0f + 0.5f);
+      td_width = (int32_t)(p[3] * 256.0f);
+      td_tone = fx_lpk(p[4]);
+      td_wow = (int32_t)(p[5] * 600.0f);
+      td_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      td_dry = (int32_t)(p[7] * 256.0f);
+    } break;
+    case 2: {
+      int semis = (int)(p[0] * 36.0f + 0.5f) - 12;
+      sm_rate = (int32_t)(4096.0f * powf(2.0f, semis / 12.0f));
+      float len = hz * (0.05f + p[1] * 0.55f); if (len > SM_LEN - 64) len = SM_LEN - 64;
+      sm_len = (int32_t)len;
+      sm_start = (int32_t)(p[2] * (SM_LEN - 1 - len));
+      float hl = hz * (0.01f + (1.0f - p[3]) * (1.0f - p[3]) * 3.0f);
+      sm_dec = (uint32_t)(65536.0f * powf(2.0f, -1.0f / hl)); if (sm_dec > 65535) sm_dec = 65535;
+      sm_auto = fx_p[2][4] > 0 ? (int32_t)(beat * beat_div[div_index(fx_p[2][4])]) : 0;
+      sm_tone = fx_lpk(p[5]);
+      sm_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      sm_dry = (int32_t)(p[7] * 256.0f);
+    } break;
+    case 3: {
+      float w = hz * (0.05f + p[0] * 0.7f); if (w > 30000) w = 30000;
+      rv_W = (int32_t)w;
+      rv_speed = (int32_t)(4096.0f * powf(2.0f, (p[1] - 0.5f) * 2.0f));
+      rv_tone = fx_lpk(p[2]);
+      rv_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      rv_dry = (int32_t)(p[7] * 256.0f);
+    } break;
+    case 4: {
+      int di = (int)(p[0] * 6.0f + 0.5f);                          // 1/16 .. 1/4.
+      float ev = beat * beat_div[di]; if (ev < 256) ev = 256;
+      gl_ev = (int32_t)ev;
+      gl_chance = (int32_t)(p[1] * 65535.0f);
+      float sl = ev * (0.125f + p[2] * 0.875f); if (sl > 30000) sl = 30000;
+      gl_slice = (int32_t)sl;
+      gl_reps = 1 + (int32_t)(p[3] * 15.0f);
+      gl_pitch = (int32_t)(p[4] * 255.0f);
+      gl_rev = (int32_t)(p[5] * 255.0f);
+      gl_crush = (int32_t)(p[6] * 32.0f);
+      gl_wet = (int32_t)(p[7] * 256.0f);
+    } break;
+    case 5: {
+      fo_drive = 256 + (int32_t)(p[0] * 7.0f * 256.0f);
+      fo_bias = (int32_t)((p[1] - 0.5f) * 2048.0f);
+      fo_down = (int32_t)(p[2] * 256.0f);
+      fo_up = (int32_t)(p[3] * 256.0f);
+      fo_tone = fx_lpk(p[4]);
+      fo_wet = (int32_t)(p[6] * 256.0f);
+      fo_dry = (int32_t)(p[7] * 256.0f);
+    } break;
+    default: {
+      rb_fb = (int32_t)(4096.0f * (0.70f + p[0] * 0.28f));
+      rb_damp = (int32_t)(p[1] * 0.7f * 4096.0f);
+      rb_width = (int32_t)(p[2] * 256.0f);
+      rb_ap = (int32_t)(4096.0f * (0.3f + p[3] * 0.4f));
+      rb_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      rb_dry = (int32_t)(p[7] * 256.0f);
+      for (int k = 0; k < 8; k++) { int32_t L = (int32_t)(rb_max[k] * hz / 44100.0f); rb_len[k] = L > rb_max[k] ? rb_max[k] : L; }
+    } break;
+  }
+}
+void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
+
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); hd_update(); fx_update_all(); }
 
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
@@ -470,7 +564,19 @@ void pc_line(char *s) {
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
               } break;
-    case 'Z': mo_sync = true; co_restart = true; dl_align = true; hd_align = true; break;
+    case 'Z': mo_sync = true; co_restart = true; dl_align = true; hd_align = true; fx_sync = true; break;
+    case 'F': { long e = -1, id = -1, val = 0; int k = sscanf(s + 1, "%ld %ld %ld", &e, &id, &val);   // MULTI
+                if (k >= 3 && e >= 0 && e < FX_N && id >= 0 && id < 8) {
+                  if (val < 0) val = 0; if (val > 1000) val = 1000;
+                  fx_p[e][id] = (int16_t)val; fx_update((int)e);
+                } else if (e == 90 && k >= 2) { if (id >= 0 && id < FX_N) fx_want = (int)id; }
+                else if (e == 91 && k >= 2) { float hz = clock_hz(); fx_xf_len = (int32_t)(hz * (0.02f + (id / 1000.0f) * (id / 1000.0f) * 2.0f)); }
+                else if (e == 92) fx_capture = true;
+                else if (e == 93) fx_trig = true;
+                else if (e == 94 && k >= 2) fx_hold_app = id != 0;
+                else if (e == 95 && k >= 2) fx_edepth = (int32_t)((id < 0 ? 0 : (id > 1000 ? 1000 : id)) * 256 / 1000);
+                else if (e == 96 && k >= 2) { float hz = clock_hz(); float q = (id < 0 ? 0 : (id > 1000 ? 1000 : id)) / 1000.0f; fx_gap = (int32_t)(hz * (0.05f + q * q * 4.95f)); }
+              } break;
     case 'C': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // coco parameter
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
                 if (id >= 0 && id < 16) { co_p[id] = (int16_t)val; co_update(); }
@@ -485,7 +591,7 @@ void pc_line(char *s) {
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
-                cafe_bpm = b / 10.0f; dl_update(); hd_update(); } break;
+                cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;
     case 'B': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // benjolin parameter
                 if (id >= 0 && id < 16) { if (val < 0) val = 0; if (val > 1000) val = 1000; bj_p[id] = (int16_t)val; bj_update(); }
                 else if (id == 16) bj_kick = true;                            // a new pattern (same as SKIP)
@@ -505,7 +611,7 @@ void pc_line(char *s) {
   }
 }
 void pc_service() {                       // called from loop(): lines that arrived over BLE
-  static char bl[300]; static int bn = 0;            // long enough for a W line (128 samples)
+  RTC_DATA_ATTR static char bl[300]; static int bn = 0;            // long enough for a W line (128 samples)
   while (ble_rh != ble_wh) {
     char c = ble_rb[ble_rh]; ble_rh = (ble_rh + 1) & 1023;
     if (c == '\n' || c == '\r') { if (bn) { bl[bn] = 0; pc_line(bl); bn = 0; } }
@@ -585,8 +691,8 @@ void ota_service() {                      // loop() while updating: ring -> flas
 // ------------------------------------------
 // PRESET PLAYLIST
 // ------------------------------------------
-// Nine presets. Long-press the button, tap N times (count from 0), long-press again.
-// The lamp blinks the number (1-9) in the menu and right after a preset is loaded. The phone switches with "G <n>".
+// Ten presets. Long-press the button, tap N times (count from 0), long-press again.
+// The lamp blinks the number (1-10) in the menu and right after a preset is loaded. The phone switches with "G <n>".
 //   1 = coco_mod  (startup preset)
 //   2 = echo_og   (4-tap echo, organ on YELLOW with EARTH FM, FLIP deeper, SKIP wobble)
 //   3 = BLE       (coco_pc: played from the phone. Modes: GRAIN / COCO / DELAY / NOISE)
@@ -596,8 +702,9 @@ void ota_service() {                      // loop() while updating: ring -> flas
 //   7 = harmony   (three-layer harmonic delay: unison, fifth down, fifth up)
 //   8 = rungler   (coco chopped by an 8-bit shift register: FLIP = clock, SKIP = data)
 //   9 = selfread  (the sound on the tape steers the play head: loaded files make their own paths)
+//  10 = multi     (seven effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
 void (*playlist_main[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi
 };
 
 // ------------------------------------------
@@ -692,6 +799,7 @@ void setup() {
      for (int i = 0; i < 13; i++) nz_p[i] = nz_default[i];
      for (int i = 0; i < 14; i++) hd_p[i] = hd_default[i];
      for (int i = 0; i < 16; i++) co_p[i] = co_default[i];
+     for (int e = 0; e < FX_N; e++) for (int i = 0; i < 8; i++) fx_p[e][i] = fx_default[e][i];
      all_update();
      PRESETTER(presets[0])
   // ------------------------------------------

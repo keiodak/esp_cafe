@@ -5,7 +5,7 @@
 // Firmware esp_cafe_duo v3 playlist ("G <n>", 0-based):
 //   0 COCO_MOD · 1 ECHO · 2 BLE (modes GRAIN / COCO / DELAY / NOISE, "M 25 <m>") · 3 RESONATOR · 4 FORMANT
 //   5 SATURATOR · 6 HARMONY (three-layer harmonic delay) · 7 RUNGLER (coco + shift register) · 8 SELF_READ
-//   slot 10: empty for now
+//   9 MULTI (seven effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
 //
 // COCO (C ids) — the 8 pads go to both (L · R = only B moves):
 //   SPEED (speed · overdub) LOOP (start · length) EARTH_FM (depth · slew) WOBBLE (rate · depth)
@@ -27,7 +27,7 @@
 import Foundation
 
 enum Preset {
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "EMPTY"]
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI"]
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
@@ -38,12 +38,13 @@ enum Preset {
         "unison + fifth down + fifth up · repeats climb in fifths",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
-        "—",
+        "7 effects · FLIP = next · SKIP = random · EARTH modulates",
     ]
     /// presets that exist in the firmware
-    static let count = 9
+    static let count = 10
     static let ble = 2
     static let harmony = 6
+    static let multi = 9
     static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
     static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
@@ -51,7 +52,33 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, harmony, knob }
+enum PadSet { case grain, coco, delay, noise, harmony, multi, knob }
+
+/// MULTI's effects (firmware ids "F <effect> <0..7> <v>"; pad k = ids 2k, 2k+1; "—" = not used)
+enum Fx {
+    static let count = 7
+    static let names = ["CLEAN", "TAP DELAY", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB"]
+    static let short = ["CLEAN", "TAPS", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB"]
+    static let titles: [[String]] = [
+        ["LEVEL · —", "—", "—", "—"],
+        ["TIME · FEEDBACK", "PATTERN · WIDTH", "TONE · WOW", "WET · DRY"],
+        ["PITCH · LENGTH", "START · DECAY", "AUTO · TONE", "WET · DRY"],
+        ["LENGTH · SPEED", "TONE · —", "—", "WET · DRY"],
+        ["GRID · CHANCE", "SLICE · REPEATS", "PITCH · REVERSE", "CRUSH · WET"],
+        ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "WET · DRY"],
+        ["SIZE · DAMP", "WIDTH · DIFFUSE", "—", "WET · DRY"],
+    ]
+    /// the firmware's defaults (fx_default)
+    static let defaults: [[Int]] = [
+        [500, 0, 0, 0, 0, 0, 0, 0],
+        [625, 400, 0, 800, 700, 0, 600, 1000],
+        [333, 400, 0, 300, 0, 1000, 700, 700],
+        [400, 500, 1000, 0, 0, 0, 700, 500],
+        [300, 500, 400, 300, 200, 200, 0, 1000],
+        [300, 500, 600, 200, 800, 0, 1000, 0],
+        [600, 400, 800, 500, 0, 0, 500, 1000],
+    ]
+}
 
 enum CoPad: Int, CaseIterable {
     case speed, loop, fm, wobble, filter, crush, stereo, mix
@@ -132,6 +159,17 @@ final class Rig: ObservableObject {
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 
+    // MULTI: pads per Cafe, per effect (4 each); the effect each Cafe is on; switches
+    let fxAxes: [[[PadAxis]]] = (0..<2).map { _ in
+        (0..<Fx.count).map { e in (0..<4).map { k in PadAxis((Double(Fx.defaults[e][2 * k]) / 1000, Double(Fx.defaults[e][2 * k + 1]) / 1000)) } }
+    }
+    @Published var fxLocal = [0, 0]
+    @Published var fxLink = false
+    @Published var fxHold = false
+    @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
+    @Published var fxEarth = 0.62          // F 95: EARTH depth
+    @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
+
     /// the Cafe whose preset the screen shows
     var focus: Int { target == 1 ? 1 : 0 }
     var ctxPreset: Int { preset[focus] }
@@ -140,11 +178,12 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
+        if ctxPreset == Preset.multi { return .multi }
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .coco, .delay, .noise][min(max(ctxMode, 0), 3)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
-    var perRow: Bool { padSet == .delay || padSet == .harmony }
+    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
 
     /// is this Cafe on what the screen shows?
     func inCtx(_ slot: Int) -> Bool {
@@ -215,6 +254,19 @@ final class Rig: ObservableObject {
         return p.ids.map { coLine($0, slot: slot) }
     }
     func coAll(slot: Int) -> [String] { (0...15).map { coLine($0, slot: slot) } + ["C 16 \(coReverse ? 1 : 0)"] }
+
+    // MARK: MULTI
+    func fxCommands(slot: Int, e: Int, k: Int) -> [String] {
+        let a = fxAxes[slot][e][k]
+        return ["F \(e) \(2 * k) \(Int((a.x * 1000).rounded()))", "F \(e) \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
+    }
+    func fxSettings() -> [String] {
+        ["F 91 \(Int(fxXfade * 1000))", "F 95 \(Int(fxEarth * 1000))", "F 96 \(Int(fxLock * 1000))", "F 94 \(fxHold ? 1 : 0)"]
+    }
+    func fxAll(slot: Int) -> [String] {
+        (0..<Fx.count).flatMap { e in (0..<4).flatMap { k in fxCommands(slot: slot, e: e, k: k) } }
+            + fxSettings() + ["F 90 \(fxLocal[slot])"]
+    }
 
     // MARK: NOISE
     func nzValue(_ id: Int, slot: Int) -> Double {

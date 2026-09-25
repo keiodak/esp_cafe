@@ -4,12 +4,13 @@
 //   BLE preset  GRAIN / COCO / NOISE: the 8 pads go to every Cafe on that mode
 //               DELAY: top row = Cafe A's delay, bottom row = Cafe B's (LINK = both rows move together)
 //   HARMONY     like DELAY (top row A, bottom row B)
+//   MULTI       top row = the 4 pads of A's effect, bottom row = B's (LINK = same effect, both rows together)
 //   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR, RUNGLER, SELF_READ): a placard, the Cafe is played with its own controls
 // Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
 //        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
 //   GRAIN   freeze · percussion · MOVE (pitch) · sync          COCO     rec · reverse · to the loop start · sync
 //   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
-//   NOISE   dice · sync
+//   NOISE   dice · sync                                 MULTI    next effect · random effect (per Cafe)
 
 import SwiftUI
 import UIKit
@@ -45,6 +46,10 @@ final class Director: ObservableObject {
                 guard let self, let u else { return }
                 self.tempoFromCafe(b, slot: u.slot)
             }
+            u.onFx = { [weak self, weak u] e in
+                guard let self, let u, e >= 0, e < Fx.count else { return }
+                self.fxFromCafe(e, slot: u.slot)
+            }
         }
         camera.axes = axes()
         camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
@@ -59,6 +64,7 @@ final class Director: ObservableObject {
         case .delay: return rig.dlAxes
         case .noise: return rig.nzAxes
         case .harmony: return rig.hdAxes
+        case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .knob: return []
         }
     }
@@ -83,6 +89,8 @@ final class Director: ObservableObject {
             }
         case Preset.harmony:
             rig.hdAll(slot: s).forEach(u.send)
+        case Preset.multi:
+            rig.fxAll(slot: s).forEach(u.send)
         default:
             break
         }
@@ -144,10 +152,71 @@ final class Director: ObservableObject {
                 let cmds = delay ? rig.dlCommands(pad: r * 4 + k) : rig.hdCommands(pad: r * 4 + k)
                 cmds.forEach(units[r].send)
             }
+        case .multi:
+            let row = i / 4, k = i % 4
+            let e = rig.fxLocal[row]
+            let a = rig.fxAxes[row][e][k]
+            var rows = [row]
+            if rig.fxLink && rig.fxLocal[1 - row] == e {             // LINK: the other Cafe's pad follows
+                let b = rig.fxAxes[1 - row][e][k]
+                b.x = a.x; b.y = a.y
+                rows = [0, 1]
+            }
+            for r in rows where rig.inCtx(r) && units[r].isConnected {
+                rig.fxCommands(slot: r, e: e, k: k).forEach(units[r].send)
+            }
         case .knob:
             break
         }
     }
+
+    // MARK: MULTI
+
+    /// Cafes that are on MULTI right now
+    private func multiUnits() -> [CafeUnit] { units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.multi } }
+
+    /// choose effect e on this Cafe (LINK: on both)
+    func setFx(_ s: Int, _ e: Int) {
+        let targets = rig.fxLink ? [0, 1] : [s]
+        var loc = rig.fxLocal
+        for t in targets {
+            loc[t] = e
+            let u = units[t]
+            if u.isConnected && rig.preset[t] == Preset.multi { u.send("F 90 \(e)") }
+        }
+        rig.fxLocal = loc
+        refresh()
+    }
+    func fxNext(_ s: Int) { setFx(s, (rig.fxLocal[s] + 1) % Fx.count) }
+    func fxRandom(_ s: Int) { setFx(s, (rig.fxLocal[s] + 1 + Int.random(in: 0..<(Fx.count - 1))) % Fx.count) }
+
+    /// a Cafe changed its effect itself (FLIP / SKIP): show it, and with LINK take the other Cafe along
+    func fxFromCafe(_ e: Int, slot: Int) {
+        var loc = rig.fxLocal
+        loc[slot] = e
+        if rig.fxLink {
+            let o = 1 - slot
+            loc[o] = e
+            let u = units[o]
+            if u.isConnected && u.preset == Preset.multi && u.fx != e { u.send("F 90 \(e)") }
+        }
+        if loc != rig.fxLocal { rig.fxLocal = loc; refresh() }
+    }
+
+    func setFxLink(_ on: Bool) {
+        rig.fxLink = on
+        guard on else { return }
+        // B takes A's effect and all of A's pads
+        for e in 0..<Fx.count { for k in 0..<4 { let a = rig.fxAxes[0][e][k], b = rig.fxAxes[1][e][k]; b.x = a.x; b.y = a.y } }
+        var loc = rig.fxLocal; loc[1] = loc[0]; rig.fxLocal = loc
+        let b = units[1]
+        if b.isConnected && rig.preset[1] == Preset.multi { rig.fxAll(slot: 1).forEach(b.send) }
+        multiUnits().forEach { $0.send("Z") }                         // the same random order from now on
+        refresh()
+    }
+
+    func fxSetting(_ line: String) { multiUnits().forEach { $0.send(line) } }
+    func fxToggleHold() { rig.fxHold.toggle(); fxSetting("F 94 \(rig.fxHold ? 1 : 0)") }
 
     // MARK: keys
 
@@ -318,13 +387,14 @@ private struct MainScreen: View {
         case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
+        case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
         let item = info(i)
-        let live = rig.perRow ? rig.inCtx(i / 4) : true
+        let live = (rig.perRow ? rig.inCtx(i / 4) : true) && item.1 != "—"
         let tag = rig.perRow ? (i < 4 ? "A" : "B") + String(format: ".%02ld", i % 4 + 1) : String(format: "%02ld", i + 1)
         let director = d
         HudPad(axis: item.0, title: item.1, tag: tag,
@@ -333,7 +403,7 @@ private struct MainScreen: View {
             .frame(height: padHeight)
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
-            .id("\(rig.padSet)\(i)")
+            .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
     }
 
     private func readSafeArea() {
@@ -500,6 +570,13 @@ private struct HudBar: View {
                     .tracking(1)
                     .foregroundStyle(PastelTheme.hudOrange)
             }
+            if p == Preset.multi {
+                Text(Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)])
+                    .font(.hud(10, .semibold))
+                    .tracking(1)
+                    .foregroundStyle(PastelTheme.hudOrange)
+                if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
+            }
             if (p == Preset.ble && m == 2) || p == Preset.harmony {
                 Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
                     .font(.hudBig(14))
@@ -552,6 +629,13 @@ private struct HudBar: View {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
             default: blank
+            }
+        case .multi:
+            switch n {
+            case 0: key("forward.end") { d.fxNext(0) }
+            case 1: key("forward.end") { d.fxNext(1) }
+            case 2: key("dice") { d.fxRandom(0) }
+            default: key("dice") { d.fxRandom(1) }
             }
         case .knob:
             blank

@@ -1,7 +1,7 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
 //   TARGET   A / B / A + B — who the presets (and the pads) go to
-//   PRESETS  1–10 (1–9 exist in esp_cafe_duo v3.2, 10 is an empty slot). A / B marks show where each Cafe is.
+//   PRESETS  1–10 (esp_cafe_duo v3.4). A / B marks show where each Cafe is.
 //   BLE MODE GRAIN / COCO / DELAY / NOISE (preset 3)
 //   TEMPO    the shared BPM (DELAY / HARMONY), TAP
 //   UPDATE   write a new firmware over Bluetooth to A / B / both (the .ino.bin from "Export Compiled Binary")
@@ -29,7 +29,7 @@ struct PresetManagerView: View {
                         }
                     }
                 }
-                PanelCard(title: "PRESETS", note: "1–9 · 10 empty", spacing: 3) {
+                PanelCard(title: "PRESETS", note: "1–10", spacing: 3) {
                     ForEach(0..<10, id: \.self) { n in
                         PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
                     }
@@ -49,7 +49,10 @@ struct PresetManagerView: View {
                         GrainOptions(d: d, grain: d.grain)
                     }
                 }
-                PanelCard(title: "TEMPO", note: "delay · harmony · SKIP on a Cafe = tap") {
+                if rig.preset.contains(Preset.multi) {
+                    MultiCard(d: d, rig: rig)
+                }
+                PanelCard(title: "TEMPO", note: "delay · harmony · multi · SKIP on a Cafe = tap") {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(String(format: "%.1f", rig.bpm))
                             .font(.hudBig(30))
@@ -122,6 +125,44 @@ private struct GrainOptions: View {
             .font(.hud(8))
             .foregroundStyle(PastelTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// MULTI: which effect each Cafe is on, LINK, and the switches
+private struct MultiCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        PanelCard(title: "MULTI", note: "FLIP = next · SKIP = random") {
+            ForEach(0..<2, id: \.self) { s in
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    HudTag(text: s == 0 ? "A" : "B", size: 8)
+                    ForEach(0..<Fx.count, id: \.self) { e in
+                        ChipButton(title: Fx.short[e], filled: rig.fxLocal[s] == e) { d.setFx(s, e) }
+                    }
+                }
+                .disabled(rig.preset[s] != Preset.multi)
+                .unlit(rig.preset[s] != Preset.multi)
+            }
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: "LINK A+B", filled: rig.fxLink) { d.setFxLink(!rig.fxLink) }
+                ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+                ChipButton(title: "TAKE SAMPLE", filled: false) { d.fxSetting("F 92") }
+                ChipButton(title: "TRIGGER", filled: false) { d.fxSetting("F 93") }
+                ChipButton(title: "SYNC", filled: false) { d.fxSetting("Z") }
+            }
+            PanelRow(label: "XFADE", value: Binding(get: { rig.fxXfade },
+                                                    set: { rig.fxXfade = $0; d.fxSetting("F 91 \(Int($0 * 1000))") }))
+            PanelRow(label: "EARTH", value: Binding(get: { rig.fxEarth },
+                                                    set: { rig.fxEarth = $0; d.fxSetting("F 95 \(Int($0 * 1000))") }))
+            PanelRow(label: "LOCK", value: Binding(get: { rig.fxLock },
+                                                   set: { rig.fxLock = $0; d.fxSetting("F 96 \(Int($0 * 1000))") }))
+            Text("XFADE 0.02–2 s between effects · EARTH = how much it modulates each effect (level, delay time, sampler pitch + trigger, reverse speed, glitch chance, fold drive, reverb size) · LOCK = the shortest time between two changes (0.05–5 s), so fast gates on FLIP / SKIP don't make it flutter. LINK: both Cafes on the same effect, pads together; the same gate into both Cafes then jumps the same way.")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
