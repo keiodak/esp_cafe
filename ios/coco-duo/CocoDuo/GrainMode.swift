@@ -13,7 +13,7 @@
 //   L · R    X = separation: 0 = the same grains L and R; up = each its own dice, AND tempo (±30 %), pitch
 //              (A down / B up, to a fifth), length, jitter, spread and scatter pull apart. Back to 0 = re-synced.
 //            Y = R later (up to one gap)
-//   LAYERS   X = grains at once (1 … 6)           Y = level
+//   LAYERS   X = grains at once (1 … 6)           (levels are set on the Cafe itself)
 // Firmware ids: M <id> <0..1000> — 0 density 1 jitter 2 length 3 shape 4 pitch 5 spread 6 where 7 scatter
 //   8 filter 9 resonance 10 reverse 11 pitch hold 12 layers 13 level 14 offset 15 separation 16 which Cafe
 //   20 mark · 21 clear · 22 use marks · 23 freeze · 24 percussion · "Z" = restart the score (sent to both at once)
@@ -24,7 +24,7 @@ import Foundation
 
 enum GrainPad: Int, CaseIterable {
     case density, length, pitch, place, filter, reverse, stereo, layers
-    var title: String { ["DENSITY", "LENGTH", "PITCH", "WHERE", "FILTER", "REV · HOLD", "L · R", "LAYERS"][rawValue] }
+    var title: String { ["DENSITY", "LENGTH", "PITCH", "WHERE", "FILTER", "REV · HOLD", "L · R", "LAYERS · —"][rawValue] }
     /// same as the firmware's defaults
     var start: (Double, Double) {
         [(0.55, 0.15), (0.55, 0.2), (0.5, 0), (0.2, 0.25), (1.0, 0.2), (0, 0.7), (0, 0), (0.6, 0.5)][rawValue]
@@ -39,7 +39,7 @@ enum GrainPad: Int, CaseIterable {
         case .filter:  return [8, 9]
         case .reverse: return [10, 11]
         case .stereo:  return [15, 14]           // separation (both), offset (only B moves)
-        case .layers:  return [12, 13]
+        case .layers:  return [12]
         }
     }
 }
@@ -97,7 +97,7 @@ final class GrainMode: ObservableObject {
 
     /// everything (after connecting or switching mode)
     func allCommands(slot: Int) -> [String] {
-        (0...16).map { line($0, slot: slot) }
+        (0...16).filter { $0 != 13 }.map { line($0, slot: slot) }
             + ["M 22 \(useMarks ? 1 : 0)", "M 23 \(freeze ? 1 : 0)", "M 24 \(perc ? 1 : 0)", "M 26 \(move ? 1 : 0)"]
     }
 

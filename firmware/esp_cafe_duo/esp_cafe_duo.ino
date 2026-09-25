@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.7"
+#define FW_VERSION "3.8"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -379,32 +379,31 @@ void nz_update() {
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
-//  0 time (free)  1 feedback  2 dry  3 unison  4 fifth down  5 fifth up  6 spread (the fifths later)  7 tone
-//  8 window (shifter grain 15 .. 120 ms)  9 width  10 division  11 sync  12 level  13 hold
-static const int16_t hd_default[14] = {450, 380, 1000, 550, 600, 600, 200, 650, 400, 1000, 625, 1000, 700, 0};
+//  0 VOICE 1 interval  1 VOICE 1 timing  2 VOICE 2 interval  3 VOICE 2 timing  4 cycle (1/4 .. 8 beats)  5 feedback
+//  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
+//  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
+//  timing: 16 steps of the cycle
+static const int16_t hd_default[14] = {273, 0, 727, 267, 600, 150, 700, 1000, 0, 1000, 0, 300, 0, 0};
+static const float hd_cyc[6] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
 void hd_update() {
   float hz = clock_hz(), p[14];
   for (int i = 0; i < 14; i++) p[i] = hd_p[i] / 1000.0f;
-  bool sync = hd_p[11] >= 500;
   float beat = hz * 60.0f / cafe_bpm;
-  float tt = sync ? beat * beat_div[div_index(hd_p[10])] : hz * 0.010f * powf(150.0f, p[0]);
-  float win = hz * (0.015f + 0.105f * p[8]);
-  float sp = p[6] * 0.5f;
-  while (tt * (1.0f + 2.0f * sp) + win > 125000.0f) tt *= 0.5f;
-  hd_t = (int32_t)(tt * 256.0f);
-  hd_fb = (int32_t)(p[1] * 240.0f);
-  hd_dry = (int32_t)(p[2] * 256.0f);
-  hd_lv[0] = (int32_t)(p[3] * 256.0f); hd_lv[1] = (int32_t)(p[4] * 256.0f); hd_lv[2] = (int32_t)(p[5] * 256.0f);
-  hd_spread = (int32_t)(sp * 4096.0f);
-  hd_tone = (int32_t)(300.0f + p[7] * p[7] * 3796.0f);
-  hd_win = (int32_t)win;
-  hd_sdn = (uint32_t)(int32_t)((1.0f / 3.0f) / win * 4294967296.0f);      // a fifth down: the delay grows 1/3 per sample
-  hd_sup = (uint32_t)(int32_t)(-0.5f / win * 4294967296.0f);              // a fifth up: it shrinks 1/2 per sample
-  hd_width = (int32_t)(p[9] * 256.0f);
-  hd_gain = (int32_t)(p[12] * 1.5f * 256.0f);
+  hd_rate[0] = hd_iv[(int)(p[0] * 11.0f + 0.5f)];
+  hd_off[0] = (int32_t)(p[1] * 15.0f + 0.5f);
+  hd_rate[1] = hd_iv[(int)(p[2] * 11.0f + 0.5f)];
+  hd_off[1] = (int32_t)(p[3] * 15.0f + 0.5f);
+  float S = beat * hd_cyc[(int)(p[4] * 5.0f + 0.5f)];
+  while (S > HD_STRIDE - 2) S *= 0.5f;
+  hd_S = (int32_t)S;
+  hd_fb = (int32_t)(p[5] * 200.0f);
+  hd_lvl = (int32_t)(p[6] * 1.5f * 256.0f);
+  hd_dry = (int32_t)(p[7] * 256.0f);
+  hd_keep = (int32_t)(p[8] * 230.0f);
+  hd_tone = p[9] >= 0.98f ? 4096 : (int32_t)(300.0f + p[9] * p[9] * 3796.0f);
+  hd_wob = (int32_t)(p[11] * 256.0f);
   hd_hold = hd_p[13] > 0;
-  float b = sync ? beat : tt;
-  hd_beat = (int32_t)(b > 64 ? b : 64);
+  hd_beat = (int32_t)(beat > 64 ? beat : 64);
 }
 // ---- COCO parameters (k.odk). "C <id> <0..1000>" ----
 //  0 speed (centre = stop, 750 = 1x forward, 250 = 1x backward, ends = 4x)  1 overdub  2 loop start  3 loop length
@@ -450,14 +449,16 @@ void co_update() {
 //  4 GLITCH     0 grid  1 chance  2 slice  3 length (1..8 grids)  4 variety (moves + randomness)  5 pitch  6 crush  7 wet
 //  5 FOLD+OCT   0 drive  1 bias  2 octave down  3 octave up  4 tone  6 wet  7 dry
 //  6 REVERB     0 size  1 damping  2 width  3 diffusion  4 HOWL  5 MOD  6 wet  7 dry
+//  7 SHORT DLY  0 time (1 .. 90 ms)  1 feedback  2 tone  3 wobble depth  4 wobble rate  5 spread (R longer)  6 wet  7 dry
 static const int16_t fx_default[FX_N][8] = {
   {500, 0, 0, 0, 0, 0, 0, 0},
   {625, 550, 1000, 500, 800, 300, 900, 1000},
-  {333, 400, 0, 300, 0, 1000, 700, 700},
-  {400, 500, 1000, 0, 0, 0, 700, 500},
+  {333, 400, 0, 300, 0, 1000, 900, 600},
+  {400, 500, 1000, 0, 0, 0, 1000, 300},
   {300, 550, 400, 300, 750, 300, 150, 1000},
   {300, 500, 600, 200, 800, 0, 1000, 0},
-  {750, 300, 800, 500, 400, 400, 600, 1000},
+  {750, 300, 800, 500, 400, 400, 450, 1000},
+  {350, 550, 700, 300, 300, 500, 800, 1000},
 };
 static int32_t fx_lpk(float v) { return v >= 0.98f ? 4096 : (int32_t)(300.0f + v * v * 3796.0f); }
 void fx_update(int e) {
@@ -471,7 +472,7 @@ void fx_update(int e) {
       float tt = beat * beat_div[div_index(fx_p[1][0])];
       while (tt > 32000.0f) tt *= 0.5f;
       td_T = (int32_t)(tt * 256.0f);
-      td_fb = (int32_t)(p[1] * 245.0f);
+      td_fb = (int32_t)(powf(p[1], 0.8f) * 0.93f * 256.0f);          // a curve: more room where the repeats sing
       td_pp = (int32_t)(p[2] * 256.0f);
       td_ratio = (int32_t)(4096.0f * powf(2.0f, (p[3] - 0.5f) * 2.0f));
       td_tone = fx_lpk(p[4]);
@@ -489,7 +490,7 @@ void fx_update(int e) {
       sm_dec = (uint32_t)(65536.0f * powf(2.0f, -1.0f / hl)); if (sm_dec > 65535) sm_dec = 65535;
       sm_auto = fx_p[2][4] > 0 ? (int32_t)(beat * beat_div[div_index(fx_p[2][4])]) : 0;
       sm_tone = fx_lpk(p[5]);
-      sm_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      sm_wet = (int32_t)(p[6] * 2.6f * 256.0f);                          // (louder: the sample stands out)
       sm_dry = (int32_t)(p[7] * 256.0f);
     } break;
     case 3: {
@@ -497,7 +498,7 @@ void fx_update(int e) {
       rv_W = (int32_t)w;
       rv_speed = (int32_t)(4096.0f * powf(2.0f, (p[1] - 0.5f) * 2.0f));
       rv_tone = fx_lpk(p[2]);
-      rv_wet = (int32_t)(p[6] * 1.6f * 256.0f);
+      rv_wet = (int32_t)(p[6] * 2.3f * 256.0f);                          // (louder)
       rv_dry = (int32_t)(p[7] * 256.0f);
     } break;
     case 4: {
@@ -522,6 +523,17 @@ void fx_update(int e) {
       fo_wet = (int32_t)(p[6] * 256.0f);
       fo_dry = (int32_t)(p[7] * 256.0f);
     } break;
+    case 7: {
+      float tt = hz * 0.001f * powf(90.0f, p[0]); if (tt > 4000) tt = 4000; if (tt < 16) tt = 16;
+      sd_T = (int32_t)(tt * 256.0f);
+      sd_fb = (int32_t)(powf(p[1], 0.7f) * 0.95f * 256.0f);
+      sd_tone = fx_lpk(p[2]);
+      sd_mod = (int32_t)(p[3] * hz * 0.003f * 256.0f);                   // up to 3 ms of wobble
+      sd_lfo = (uint32_t)((0.05f + p[4] * p[4] * 6.0f) / hz * 4294967295.0f);
+      sd_spread = (int32_t)(p[5] * 0.5f * 4096.0f);
+      sd_wet = (int32_t)(p[6] * 1.4f * 256.0f);
+      sd_dry = (int32_t)(p[7] * 256.0f);
+    } break;
     default: {
       rb_fb = (int32_t)(4096.0f * (0.72f + p[0] * 0.27f));
       rb_howl = (int32_t)(p[4] * p[4] * 0.14f * 4096.0f);               // up to +0.14 past the size: it howls
@@ -540,6 +552,19 @@ void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
 void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); hd_update(); fx_update_all(); }
 
+// ---- EARTH guard (k.odk) ----
+// EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
+// The radio (Bluetooth) also uses ADC2 for its power detector and takes it over: then EARTH reads 0.
+// Every 20 ms we give ADC2 back to the digital controller (the bits the original setup sets). e2_fix counts it.
+volatile uint32_t e2_fix = 0;
+void earth_guard() {
+  uint32_t a = REG(APB_SARADC_CTRL_REG)[0];
+  if (!(a & BIT(2))) { REG(APB_SARADC_CTRL_REG)[0] = a | BIT(2); e2_fix++; }          // sar2_mux: ADC2 <- DIG
+  uint32_t r = REG(SENS_SAR_READ_CTRL2_REG)[0];
+  uint32_t want = (r | BIT(28) | BIT(29)) & ~BIT(27);                                 // dig_force = 1, data_inv (as setup), pwdet_force = 0
+  if (r != want) { REG(SENS_SAR_READ_CTRL2_REG)[0] = want; e2_fix++; }
+}
+
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
 void ota_cmd(char *s);
@@ -548,9 +573,10 @@ void pc_line(char *s) {
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
-    case 'H': { char hb[128]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu",
+    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu fifo %08lx sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
-                (unsigned long)(esp_timer_get_time() / 1000));
+                (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
+                (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
     case 'R': pc_rec = atol(s + 1) != 0; break;
@@ -702,10 +728,10 @@ void ota_service() {                      // loop() while updating: ring -> flas
 //   4 = resonator
 //   5 = formant   (ieat31415)
 //   6 = saturator (ieat31415: BUTTON = next kind)
-//   7 = harmony   (three-layer harmonic delay: unison, fifth down, fifth up)
+//   7 = harmony   (replay in intervals, after norns' rpls: two voices, interval + timing each)
 //   8 = rungler   (coco chopped by an 8-bit shift register: FLIP = clock, SKIP = data)
 //   9 = selfread  (the sound on the tape steers the play head: loaded files make their own paths)
-//  10 = multi     (seven effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
+//  10 = multi     (eight effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
 //  11 = arpdelay  (MULTI's stereo tap delay for the phone's arpeggiator; SKIP = tap tempo, shared with the phone)
 void (*playlist_main[])() = {
     coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi, arpdelay
@@ -852,6 +878,9 @@ void loop() {
     hz_t = millis(); hz_n = n;
     if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
   }
+  static uint32_t eg_t = 0;
+  if (millis() - eg_t >= 20) { eg_t = millis(); earth_guard(); }
+
   // SKIP was tapped twice (DELAY / HARMONY): that is the tempo now, and the delay follows it
   if (tap_samples > 0) {
     int32_t d = tap_samples; tap_samples = 0;

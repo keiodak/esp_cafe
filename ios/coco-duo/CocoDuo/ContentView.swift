@@ -9,7 +9,7 @@
 //   knob presets (COCO_MOD, ECHO, RESONATOR, FORMANT, SATURATOR, RUNGLER, SELF_READ): a placard, the Cafe is played with its own controls
 // Keys:  top    [CAFES] [ctx 1] … status (tap = PRESET MANAGER) … [ctx 3] [WAVE]
 //        bottom [MODE ] [ctx 2] … status (tap = PRESET MANAGER) … [ctx 4] [CAMERA]
-//   GRAIN   freeze · percussion · MOVE (pitch) · sync          COCO     rec · reverse · to the loop start · sync
+//   GRAIN   freeze · percussion · MOVE (pitch) · sync      HARMONY  hold · link · sync (cycles) · tap          COCO     rec · reverse · to the loop start · sync
 //   DELAY   hold · link · grid · tap                   HARMONY  hold · link · grid · tap
 //   NOISE   dice · sync                                 MULTI    next effect · random effect (per Cafe)
 //   ARP     play / stop · hold · tap · sync
@@ -137,6 +137,7 @@ final class Director: ObservableObject {
     // MARK: pads
 
     func padMoved(_ i: Int) {
+        if rig.isTapPad(i) { return }                       // (the TAP pad has no parameters)
         switch rig.padSet {
         case .grain:
             let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
@@ -277,7 +278,6 @@ final class Director: ObservableObject {
         rig.grid.toggle()
         let v = rig.grid ? 1000 : 0
         if rig.padSet == .delay { ctxUnits().forEach { $0.send("Y 8 \(v)") } }
-        if rig.padSet == .harmony { ctxUnits().forEach { $0.send("V 11 \(v)") } }
     }
 
     /// LINK: the two Cafes as one. DELAY: one line per Cafe, ping-pong goes A -> B. Both rows take A's pads.
@@ -439,10 +439,27 @@ private struct MainScreen: View {
         }
     }
 
+    /// the small text under a pad's title (what it is set to), for the pads that have one
+    private func captionFor(_ i: Int) -> ((Double, Double) -> String)? {
+        switch rig.padSet {
+        case .arp:
+            if i >= 4 { return nil }
+            return { x, y in ArpPad.caption(i, x, y) }
+        case .harmony:
+            return { x, y in HdPad.caption(i % 4, x, y) }
+        default:
+            return nil
+        }
+    }
+
     @ViewBuilder private func pad(_ i: Int) -> some View {
+        if rig.isTapPad(i) {
+            TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
+                .frame(height: padHeight)
+        } else {
         let item = info(i)
         let live = (rig.perRow ? rig.inCtx(i / 4) : true) && item.1 != "—"
-        let caption: ((Double, Double) -> String)? = rig.padSet == .arp && i < 4 ? { x, y in ArpPad.caption(i, x, y) } : nil
+        let caption = captionFor(i)
         let tag = rig.perRow ? (i < 4 ? "A" : "B") + String(format: ".%02ld", i % 4 + 1) : String(format: "%02ld", i + 1)
         let director = d
         HudPad(axis: item.0, title: item.1, tag: tag,
@@ -452,6 +469,7 @@ private struct MainScreen: View {
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
+        }
     }
 
     private func readSafeArea() {
@@ -526,6 +544,39 @@ private struct HudPad: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+}
+
+/// TAP: one pad for the tempo. Every touch is a tap (two or more set the BPM, sent to the Cafes).
+private struct TapPad: View {
+    @ObservedObject var rig: Rig
+    let tag: String
+    let tap: () -> Void
+    @State private var lit = false
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(lit ? PastelTheme.hudOrange.opacity(0.35) : PastelTheme.padScreen)
+            HudDots(step: 12)
+            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
+            HudCorners(arm: 8).stroke(PastelTheme.hudBlack, lineWidth: 1.2).padding(3)
+            VStack(spacing: 2) {
+                Text(String(format: "%.1f", rig.bpm))
+                    .font(.hudBig(30))
+                    .foregroundStyle(PastelTheme.hudBlack)
+                Text("BPM · TAP")
+                    .font(.hud(8, .semibold))
+                    .tracking(1)
+                    .foregroundStyle(PastelTheme.hudOrange)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            HudTag(text: tag, size: 7).padding(.leading, 7).padding(.top, 6)
+        }
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
+            if !lit { lit = true; tap() }
+        }.onEnded { _ in lit = false })
     }
 }
 
@@ -680,7 +731,9 @@ private struct HudBar: View {
             switch n {
             case 0: key("pause.circle", on: rig.padSet == .delay ? rig.dlHold : rig.hdHold) { d.toggleHold() }
             case 1: key("link", on: rig.link) { d.toggleLink() }
-            case 2: key("squareshape.split.3x3", on: rig.grid) { d.toggleGrid() }
+            case 2:
+                if rig.padSet == .delay { key("squareshape.split.3x3", on: rig.grid) { d.toggleGrid() } }
+                else { key("arrow.triangle.2.circlepath") { d.sync() } }       // HARMONY: cycles start together
             default: key("hand.tap") { d.tapTempo() }
             }
         case .noise:

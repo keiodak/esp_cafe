@@ -9,7 +9,7 @@
 //
 // COCO (C ids) — the 8 pads go to both (L · R = only B moves):
 //   SPEED (speed · overdub) LOOP (start · length) EARTH_FM (depth · slew) WOBBLE (rate · depth)
-//   FILTER  CRUSH (hold · bits)  L · R (B faster · B's loop later)  MIX (dry · level)
+//   FILTER  CRUSH (hold · bits)  L · R (B faster · B's loop later)   (levels / dry / wet: on the Cafe itself)
 //   keys: REC · reverse · back to the loop start · sync
 //
 // DELAY (Y ids) — pads per Cafe, top row = A, bottom row = B:
@@ -20,9 +20,9 @@
 //   keys: HOLD (Y 10) · LINK (Y 11 / Y 12: the two Cafes are one delay, ping-pong goes A -> B) · GRID (Y 8) · TAP
 // NOISE (N ids) — the 8 pads go to both:
 //   RING (size · spread) FEEDBACK · GRIT  SHIFT · LOOP  GATE (rate · open)  FILTER  SELF · INPUT  L · R  LEVEL
-// HARMONY (V ids) — pads per Cafe like DELAY:
-//   TIME · FB (V 0, V 10, V 1)  5TH DN · 5TH UP (V 4, V 5)  TONE · SPREAD (V 7, V 6)  UNISON · DRY (V 3, V 2)
-//   keys: HOLD (V 13) · LINK (both rows move together) · GRID (V 11) · TAP
+// HARMONY (V ids) — rpls-like replay, pads per Cafe like DELAY:
+//   VOICE 1 · TIMING (V 0, V 1)  VOICE 2 · TIMING (V 2, V 3)  CYCLE · FEEDBACK (V 4, V 5)  OVERDUB · TONE (V 8, V 9)
+//   keys: HOLD (V 13) · LINK (both rows move together) · SYNC (cycles start together) · TAP
 
 import Foundation
 
@@ -35,7 +35,7 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "unison + fifth down + fifth up · repeats climb in fifths",
+        "replay in intervals (like rpls) · 2 voices: interval + timing",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
@@ -59,7 +59,7 @@ enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, knob }
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
     static let titles = ["ROOT · CHORD", "PATTERN · OCTAVES", "RATE · SWING", "GATE · DECAY",
-                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "WET · DRY"]
+                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "TAP"]
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
                                              (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
     static func root(_ x: Double) -> Int { 36 + min(24, Int(x * 25)) }
@@ -81,33 +81,35 @@ enum ArpPad {
 
 /// MULTI's effects (firmware ids "F <effect> <0..7> <v>"; pad k = ids 2k, 2k+1; "—" = not used)
 enum Fx {
-    static let count = 7
-    static let names = ["CLEAN", "ECHO", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB"]
-    static let short = ["CLEAN", "ECHO", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB"]
+    static let count = 8
+    static let names = ["CLEAN", "ECHO", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB", "SHORT DLY"]
+    static let short = ["CLEAN", "ECHO", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB", "SHORT"]
     static let titles: [[String]] = [
-        ["LEVEL · —", "—", "—", "—"],
-        ["TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "WET · DRY"],
-        ["PITCH · LENGTH", "START · DECAY", "AUTO · TONE", "WET · DRY"],
-        ["LENGTH · SPEED", "TONE · —", "—", "WET · DRY"],
-        ["GRID · CHANCE", "SLICE · LENGTH", "VARIETY · PITCH", "CRUSH · WET"],
-        ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "WET · DRY"],
-        ["SIZE · DAMP", "WIDTH · DIFFUSE", "HOWL · MOD", "WET · DRY"],
+        ["—", "—", "—", "—"],
+        ["TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "—"],
+        ["PITCH · LENGTH", "START · DECAY", "AUTO · TONE", "—"],
+        ["LENGTH · SPEED", "TONE · —", "—", "—"],
+        ["GRID · CHANCE", "SLICE · LENGTH", "VARIETY · PITCH", "—"],
+        ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "—"],
+        ["SIZE · DAMP", "WIDTH · DIFFUSE", "HOWL · MOD", "—"],
+        ["TIME · FEEDBACK", "TONE · WOBBLE", "RATE · SPREAD", "—"],
     ]
     /// the firmware's defaults (fx_default)
     static let defaults: [[Int]] = [
         [500, 0, 0, 0, 0, 0, 0, 0],
         [625, 550, 1000, 500, 800, 300, 900, 1000],
-        [333, 400, 0, 300, 0, 1000, 700, 700],
-        [400, 500, 1000, 0, 0, 0, 700, 500],
+        [333, 400, 0, 300, 0, 1000, 900, 600],
+        [400, 500, 1000, 0, 0, 0, 1000, 300],
         [300, 550, 400, 300, 750, 300, 150, 1000],
         [300, 500, 600, 200, 800, 0, 1000, 0],
-        [750, 300, 800, 500, 400, 400, 600, 1000],
+        [750, 300, 800, 500, 400, 400, 450, 1000],
+        [350, 550, 700, 300, 300, 500, 800, 1000],
     ]
 }
 
 enum CoPad: Int, CaseIterable {
     case speed, loop, fm, wobble, filter, crush, stereo, mix
-    var title: String { ["SPEED · DUB", "LOOP", "EARTH FM", "WOBBLE", "FILTER", "CRUSH", "L · R", "DRY · LEVEL"][rawValue] }
+    var title: String { ["SPEED · DUB", "LOOP", "EARTH FM", "WOBBLE", "FILTER", "CRUSH", "L · R", "—"][rawValue] }
     /// the same as the firmware's defaults (speed 1x forward, whole tape)
     var start: (Double, Double) { [(0.75, 0.0), (0.0, 1.0), (0.3, 0.2), (0.3, 0.0), (1.0, 0.2), (0.0, 0.0), (0.0, 0.0), (0.0, 0.5)][rawValue] }
     var ids: [Int] {
@@ -119,26 +121,37 @@ enum CoPad: Int, CaseIterable {
         case .filter: return [8, 9]
         case .crush: return [10, 11]
         case .stereo: return [14, 15]           // only B: a little faster, its loop a little later
-        case .mix: return [12, 13]
+        case .mix: return []                     // (levels are set on the Cafe itself)
         }
     }
 }
 
 enum DlPad: Int, CaseIterable {
     case time, spread, tone, mix
-    var title: String { ["TIME · FB", "L·R · PING", "TONE · WOW", "WET · DRY"][rawValue] }
+    var title: String { ["TIME · FB", "L·R · PING", "TONE · WOW", "TAP"][rawValue] }
     var start: (Double, Double) { [(0.625, 0.45), (0.5, 1.0), (0.7, 0.0), (0.6, 1.0)][rawValue] }
 }
 
+/// HARMONY (rpls-like replay): per Cafe, VOICE 1 / VOICE 2 = interval (X) and timing in the cycle (Y)
 enum HdPad: Int, CaseIterable {
-    case time, fifths, color, mix
-    var title: String { ["TIME · FB", "5TH DN · 5TH UP", "TONE · SPREAD", "UNISON · DRY"][rawValue] }
-    var start: (Double, Double) { [(0.625, 0.38), (0.6, 0.6), (0.65, 0.2), (0.55, 1.0)][rawValue] }
+    case voice1, voice2, cycle, tape
+    var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · FEEDBACK", "TAP"][rawValue] }
+    var start: (Double, Double) { [(0.273, 0.0), (0.727, 0.267), (0.6, 0.15), (0.0, 1.0)][rawValue] }
+    var ids: (Int, Int) { [(0, 1), (2, 3), (4, 5), (8, 9)][rawValue] }
+    static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
+    static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]
+    static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
+        switch k {
+        case 0, 1: return "\(intervals[min(11, Int(x * 11 + 0.5))]) · \(Int(y * 15 + 0.5))/16"
+        case 2: return "\(cycles[min(5, Int(x * 5 + 0.5))]) BEAT · FB \(Int(y * 100))%"
+        default: return "KEEP \(Int(x * 90))%"
+        }
+    }
 }
 
 enum NzPad: Int, CaseIterable {
     case ring, feedback, shift, gate, filter, selfmod, stereo, out
-    var title: String { ["RING", "FEEDBACK · GRIT", "SHIFT · LOOP", "GATE", "FILTER", "SELF · INPUT", "L · R", "LEVEL"][rawValue] }
+    var title: String { ["RING", "FEEDBACK · GRIT", "SHIFT · LOOP", "GATE", "FILTER", "SELF · INPUT", "L · R", "—"][rawValue] }
     var start: (Double, Double) { [(0.45, 0.5), (0.85, 0.35), (0.6, 0.0), (0.35, 0.6), (0.65, 0.45), (0.3, 0.0), (0.0, 0.0), (0.5, 0.5)][rawValue] }
     var ids: [Int] {
         switch self {
@@ -149,7 +162,7 @@ enum NzPad: Int, CaseIterable {
         case .filter: return [8, 9]
         case .selfmod: return [10, 12]
         case .stereo: return [0, 4, 6]            // B's ring, clock and gate drift away from A's
-        case .out: return [11]
+        case .out: return []                     // (levels are set on the Cafe itself)
         }
     }
 }
@@ -207,7 +220,7 @@ final class Rig: ObservableObject {
         let a = arpAxes[i], k = i - 4
         return ["F 1 \(2 * k) \(Int((a.x * 1000).rounded()))", "F 1 \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
     }
-    func arpDelayAll() -> [String] { (4..<8).flatMap { arpDelayCommands(pad: $0) } + ["F 94 \(fxHold ? 1 : 0)", "F 95 \(Int(fxEarth * 1000))"] }
+    func arpDelayAll() -> [String] { (4..<7).flatMap { arpDelayCommands(pad: $0) } + ["F 94 \(fxHold ? 1 : 0)", "F 95 \(Int(fxEarth * 1000))"] }
 
     /// the Cafe whose preset the screen shows
     var focus: Int { target == 1 ? 1 : 0 }
@@ -224,6 +237,14 @@ final class Rig: ObservableObject {
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
+    /// the TAP pad (tempo): the 4th pad of each row where there is a tempo (ARP: only the bottom row's)
+    func isTapPad(_ i: Int) -> Bool {
+        switch padSet {
+        case .delay, .harmony, .multi: return i % 4 == 3
+        case .arp: return i == 7
+        default: return false
+        }
+    }
 
     /// is this Cafe on what the screen shows?
     func inCtx(_ slot: Int) -> Bool {
@@ -243,7 +264,7 @@ final class Rig: ObservableObject {
         }
     }
     func dlAll(slot: Int) -> [String] {
-        (0..<4).flatMap { dlCommands(pad: slot * 4 + $0) }
+        (0..<3).flatMap { dlCommands(pad: slot * 4 + $0) }
             + ["Y 8 \(grid ? 1000 : 0)", "Y 10 \(dlHold ? 1000 : 0)",
                "Y 12 \(slot == 1 ? 1000 : 0)", "Y 11 \(link ? 1000 : 0)"]
     }
@@ -252,15 +273,11 @@ final class Rig: ObservableObject {
     func hdCommands(pad i: Int) -> [String] {
         let a = hdAxes[i]
         let x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
-        switch HdPad(rawValue: i % 4)! {
-        case .time: return ["V 0 \(x)", "V 10 \(x)", "V 1 \(y)"]
-        case .fifths: return ["V 4 \(x)", "V 5 \(y)"]
-        case .color: return ["V 7 \(x)", "V 6 \(y)"]
-        case .mix: return ["V 3 \(x)", "V 2 \(y)"]
-        }
+        let ids = HdPad(rawValue: i % 4)!.ids
+        return ["V \(ids.0) \(x)", "V \(ids.1) \(y)"]
     }
     func hdAll(slot: Int) -> [String] {
-        (0..<4).flatMap { hdCommands(pad: slot * 4 + $0) } + ["V 11 \(grid ? 1000 : 0)", "V 13 \(hdHold ? 1000 : 0)"]
+        (0..<3).flatMap { hdCommands(pad: slot * 4 + $0) } + ["V 13 \(hdHold ? 1000 : 0)"]
     }
 
     // MARK: COCO
@@ -293,12 +310,17 @@ final class Rig: ObservableObject {
         guard let p = CoPad(rawValue: i) else { return [] }
         return p.ids.map { coLine($0, slot: slot) }
     }
-    func coAll(slot: Int) -> [String] { (0...15).map { coLine($0, slot: slot) } + ["C 16 \(coReverse ? 1 : 0)"] }
+    func coAll(slot: Int) -> [String] { (0...15).filter { $0 != 12 && $0 != 13 }.map { coLine($0, slot: slot) } + ["C 16 \(coReverse ? 1 : 0)"] }
 
     // MARK: MULTI
+    /// a pad's lines; "—" halves are not sent (the mix stays at the firmware's settings)
     func fxCommands(slot: Int, e: Int, k: Int) -> [String] {
+        let t = Fx.titles[e][k]
+        if t == "—" { return [] }
         let a = fxAxes[slot][e][k]
-        return ["F \(e) \(2 * k) \(Int((a.x * 1000).rounded()))", "F \(e) \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
+        var out = ["F \(e) \(2 * k) \(Int((a.x * 1000).rounded()))"]
+        if !t.hasSuffix("· —") { out.append("F \(e) \(2 * k + 1) \(Int((a.y * 1000).rounded()))") }
+        return out
     }
     func fxSettings() -> [String] {
         ["F 91 \(Int(fxXfade * 1000))", "F 95 \(Int(fxEarth * 1000))", "F 96 \(Int(fxLock * 1000))", "F 94 \(fxHold ? 1 : 0)"]
@@ -336,7 +358,7 @@ final class Rig: ObservableObject {
         guard let p = NzPad(rawValue: i) else { return [] }
         return p.ids.map { nzLine($0, slot: slot) }
     }
-    func nzAll(slot: Int) -> [String] { (0...12).map { nzLine($0, slot: slot) } }
+    func nzAll(slot: Int) -> [String] { (0...12).filter { $0 != 11 }.map { nzLine($0, slot: slot) } }
     /// the dice key: somewhere new for every NOISE pad (except the level)
     func nzDice() {
         for p in NzPad.allCases where p != .out && p != .stereo {
