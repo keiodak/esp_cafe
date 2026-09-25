@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coco-pc</title>
+<style>
+:root{
+  --bg:#ecebe7; --panel:#f7f6f3; --ink:#1f1f1e; --dim:#8a8984; --line:#cfcdc7;
+  --wave:#3b3a37; --loop:rgba(47,95,168,.14); --loopEdge:#2f5fa8; --play:#b5502a; --rec:#c0392b; --ok:#2e7d4f;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#171716; --panel:#1f1f1d; --ink:#e9e7e1; --dim:#8f8d86; --line:#34332f;
+    --wave:#d9d6ce; --loop:rgba(120,160,230,.16); --loopEdge:#7fa4e6; --play:#f08a5d; --rec:#ff6b5b; --ok:#5fc48a; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.04em}
+.sp{flex:1}
+button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--dim)}
+button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button.rec.on{background:var(--rec);border-color:var(--rec);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+main{padding:16px;display:grid;gap:14px;max-width:1200px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+#wrap{position:relative}
+canvas{display:block;width:100%;height:260px;cursor:crosshair;touch-action:none}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lbl{color:var(--dim);min-width:64px}
+input[type=range]{flex:1;min-width:200px;accent-color:var(--ink)}
+.val{min-width:70px;text-align:right}
+.lamps{display:flex;gap:16px;flex-wrap:wrap}
+.lamp{display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;border:1px solid var(--dim)}
+.dot.on{background:var(--play);border-color:var(--play)}
+.bar{width:120px;height:8px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--ink);width:0}
+#msg{color:var(--dim);white-space:pre-wrap}
+.warn{color:var(--rec)}
+small{color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>coco-pc</h1>
+  <small id="conn">not connected</small>
+  <select id="baud" title="serial speed (must match PC_BAUD in the firmware)"><option>115200</option><option>230400</option><option>460800</option><option>921600</option></select>
+  <small id="rx">rx 0 B</small>
+  <button id="bHex" title="show the last raw bytes">hex</button>
+  <button id="bLog" title="show everything the Cafe printed (boot messages etc.)">log</button>
+  <span class="sp"></span>
+  <button id="bCheck" title="ask the Cafe for memory / BLE state">check</button>
+  <button id="bConnect">USB</button>
+  <button id="bBle" title="connect over Bluetooth (BLE test firmware)">BLE</button>
+</header>
+<main>
+  <div class="card">
+    <div id="wrap"><canvas id="cv"></canvas></div>
+    <div class="row" style="margin-top:8px">
+      <small>click = jump &nbsp;·&nbsp; drag = set loop &nbsp;·&nbsp; drag an edge = move it &nbsp;·&nbsp; double-click = whole buffer</small>
+      <span class="sp"></span>
+      <small id="pos">—</small>
+    </div>
+  </div>
+
+  <div class="card row">
+    <span class="lbl">speed</span>
+    <input id="speed" type="range" min="-4000" max="4000" step="10" value="1000">
+    <span class="val" id="speedv">1.00x</span>
+    <button data-s="-1000">-1</button>
+    <button data-s="500">½</button>
+    <button data-s="1000">1</button>
+    <button data-s="2000">2</button>
+    <button id="bRev">reverse</button>
+    <button data-s="0">stop</button>
+  </div>
+
+  <div class="card row">
+    <button id="bRec" class="rec">REC</button>
+    <button id="bStart">to loop start</button>
+    <span class="sp"></span>
+    <button id="bDump">save wav</button>
+    <small id="dump"></small>
+  </div>
+
+  <div class="card lamps">
+    <div class="lamp"><span class="lbl">earth</span><div class="bar"><i id="earth"></i></div><span id="earthv">—</span></div>
+    <div class="lamp"><span class="dot" id="flip"></span>flip</div>
+    <div class="lamp"><span class="dot" id="skip"></span>skip</div>
+    <div class="lamp"><span class="dot" id="btn"></span>button</div>
+    <div class="lamp"><span class="lbl">clock</span><span id="hz">—</span></div>
+    <div class="lamp"><span class="lbl">buffer</span><span id="secs">—</span></div>
+    <div class="lamp"><span class="lbl">preset</span><span id="preset">—</span></div>
+  </div>
+
+  <div class="card" id="msg">Choose preset 6 (coco_pc) on the Cafe, then press USB (cable) or BLE (Bluetooth test firmware).
+Needs Chrome or Edge (Web Serial / Web Bluetooth). If Connect does nothing when opened as a file, run
+  python3 -m http.server   in this folder and open http://localhost:8000/coco-pc.html</div>
+  <pre class="card" id="log" hidden style="max-height:50vh;overflow:auto;margin:0;font-size:12px"></pre>
+</main>
+
+<script>
+const N = 131072, BINS = 512;
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const mins = new Uint8Array(BINS).fill(128), maxs = new Uint8Array(BINS).fill(128);
+let st = {w:0,p:0,rec:1,ls:0,le:N,speed:1000,earth:0,flip:0,skip:0,btn:0,hz:0,preset:-1};
+let port=null, writer=null, reading=false;
+let dumpBuf=null, dumpGot=0, dumpWant=-1;
+
+// ---------- serial ----------
+async function connect(){
+  if(!('serial' in navigator)){ msg('This browser has no Web Serial. Use Chrome or Edge.', true); return; }
+  let p;
+  try{ p = await navigator.serial.requestPort(); }catch(e){ return; }   // user closed the picker
+  try{
+    try{ await p.open({baudRate: +$('baud').value, bufferSize: 65536}); }
+    catch(e){
+      // "already open": left open by an earlier try in this tab -> close it and open again
+      if(/already open/i.test(e.message)){ try{ await p.close(); }catch(_){}; await p.open({baudRate: +$('baud').value, bufferSize: 65536}); }
+      else throw e;
+    }
+    port = p;
+    // release DTR/RTS so an auto-reset circuit does not hold the ESP32 in reset / boot mode
+    try{ await port.setSignals({dataTerminalReady:false, requestToSend:false}); }catch(e){}
+    writer = port.writable.getWriter();
+    $('conn').textContent = 'USB'; $('bConnect').textContent = 'USB off';
+    msg('Connected. Waiting for the Cafe...'); connT=Date.now(); rxBytes=0; gotLine=false; noDataShown=false;
+    readLoop(); send('P');
+  }catch(e){
+    msg('Could not open the port: ' + e.message + '\nIf the Arduino Serial Monitor (or another tab) has this port open, close it and try again. Reloading this page also frees it.', true);
+  }
+}
+let lastSmp={t:0,n:0}, hzEst=0, waitingQ=false, lastQ=0;
+let nT=0, nO=0, oPeak=0, rawHex=[], rawReader=null;
+let logText='';
+function logAdd(t){ logText = (logText + t).slice(-20000); }
+let reader=null, pipeDone=null, rxBytes=0, lastRaw='', gotLine=false, connT=0, noDataShown=false;
+setInterval(()=>{ $('rx').textContent = 'rx ' + (rxBytes>9999 ? (rxBytes/1024).toFixed(0)+' KB' : rxBytes+' B') + '  T:' + nT + '  O:' + nO + '  wave:' + oPeak; if(port && rxBytes===0 && Date.now()-connT>3000 && !noDataShown){ noDataShown=true; msg('Nothing is coming from the Cafe (0 bytes).\n• Was the NEW firmware uploaded? (it sends status lines all the time)\n• Is the Cafe powered and not inside the preset menu?\n• Try: Disconnect, unplug/replug USB, Connect again.', true); }
+  if(port && !gotLine && rxBytes>0) msg('Receiving, but nothing readable yet.\nlast bytes (hex): ' + rawHex.join(' ') + '\nas text: ' + JSON.stringify(lastRaw) + '\nIf this is garbage, the speed does not match: try the other speed in the box, or upload the new firmware.'); }, 500);
+async function disconnect(){
+  reading=false;
+  try{ reader && await reader.cancel(); }catch(e){}
+  try{ rawReader && await rawReader.cancel(); }catch(e){}
+  try{ pipeDone && await pipeDone; }catch(e){}
+  try{ writer && writer.releaseLock(); }catch(e){}
+  try{ port && await port.close(); }catch(e){}
+  port=null; writer=null; reader=null; pipeDone=null;
+  $('conn').textContent='not connected'; $('bConnect').textContent='USB';
+}
+window.addEventListener('beforeunload', ()=>{ disconnect(); });
+async function send(s){
+  if(ble){ bleSend(s); return; }
+  if(!writer) return;
+  try{ await writer.write(new TextEncoder().encode(s + '\n')); }catch(e){ msg('send failed: '+e.message, true); }
+}
+async function readLoop(){
+  reading = true;
+  const dec = new TextDecoderStream();
+  const [rs1, rs2] = port.readable.tee();          // rs2: raw bytes for the hex view
+  pipeDone = rs1.pipeTo(dec.writable).catch(()=>{});
+  (async()=>{ const r = rs2.getReader(); rawReader = r;
+    try{ for(;;){ const {value,done} = await r.read(); if(done) break;
+      for(const b of value){ rawHex.push(b.toString(16).padStart(2,'0')); if(rawHex.length>48) rawHex.shift(); } } }catch(e){} })();
+  reader = dec.readable.getReader();
+  let buf='';
+  try{
+    while(reading){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buf += value; rxBytes += value.length; lastRaw = (lastRaw + value).slice(-160);
+      let i;
+      while((i = buf.indexOf('\n')) >= 0){ handle(buf.slice(0,i).trim()); buf = buf.slice(i+1); }
+      if(buf.length > 100000) buf = '';
+    }
+  }catch(e){ if(reading) msg('read stopped: '+e.message, true); }
+  try{ reader.releaseLock(); }catch(e){}
+}
+// ---------- BLE (Nordic UART Service, same text lines as USB) ----------
+const NUS='6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+let ble=null, bleQ=Promise.resolve(), bleBuf='', bleOut=[], bleBusy=false, bleChunk=20;
+// BLE sending with less lag: one writer, your commands go first, a newer S/L/J replaces an older one
+// still waiting, and the status poll (Q) is skipped while anything else is waiting.
+function bleSend(s){
+  const k = s[0];
+  if(k==='Q' && bleOut.length) { waitingQ=false; return; }
+  if('SLJ'.includes(k)){ const i = bleOut.findIndex(x=>x[0]===k); if(i>=0){ bleOut[i]=s; return; } }
+  bleOut.push(s); bleKick();
+}
+async function bleKick(){
+  if(bleBusy || !ble) return; bleBusy = true;
+  try{
+    while(ble && bleOut.length){
+      let text = '';                                  // pack as many whole lines as fit in one packet
+      while(bleOut.length && (text.length + bleOut[0].length + 1 <= bleChunk || !text)) text += bleOut.shift() + '\n';
+      const data = new TextEncoder().encode(text), c = ble.rx;
+      for(let o=0;o<data.length;o+=bleChunk){ const part=data.slice(o,o+bleChunk);
+        if(c.writeValueWithoutResponse) await c.writeValueWithoutResponse(part); else await c.writeValue(part); }
+    }
+  }catch(e){ msg('BLE send failed: '+e.message, true); bleOut=[]; }
+  bleBusy = false;
+  if(ble && bleOut.length) bleKick();
+}
+const linked = ()=> !!(writer || ble);
+async function bleConnect(){
+  if(!navigator.bluetooth){ msg('This browser has no Web Bluetooth. Use Chrome, and allow Bluetooth for Chrome in macOS System Settings > Privacy & Security > Bluetooth.', true); return; }
+  let dev;
+  try{ dev = await navigator.bluetooth.requestDevice({filters:[{services:[NUS]},{namePrefix:'Cafe'}], optionalServices:[NUS]}); }catch(e){ return; }
+  try{
+    msg('Connecting to ' + dev.name + ' ...');
+    dev.addEventListener('gattserverdisconnected', ()=>{ if(ble && ble.dev===dev){ ble=null; logAdd('[page] BLE connection lost\n'); $('conn').textContent = port ? 'USB' : 'not connected'; $('bBle').textContent='BLE'; msg('BLE connection lost.', true); } });
+    let svc=null, err=null;
+    for(let k=1; k<=4 && !svc; k++){                 // the first try often drops on macOS: retry
+      try{ const srv = await dev.gatt.connect(); await new Promise(r=>setTimeout(r,300));
+           if(!dev.gatt.connected) throw new Error('dropped right after connecting');
+           svc = await srv.getPrimaryService(NUS); }
+      catch(e){ err=e; logAdd('[page] BLE try '+k+': '+e.message+'\n'); msg('BLE try '+k+' failed: '+e.message+' ... retrying'); await new Promise(r=>setTimeout(r,700)); }
+    }
+    if(!svc) throw err;
+    const rx = await svc.getCharacteristic(NUS_RX), tx = await svc.getCharacteristic(NUS_TX);
+    const dec = new TextDecoder();
+    tx.addEventListener('characteristicvaluechanged', e=>{
+      const t = dec.decode(e.target.value); rxBytes += t.length; lastRaw = (lastRaw + t).slice(-160);
+      for(const ch of t){ rawHex.push(ch.charCodeAt(0).toString(16).padStart(2,'0')); if(rawHex.length>48) rawHex.shift(); }
+      bleBuf += t; let i;
+      while((i = bleBuf.indexOf('\n')) >= 0){ handle(bleBuf.slice(0,i).trim()); bleBuf = bleBuf.slice(i+1); }
+      if(bleBuf.length > 100000) bleBuf = '';
+    });
+    await tx.startNotifications();
+    ble = {dev, rx, tx}; bleBuf=''; bleOut=[]; bleBusy=false; bleChunk=20;
+    $('conn').textContent = 'BLE ' + dev.name + (port ? ' (+USB log)' : ''); $('bBle').textContent = 'BLE off';
+    connT=Date.now(); rxBytes=0; gotLine=false; noDataShown=true; waitingQ=false;
+    send('P'); send('H');
+  }catch(e){ msg('BLE connect failed: ' + e.message, true); try{ dev.gatt.disconnect(); }catch(_){} ble=null; }
+}
+function bleDisconnect(){
+  const d = ble && ble.dev; ble=null;
+  try{ d && d.gatt.disconnect(); }catch(e){}
+  $('conn').textContent = port ? 'USB' : 'not connected'; $('bBle').textContent='BLE';
+}
+
+function handle(l){
+  if(!l) return;
+  if(!/^[TOB] /.test(l)) logAdd(l + '\n');       // the log keeps everything except the poll traffic
+  if(/^(T|O|B|E|HELLO)/.test(l)) gotLine = true;
+  const c = l[0];
+  if(c==='T'){
+    nT++;
+    const a = l.split(' ');
+    if(a.length < 13) return;
+    const keep = dragging ? {ls:st.ls, le:st.le} : null;
+    const now = performance.now(), smp = +a[11];
+    if(lastSmp.t && now - lastSmp.t > 500){ const d = (smp - lastSmp.n) >>> 0; hzEst = d / ((now - lastSmp.t)/1000); lastSmp = {t:now, n:smp}; }
+    else if(!lastSmp.t){ lastSmp = {t:now, n:smp}; }
+    st = {w:+a[1],p:+a[2],rec:+a[3],ls:+a[4],le:+a[5],speed:+a[6],earth:+a[7],flip:+a[8],skip:+a[9],btn:+a[10],hz:Math.round(hzEst),preset:+a[12]};
+    waitingQ = false;
+    if(keep){ st.ls=keep.ls; st.le=keep.le; }
+    ui();
+  } else if(c==='O'){
+    nO++;
+    const sp = l.indexOf(' ',2); const bin = +l.slice(2,sp); const h = l.slice(sp+1);
+    for(let k=0;k<16 && (k*4+3)<h.length;k++){
+      const b=(bin+k)%BINS; mins[b]=parseInt(h.substr(k*4,2),16); maxs[b]=parseInt(h.substr(k*4+2,2),16); 
+    }
+    oPeak = 0; for(let i=0;i<BINS;i++) oPeak = Math.max(oPeak, maxs[i]-mins[i]);
+  } else if(c==='B' && dumpBuf){
+    const sp = l.indexOf(' ',2); const start = +l.slice(2,sp); const h = l.slice(sp+1);
+    for(let k=0;k<256 && k*3+2<h.length;k++) dumpBuf[start+k] = parseInt(h.substr(k*3,3),16);
+    dumpGot += 256; if(start === dumpWant) dumpWant = -1;
+  } else if(l.startsWith('HELLO')){ msg('Cafe answered: '+l);
+  } else if(l.startsWith('H ')){ msg('Cafe check: '+l.slice(2)); const m=/mtu (\d+)/.exec(l); if(m && +m[1]>23) bleChunk=Math.min(180, +m[1]-3); }
+}
+
+// ---------- ui ----------
+function msg(t, warn){ const m=$('msg'); m.textContent=t; m.className = 'card' + (warn?' warn':''); }
+function ui(){
+  $('bRec').classList.toggle('on', !!st.rec);
+  $('earth').style.width = (st.earth/255*100)+'%'; $('earthv').textContent = st.earth;
+  $('flip').classList.toggle('on', !!st.flip); $('skip').classList.toggle('on', !!st.skip); $('btn').classList.toggle('on', !!st.btn);
+  $('hz').textContent = st.hz ? (st.hz/1000).toFixed(1)+' kHz' : '—';
+  $('secs').textContent = st.hz ? (N/st.hz).toFixed(2)+' s' : '—';
+  $('preset').innerHTML = st.preset===5 ? '6 · coco_pc' : '<span class="warn">'+(st.preset+1)+' (choose 6)</span>';
+  if(!dragging && document.activeElement !== $('speed')){ $('speed').value = st.speed; }
+  $('speedv').textContent = (st.speed/1000).toFixed(2)+'x';
+  const s = st.hz || 44100;
+  $('pos').textContent = `play ${(st.p/s).toFixed(3)} s   rec ${(st.w/s).toFixed(3)} s   loop ${(st.ls/s).toFixed(2)}–${(st.le/s).toFixed(2)} s`;
+}
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function draw(){
+  const dpr = window.devicePixelRatio||1, W = cv.clientWidth, H = cv.clientHeight;
+  if(cv.width !== W*dpr || cv.height !== H*dpr){ cv.width=W*dpr; cv.height=H*dpr; }
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const x = s => s/N*W;
+  // loop region
+  ctx.fillStyle = css('--loop'); ctx.fillRect(x(st.ls),0,x(st.le)-x(st.ls),H);
+  ctx.fillStyle = css('--loopEdge'); ctx.fillRect(x(st.ls)-1,0,2,H); ctx.fillRect(x(st.le)-1,0,2,H);
+  // waveform
+  ctx.fillStyle = css('--wave');
+  const bw = W/BINS;
+  for(let b=0;b<BINS;b++){
+    const y1 = H - maxs[b]/255*H, y2 = H - mins[b]/255*H;
+    ctx.fillRect(b*bw, y1, Math.max(1,bw-0.3), Math.max(1,y2-y1));
+  }
+  // centre line
+  ctx.fillStyle = css('--line'); ctx.fillRect(0,H/2,W,1);
+  // heads
+  // record head: dashed, labelled
+  ctx.fillStyle = css('--rec'); ctx.globalAlpha = st.rec ? 1 : .35;
+  for(let yy=0; yy<H; yy+=8) ctx.fillRect(x(st.w)-1, yy, 2, 4);
+  ctx.font = '10px ui-monospace, monospace'; ctx.fillText('REC', Math.min(x(st.w)+4, W-24), H-6);
+  ctx.globalAlpha=1;
+  ctx.fillStyle = css('--play'); ctx.fillRect(x(st.p)-1.5,0,3,H);
+  ctx.beginPath(); ctx.moveTo(x(st.p)-6,0); ctx.lineTo(x(st.p)+6,0); ctx.lineTo(x(st.p),8); ctx.fill();
+  ctx.font = '10px ui-monospace, monospace'; ctx.fillText('PLAY', Math.min(x(st.p)+6, W-28), 18);
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// poll the Cafe: it only answers when asked (Q -> one status line + one overview chunk)
+setInterval(()=>{
+  if(!linked() || dumpBuf) return;
+  const now = performance.now();
+  if(waitingQ && now - lastQ < 300) return;      // wait for the reply (or give up after 300 ms)
+  waitingQ = true; lastQ = now; send('Q');
+}, 30);
+
+// waveform mouse: click = jump, drag = loop, drag edge = move edge
+let dragging=null;
+function sampleAt(e){ const r=cv.getBoundingClientRect(); return Math.max(0,Math.min(N,Math.round((e.clientX-r.left)/r.width*N))); }
+function nearEdge(e){
+  const r=cv.getBoundingClientRect(), px=e.clientX-r.left;
+  const xs = st.ls/N*r.width, xe = st.le/N*r.width;
+  if(Math.abs(px-xs)<7) return 'ls'; if(Math.abs(px-xe)<7) return 'le'; return null;
+}
+cv.addEventListener('pointermove', e=>{
+  if(!dragging){ cv.style.cursor = nearEdge(e) ? 'ew-resize' : 'crosshair'; return; }
+  const s = sampleAt(e);
+  if(dragging.mode==='new'){ dragging.moved = dragging.moved || Math.abs(s-dragging.from)>N/400; if(dragging.moved){ st.ls=Math.min(s,dragging.from); st.le=Math.max(s,dragging.from); } }
+  else if(dragging.mode==='ls'){ st.ls = Math.min(s, st.le-512); }
+  else if(dragging.mode==='le'){ st.le = Math.max(s, st.ls+512); }
+});
+cv.addEventListener('pointerdown', e=>{
+  cv.setPointerCapture(e.pointerId);
+  const edge = nearEdge(e);
+  dragging = edge ? {mode:edge} : {mode:'new', from:sampleAt(e), moved:false};
+});
+cv.addEventListener('pointerup', e=>{
+  if(!dragging) return;
+  if(dragging.mode==='new' && !dragging.moved){ send('J '+sampleAt(e)); }
+  else { if(st.le-st.ls<512) st.le=st.ls+512; send('L '+st.ls+' '+st.le); }
+  dragging=null;
+});
+cv.addEventListener('dblclick', ()=>send('L 0 '+N));
+
+// controls
+$('bHex').onclick = ()=> msg('last bytes (hex): ' + rawHex.join(' ') + '\nT lines: ' + nT + '   O lines: ' + nO);
+$('bConnect').onclick = ()=> port ? disconnect() : connect();
+$('bBle').onclick = ()=> ble ? bleDisconnect() : bleConnect();
+$('bCheck').onclick = ()=> send('H');
+$('bLog').onclick = ()=>{ const L=$('log'); L.hidden=!L.hidden; if(!L.hidden){ L.textContent=logText||'(nothing yet)'; L.scrollTop=L.scrollHeight; } };
+setInterval(()=>{ const L=$('log'); if(!L.hidden){ const atEnd = L.scrollTop+L.clientHeight >= L.scrollHeight-20; L.textContent=logText; if(atEnd) L.scrollTop=L.scrollHeight; } }, 500);
+$('speed').oninput = e => { const v=+e.target.value; $('speedv').textContent=(v/1000).toFixed(2)+'x'; send('S '+v); };
+$('speed').ondblclick = ()=>send('S 1000');
+document.querySelectorAll('[data-s]').forEach(b=> b.onclick = ()=>send('S '+b.dataset.s));
+$('bRev').onclick = ()=>send('S '+(-st.speed));
+$('bRec').onclick = ()=>{ if(nT===0){ msg('No status from the Cafe yet, so REC does not know the current state. (Not sent.)', true); return; } send('R '+(st.rec?0:1)); };
+$('bStart').onclick = ()=>send('J '+st.ls);
+$('bDump').onclick = async ()=>{
+  if(!linked() || dumpBuf) return;
+  dumpBuf = new Uint16Array(N); dumpGot = 0; $('dump').textContent='0%';
+  for(let start=0; start<N; start+=256){
+    dumpWant = start; let tries = 0;
+    while(dumpWant === start && tries < 3){
+      send('D '+start);
+      const t0 = performance.now();
+      while(dumpWant === start && performance.now() - t0 < 400) await new Promise(r=>setTimeout(r,2));
+      tries++;
+    }
+    $('dump').textContent = Math.round(start/N*100)+'%';
+  }
+  finishDump();
+};
+
+function finishDump(){
+  const rate = Math.round(st.hz || 44100);
+  const data = new Int16Array(N);
+  for(let i=0;i<N;i++) data[i] = (dumpBuf[i]-2048)*16;
+  const buf = new ArrayBuffer(44 + N*2), v = new DataView(buf);
+  const w = (o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+N*2,true); w(8,'WAVE'); w(12,'fmt '); v.setUint32(16,16,true);
+  v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,rate,true); v.setUint32(28,rate*2,true);
+  v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,N*2,true);
+  new Int16Array(buf,44).set(data);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
+  a.download = 'cafe-' + new Date().toISOString().replace(/[:.]/g,'-') + '.wav';
+  a.click();
+  $('dump').textContent = 'saved ('+rate+' Hz)'; dumpBuf=null;
+}
+</script>
+</body>
+</html>
