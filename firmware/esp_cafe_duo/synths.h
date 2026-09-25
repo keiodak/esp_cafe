@@ -1071,9 +1071,8 @@ static inline void IRAM_ATTR earth_ac() {
   // the average follows slowly (~1.5 s), so CV movements, LFOs and hand gestures come through;
   // only a constant level (e.g. an empty jack) is taken away
   static int32_t eavg = 0; static bool first = true;
-  uint32_t raw = REG(I2S_FIFO_RD_REG)[0];            // (the same as EARTHREAD, but the whole word kept for "H")
-  pc_fifo = raw;
-  int32_t ev = (int32_t)((raw & 0x7FF) >> 3);
+  pc_fifo = (uint32_t)earth_raw12;                   // (for "H")
+  int32_t ev = (int32_t)EARTHREAD;
   pc_earth = (uint8_t)ev;                          // what the phone shows (EARTH is read ONCE per sample:
                                                    //  a second read of the I2S FIFO gets another entry)
   if (first) { first = false; eavg = ev << 16; }

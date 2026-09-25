@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.11"
+#define FW_VERSION "3.12"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -549,7 +549,7 @@ void pc_line(char *s) {
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
-    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu fifo %08lx sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
+    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a34 %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
                 (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
                 (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
@@ -740,6 +740,11 @@ void setup() {
 
   SETUPPERS
   Serial.printf("[1] SETUPPERS Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
+  // EARTH on ADC1 channel 6 (GPIO 34), 12 bits, 0 dB like the original pattern table (ADC1_PATT)
+  analogReadResolution(12);
+  analogSetPinAttenuation(34, ADC_0db);
+  earth_raw12 = analogRead(34); earth_now = earth_raw12 >> 4;
+  Serial.printf("[1] EARTH (GPIO 34) now %d / 4095\n", earth_raw12);
 
 
   //theCoolWifiInitiation();
@@ -846,6 +851,15 @@ void loop() {
   pc_service();   // lines from the phone (BLE)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
+  // EARTH: ADC1 channel 6 (GPIO 34), read here 2000 times a second (works with Bluetooth on)
+  static uint32_t ea_us = 0;
+  if ((uint32_t)(micros() - ea_us) >= 500) {
+    ea_us = micros();
+    int r = analogRead(34);
+    earth_raw12 = r;
+    earth_now = r >> 4;
+  }
+
   // GRAIN works in samples: keep its times right when the SPEED knob moves the clock
   static uint32_t hz_t = 0, hz_n = 0;
   if (millis() - hz_t >= 500) {
@@ -859,7 +873,7 @@ void loop() {
   static uint32_t dbg_t = 0;
   if (millis() - dbg_t >= 1000) {
     dbg_t = millis();
-    Serial.printf("[earth] %s fifo %08lx earth %d flip %d skip %d | sarctl %08lx rd1 %08lx rd2 %08lx st1 %08lx st2 %08lx wait2 %08lx i2s %08lx\n",
+    Serial.printf("[earth] %s a34 %4lu earth %d flip %d skip %d | sarctl %08lx rd1 %08lx rd2 %08lx st1 %08lx st2 %08lx wait2 %08lx i2s %08lx\n",
       cafe_no_ble ? "noBLE" : "BLE", (unsigned long)pc_fifo, (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0,
       (unsigned long)REG(APB_SARADC_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0],
       (unsigned long)REG(SENS_SAR_MEAS_START1_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0],

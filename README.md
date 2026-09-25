@@ -34,7 +34,7 @@ Things learned on the way (see comments in the code):
 - The original setup reset timer group 0, which on the ESP32 also stops the system clock (`esp_timer`): BLE advertises but can't connect, and `millis()` stops. The BLE builds only reset SPI3.
 - With BLE running there is no single 96 KB block free: the tape is allocated in 64 pieces of 3 KB, and the small buffers live in RTC memory.
 - The radio clock was switched off (`DPORT_WIFI_CLK_EN_REG = 0`) in the original setup: removed in the BLE builds.
-- With Bluetooth on, the radio's power detector keeps taking the SAR ADC2. The original ADC setup converted ADC1 and ADC2 together (double mode), so every conversion stalled and EARTH read 0. The BLE build runs the ADC on ADC1 alone (EARTH = ADC1 channel 6).
+- With Bluetooth on, the radio's power detector keeps taking the SAR ADC2. The original ADC setup converted ADC1 and ADC2 together (double mode), so every conversion stalled and EARTH read 0. In the end EARTH is read in `loop()` straight from ADC1 (GPIO 34, `analogRead`, 2000×/s) and `EARTHREAD` returns that value, so every preset gets it with Bluetooth on.
 
 ### web/coco-pc.html
 Chrome page (Web Serial / Web Bluetooth): the Cafe's tape as a waveform, loop / jump / speed / REC, save WAV, boot log.

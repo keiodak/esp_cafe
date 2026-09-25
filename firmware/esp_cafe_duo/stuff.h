@@ -83,7 +83,13 @@ bool lamp; // declare the lamp variable for lampaflip
 // =========================================================
 // EARTH
 // =========================================================
-#define EARTHREAD (REG(I2S_FIFO_RD_REG)[0] & 0x7FF) >> 3 // converts earth to 8bit from its raw 12 bit
+// k.odk: EARTH is read in loop() straight from ADC1 (GPIO 34), 2000 times a second, and kept here.
+// (The original read it inside the audio interrupt through the I2S FIFO of the SAR ADC's digital controller;
+//  with Bluetooth running that path delivers nothing — EARTH read 0 in every preset.)
+volatile int earth_now = 0;        // 0..255
+volatile int earth_raw12 = 0;      // 0..4095 (for "H" / the USB test line)
+#define EARTHREAD (earth_now)
+#define EARTHREAD_FIFO ((REG(I2S_FIFO_RD_REG)[0] & 0x7FF) >> 3)   // the original way (unused)
 
 volatile int earth_last_state = 0; 
 
