@@ -939,7 +939,7 @@ volatile int      mo_pulse = 0;              // YELLOW pulse length after a grai
 
 /// One sample of the grain engine: returns the grains (centred on 0, filtered, level applied).
 /// wpos = the record head, frz = FREEZE (grains stay at the moment it was pressed), restart = back to grain 0.
-static int32_t IRAM_ATTR grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
+static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
   static uint32_t gn = 0, anchor = 0;
   static int64_t next_t = 0, beat_t = 0;        // beat = the steady grid, next = beat + this grain's jitter
   static int32_t low = 0, band = 0;
@@ -1088,7 +1088,7 @@ static inline uint32_t IRAM_ATTR bj_exp2(int32_t o) {   // 2^(o/256), Q16
 }
 
 /// one sample of the Benjolin. in = tape / live input (centred). Returns the output (centred).
-static int32_t IRAM_ATTR bj_tick(int32_t in) {
+static int32_t bj_tick(int32_t in) {
   static uint32_t ph1 = 0, ph2 = 0x40000000;
   static uint8_t reg = 0xA5;
   static int32_t low = 0, band = 0;
@@ -1143,6 +1143,7 @@ static int32_t IRAM_ATTR bj_tick(int32_t in) {
 }
 
 // ---- shared by the BLE preset and HARMONY (k.odk) ----
+// (the engines' tick functions are NOT in IRAM: the ESP32's 128 KB of IRAM is full with BLE; they run from flash cache)
 /// EARTH, AC-coupled: only its movement counts, so an empty jack does nothing. Sets pc_emod (-128..127).
 static inline void IRAM_ATTR earth_ac() {
   static int32_t eavg = 128 << 8;
@@ -1202,7 +1203,7 @@ volatile int      dl_click = 0;                             // YELLOW click leng
 volatile uint32_t dl_wpos = 0, dl_rpos = 0;                 // for the status line
 
 /// one sample of the stereo delay. in = centred. Returns L, *rout = R.
-static int32_t IRAM_ATTR dl_tick(int32_t in, int32_t *rout, bool hold) {
+static int32_t dl_tick(int32_t in, int32_t *rout, bool hold) {
   static uint32_t w = 0, fill = 0, bc = 0, pw = 0;
   static int32_t cl = 16000 << 8, cr = 16000 << 8;           // current times (they glide)
   static int32_t lpl = 0, lpr = 0;
@@ -1310,7 +1311,7 @@ static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
   return fo + (((bit - fo) * (grit - 2048)) >> 11);
 }
 
-static int32_t IRAM_ATTR nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
+static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   static uint32_t w = 0, sph = 0, gph = 0;
   static uint16_t lfsr = 0xACE1;
   static int32_t steps = 0, val = 0, env = 0;
@@ -1394,7 +1395,7 @@ volatile int      co_pulse = 0;
 volatile uint32_t co_ppos = 0;
 #define CO_XF 256
 
-static int32_t IRAM_ATTR co_tick(uint32_t wpos, int32_t in, int32_t rg, bool back) {
+static int32_t co_tick(uint32_t wpos, int32_t in, int32_t rg, bool back) {
   static int32_t rel = 0;                         // position inside the loop, Q12
   static int32_t tail = -1, xf = 0;               // the old head (absolute Q12) while a crossfade runs
   static int32_t ef = 0;                          // EARTH, smoothed, Q8
@@ -2228,7 +2229,7 @@ static inline int32_t IRAM_ATTR h_readq(uint32_t posq) {
 }
 
 // ---- 1 TAP DELAY: one line with feedback, four taps spread L / R ----
-static int32_t IRAM_ATTR td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
+static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lp = 0;
   if (rs) { w = 0; fill = 0; ct = td_T; lp = 0; }
   ct += (td_T - ct) >> 11;
@@ -2259,7 +2260,7 @@ static int32_t IRAM_ATTR td_tick(int32_t in, int32_t *rout, bool hold, bool rs) 
 }
 
 // ---- 2 SAMPLER: a slice of the recent past, played once per trigger at -1 .. +2 octaves ----
-static int32_t IRAM_ATTR sm_tick(int32_t in, bool rs) {
+static int32_t sm_tick(int32_t in, bool rs) {
   static int32_t cp = -1; static uint32_t csrc = 0;
   static int32_t pq[2] = {0, 0}, n[2] = {0, 0}, len[2] = {1, 1}, env[2] = {0, 0}, rate[2] = {4096, 4096};
   static int vi = 0; static uint32_t ac = 0; static int32_t lp = 0; static bool ehi = false;
@@ -2302,7 +2303,7 @@ static int32_t IRAM_ATTR sm_tick(int32_t in, bool rs) {
 }
 
 // ---- 3 REVERSE: two heads read the past backwards, sin² windows half a length apart ----
-static int32_t IRAM_ATTR rv_tick(int32_t in, bool rs) {
+static int32_t rv_tick(int32_t in, bool rs) {
   static uint32_t anc[2] = {0, 0}; static int32_t t[2] = {0, 0}, p[2] = {0, 0}; static int32_t lp = 0;
   int32_t W = rv_W; if (W < 256) W = 256; if (W > 30000) W = 30000;
   if (rs) { anc[0] = anc[1] = fx_hw; t[0] = 0; t[1] = W / 2; p[0] = 0; p[1] = (W / 2) * rv_speed; lp = 0; }
@@ -2324,7 +2325,7 @@ static int32_t IRAM_ATTR rv_tick(int32_t in, bool rs) {
 
 // ---- 4 GLITCH: on a grid, a slice of the recent past stutters (pitch jumps, backwards, crushed) ----
 volatile bool gl_resync = false;
-static int32_t IRAM_ATTR gl_tick(int32_t in, bool hold, bool rs) {
+static int32_t gl_tick(int32_t in, bool hold, bool rs) {
   static uint32_t bc = 0, n = 0, sst = 0; static int32_t left = 0, sl = 1, pq = 0, rate = 4096, held = 0, hn = 0;
   static bool rev = false;
   if (rs || gl_resync) { gl_resync = false; bc = 0; n = 0; left = 0; }
@@ -2356,7 +2357,7 @@ static int32_t IRAM_ATTR gl_tick(int32_t in, bool hold, bool rs) {
 }
 
 // ---- 5 FOLD + OCTAVER: an octave down (flip-flop), an octave up (rectifier), into a wave folder ----
-static int32_t IRAM_ATTR fo_tick(int32_t in, bool rs) {
+static int32_t fo_tick(int32_t in, bool rs) {
   static int32_t env = 0, lpd = 0, ff = 1, lp = 0; static bool pos = false;
   if (rs) { env = 0; lpd = 0; ff = 1; lp = 0; pos = false; }
   int32_t a = in < 0 ? -in : in;
@@ -2375,7 +2376,7 @@ static int32_t IRAM_ATTR fo_tick(int32_t in, bool rs) {
 }
 
 // ---- 6 REVERB: four combs (damped) + two allpasses per side, on the tape (lo-fi, 12 bits) ----
-static int32_t IRAM_ATTR rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
+static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t idx[8]; static int32_t st[4]; static int32_t clr = 0, fade = 0;
   static int32_t base[8]; static bool based = false;
   if (!based) { int32_t o = RB_BASE; for (int k = 0; k < 8; k++) { base[k] = o; o += rb_max[k]; } based = true; }
@@ -2421,7 +2422,7 @@ static int32_t IRAM_ATTR rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) 
   return dry + ((ol * g) >> 7);
 }
 
-static inline void IRAM_ATTR fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) {
+static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) {
   bool rs = fx_rs[e]; fx_rs[e] = false;
   switch (e) {
     case 0: { int32_t g = cl_g + ((cl_g * fx_em) >> 7); if (g < 0) g = 0;     // EARTH = level (VCA)

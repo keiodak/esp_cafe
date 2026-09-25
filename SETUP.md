@@ -184,6 +184,7 @@ In the delays, **SKIP = tap tempo**.
 | *update*: "the Cafe did not answer U" | The Cafe doesn't have a BLE-capable firmware yet, or the Partition Scheme isn't *Default*. Upload once over USB (section 4). |
 | After an update the version didn't change | Check the name: you may have connected to the other Cafe. |
 | No *Partition Scheme* menu | Choose *Tools → Board → ESP32 Dev Module*. |
+| Compile error: `iram0_0_seg overflowed` | The ESP32's fast memory (IRAM) is full. Use the latest `esp_cafe_duo` (its effect code runs from flash), keep *Tools → Core Debug Level* at *None*, and don't add `IRAM_ATTR` to new functions. |
 
 ---
 
