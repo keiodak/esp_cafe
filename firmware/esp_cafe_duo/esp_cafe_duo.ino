@@ -66,6 +66,9 @@
 #define NUS_SVC "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define NUS_RX  "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"   // computer -> Cafe (write)
 #define NUS_TX  "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"   // Cafe -> computer (notify)
+#define OTA_RX  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"   // firmware update: binary pieces (write without response)
+#include <Update.h>
+#include <esp_ota_ops.h>
 static NimBLECharacteristic *ble_tx = nullptr;
 static volatile bool ble_conn = false;
 static volatile uint16_t ble_mtu = 23;
@@ -74,6 +77,7 @@ static bool ble_ok = false;
 static char ble_name[16] = "Cafe";
 static char ble_rb[1024];                          // bytes written by the BLE task (core 0), read in loop()
 static volatile uint16_t ble_wh = 0, ble_rh = 0;
+static volatile bool ota_active = false;         // a firmware update is running (see below)
 
 class CafeServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *s, NimBLEConnInfo &ci) override {
@@ -83,6 +87,7 @@ class CafeServerCB : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer *s, NimBLEConnInfo &ci, int reason) override {
     ble_conn = false; pc_link = false;
+    if (ota_active) { Update.abort(); Serial.println("[ota] link lost: restarting"); ESP.restart(); }
     Serial.printf("[ble] disconnected, reason 0x%X. heap %u\n", reason, (unsigned)ESP.getFreeHeap());
   }
   void onConnParamsUpdate(NimBLEConnInfo &ci) override { ble_itvl = ci.getConnInterval(); Serial.printf("[ble] interval now %u x1.25ms\n", (unsigned)ble_itvl); }
@@ -99,6 +104,33 @@ class CafeRxCB : public NimBLECharacteristicCallbacks {
     }
   }
 };
+// ---- BLE firmware update (k.odk) ----
+// "U <size> <crc32 hex>" on the text link starts it: audio stops, the tape memory is freed for a receive buffer,
+// then the page writes pieces to OTA_RX: [4 bytes offset, little endian][data]. loop() writes them to the other
+// app slot and answers "U A <bytes written>" every 4 KB. At the end the CRC is checked and the Cafe restarts.
+#define OTA_RING 16384
+static uint8_t *ota_rb = nullptr;
+static volatile uint32_t ota_wh = 0, ota_rh = 0;      // ring heads (byte counters, never wrap back)
+static volatile uint32_t ota_rx = 0;                  // next offset the ring expects
+static volatile bool ota_bad = false;                 // a piece came out of order (dropped)
+static volatile uint32_t ota_last_ms = 0;
+class CafeOtaCB : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *c, NimBLEConnInfo &ci) override {
+    if (!ota_active || !ota_rb) return;
+    NimBLEAttValue v = c->getValue();
+    const uint8_t *d = v.data(); size_t n = v.size();
+    if (n < 5) return;
+    uint32_t off = d[0] | (d[1] << 8) | (d[2] << 16) | ((uint32_t)d[3] << 24);
+    n -= 4; d += 4;
+    if (off != ota_rx || (ota_wh - ota_rh) + n > OTA_RING) { ota_bad = true; return; }
+    uint32_t w = ota_wh;
+    for (size_t i = 0; i < n; i++) ota_rb[(w + i) & (OTA_RING - 1)] = d[i];
+    ota_rx = off + n;
+    ota_wh = w + n;
+    ota_last_ms = millis();
+  }
+};
+
 void ble_begin() {
   uint64_t m = ESP.getEfuseMac();
   snprintf(ble_name, sizeof(ble_name), "Cafe-%02X%02X", (unsigned)((m >> 32) & 0xFF), (unsigned)((m >> 40) & 0xFF));
@@ -111,6 +143,8 @@ void ble_begin() {
   ble_tx = svc->createCharacteristic(NUS_TX, NIMBLE_PROPERTY::NOTIFY);
   NimBLECharacteristic *rx = svc->createCharacteristic(NUS_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   rx->setCallbacks(new CafeRxCB());
+  NimBLECharacteristic *ota = svc->createCharacteristic(OTA_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  ota->setCallbacks(new CafeOtaCB());
   svc->start();
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   NimBLEAdvertisementData ad, sr;
@@ -277,9 +311,12 @@ void bj_fill_table() { for (int i = 0; i < 256; i++) bj_exp[i] = (uint32_t)(6553
 
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
+void ota_cmd(char *s);
 void pc_line(char *s) {
+  if (s[0] == 'U') { ota_cmd(s); return; }
+  if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
-    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo 1 %s", ble_name); pc_out(hb); } break;
+    case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo 2 %s ota", ble_name); pc_out(hb); } break;
     case 'H': { char hb[128]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
                 (unsigned long)(esp_timer_get_time() / 1000));
@@ -342,6 +379,74 @@ void pc_service() {                       // called from loop(): lines that arri
     if (c == '\n' || c == '\r') { if (bn) { bl[bn] = 0; pc_line(bl); bn = 0; } }
     else if (bn < 299) bl[bn++] = c;
   }
+}
+
+// ---- BLE firmware update: the loop() side ----
+static uint32_t ota_size = 0, ota_crc_want = 0, ota_crc = 0xFFFFFFFF, ota_done = 0, ota_acked = 0, ota_bad_ms = 0;
+static void ota_fail(const char *why) {
+  char b[96]; snprintf(b, sizeof(b), "U ERR %s", why); pc_out(b);
+  Serial.printf("[ota] %s: restarting\n", why);
+  Update.abort(); delay(400); ESP.restart();
+}
+static uint32_t ota_crc32(uint32_t c, const uint8_t *p, size_t n) {   // zlib CRC-32 (c starts at 0xFFFFFFFF)
+  while (n--) { c ^= *p++; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1))); }
+  return c;
+}
+void ota_cmd(char *s) {
+  if (s[1] == ' ' && !ota_active) {
+    unsigned long size = 0, crc = 0;
+    if (sscanf(s + 1, "%lu %lx", &size, &crc) < 2 || size < 1024) { pc_out("U ERR bad start"); return; }
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    if (!next) { pc_out("U ERR no OTA slot (partition scheme: Default)"); return; }
+    if (size > next->size) { pc_out("U ERR too big for the slot"); return; }
+    Serial.printf("[ota] start: %lu bytes -> %s\n", size, next->label);
+    // stop the audio, give the tape's memory back (the Cafe restarts at the end anyway)
+    REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+    detachInterrupt(2);
+    ota_active = true;
+    for (int i = 0; i < DCHUNKS; i++) { if (dchunk[i]) free(dchunk[i]); dchunk[i] = nullptr; }
+    delaybuffa = delaybuffb = nullptr;
+    ota_rb = (uint8_t *)malloc(OTA_RING);
+    if (!ota_rb) ota_fail("no memory");
+    if (!Update.begin(size, U_FLASH)) ota_fail(Update.errorString());
+    ota_size = size; ota_crc_want = crc; ota_crc = 0xFFFFFFFF; ota_done = 0; ota_acked = 0;
+    ota_wh = ota_rh = 0; ota_rx = 0; ota_bad = false; ota_last_ms = millis();
+    char b[48]; snprintf(b, sizeof(b), "U OK %d", OTA_RING); pc_out(b);
+  } else if (s[1] == ' ' ) {
+    pc_out("U ERR busy");
+  } else if (s[1] == 'X' && ota_active) {
+    ota_fail("stopped");
+  }
+}
+void ota_service() {                      // loop() while updating: ring -> flash
+  static uint8_t buf[1024];
+  uint32_t avail = ota_wh - ota_rh;
+  while (avail) {
+    uint32_t n = avail > sizeof(buf) ? sizeof(buf) : avail;
+    for (uint32_t i = 0; i < n; i++) buf[i] = ota_rb[(ota_rh + i) & (OTA_RING - 1)];
+    if (Update.write(buf, n) != n) ota_fail(Update.errorString());
+    ota_crc = ota_crc32(ota_crc, buf, n);
+    ota_rh += n; ota_done += n; avail -= n;
+  }
+  if (ota_done >= ota_acked + 4096 || (ota_done == ota_size && ota_acked != ota_done)) {
+    ota_acked = ota_done;
+    char b[32]; snprintf(b, sizeof(b), "U A %lu", (unsigned long)ota_done); pc_out(b);
+    static bool lit = false; lit = !lit;                                    // the lamp flickers while it writes
+    if (lit) REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); else REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1);
+  }
+  if (ota_bad && ota_wh == ota_rh && millis() - ota_bad_ms > 300) {       // a piece was lost: ask again from here
+    ota_bad = false; ota_bad_ms = millis();
+    char b[32]; snprintf(b, sizeof(b), "U R %lu", (unsigned long)ota_rx); pc_out(b);
+  }
+  if (ota_done >= ota_size) {
+    uint32_t crc = ~ota_crc;
+    if (crc != ota_crc_want) { char b[64]; snprintf(b, sizeof(b), "crc %08lx wanted %08lx", (unsigned long)crc, (unsigned long)ota_crc_want); ota_fail(b); }
+    if (!Update.end(true)) ota_fail(Update.errorString());
+    pc_out("U DONE");
+    Serial.println("[ota] done: restarting into the new firmware");
+    delay(600); ESP.restart();
+  }
+  if (millis() - ota_last_ms > 20000) ota_fail("timeout");
 }
 
 // ------------------------------------------
@@ -481,6 +586,7 @@ Serial.println("--- BOOT COMPLETE: Entering Main Loop ---\n"); // FOR DEBUGGING
 void loop() {
 
   pc_service();   // lines from the phone (BLE)
+  if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
   // GRAIN works in samples: keep its times right when the SPEED knob moves the clock
   static uint32_t hz_t = 0, hz_n = 0;
