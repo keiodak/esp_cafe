@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.15"
+#define FW_VERSION "3.16"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -199,14 +199,17 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 //   U ...        firmware update (see ota_cmd)
 // T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10 multi_effect
 //   F …          MULTI (see the top of multi() in synths.h)
+// FLIP / SKIP / BUTTON seen high since the last status line (short triggers are not missed by the 30 ms poll)
+volatile bool seen_flip = false, seen_skip = false, seen_btn = false;
 void pc_status() {
   char tb[128];
   snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
-    (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0, (BUTTONEST) ? 0 : 1, (unsigned long)pc_samples, preset,
+    (int)EARTHREAD, (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
     pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now);
   pc_out(tb);
+  seen_flip = seen_skip = seen_btn = false;
 }
 void pc_overview() {
   static int obin = 0;
@@ -553,7 +556,7 @@ void pc_line(char *s) {
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
     case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
-                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)EARTHREAD,
                 (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)earth_fail, (unsigned long)(REG(GPIO_IN1_REG)[0] & 0xFF), (unsigned long)REG(RTC_IO_ADC_PAD_REG)[0], (unsigned long)pin_fix, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
                 (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
                 pc_out(hb); } break;
@@ -857,6 +860,11 @@ void loop() {
 
   pc_service();   // lines from the phone (BLE)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
+
+  // latch the switches for the status line
+  if (FLIPPERAT) seen_flip = true;
+  if (SKIPPERAT) seen_skip = true;
+  if (!(BUTTONEST)) seen_btn = true;
 
   // SKIP / FLIP stay digital inputs (in case an ADC call touched their pads)
   static uint32_t pin_t = 0;
