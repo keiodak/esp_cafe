@@ -97,6 +97,18 @@ small{color:var(--dim)}
     <div class="lamp"><span class="lbl">preset</span><span id="preset">—</span></div>
   </div>
 
+  <div class="card" id="multi">
+    <div class="row">
+      <span class="lbl">update · several Cafes at once</span>
+      <button id="mAdd" title="pick one more Cafe (one Bluetooth chooser per Cafe)">+ Cafe</button>
+      <button id="mWrite" title="write one .bin to every Cafe in the list, at the same time">write .bin to all</button>
+      <input type="file" id="mFile" accept=".bin" hidden>
+      <span class="sp"></span>
+      <small id="mNote"></small>
+    </div>
+    <div id="mRows"></div>
+  </div>
+
   <div class="card" id="msg">Choose preset 6 (coco_pc) on the Cafe, then press USB (cable) or BLE (Bluetooth test firmware).
 Needs Chrome or Edge (Web Serial / Web Bluetooth). If Connect does nothing when opened as a file, run
   python3 -m http.server   in this folder and open http://localhost:8000/coco-pc.html</div>
@@ -329,6 +341,92 @@ function otaLine(l){
   else if(a[1]==='ERR'){ msg('Update failed: '+l.slice(6)+'\nThe Cafe restarts with its old firmware.', true); ota=null; }
 }
 
+// ---------- several Cafes at once (firmware update only) ----------
+// Each Cafe gets its own connection and its own copy of the update (U / pieces / U A acks), independent of the main
+// BLE link above, so two (or more) run side by side. Chrome asks for each Cafe in its own chooser (one click each).
+class OtaLink{
+  constructor(dev){ this.dev=dev; this.buf=''; this.mtu=23; this.q=Promise.resolve(); this.ota=null; this.state='—'; this.pct=0; }
+  async connect(){
+    let svc=null, err=null;
+    for(let k=1;k<=4 && !svc;k++){
+      try{ const srv = await this.dev.gatt.connect(); await new Promise(r=>setTimeout(r,300));
+           if(!this.dev.gatt.connected) throw new Error('dropped right after connecting');
+           svc = await srv.getPrimaryService(NUS); }
+      catch(e){ err=e; await new Promise(r=>setTimeout(r,700)); }
+    }
+    if(!svc) throw err;
+    this.rx = await svc.getCharacteristic(NUS_RX); this.tx = await svc.getCharacteristic(NUS_TX);
+    try{ this.och = await svc.getCharacteristic(OTA_RX); }catch(e){ this.och = null; }
+    const dec = new TextDecoder();
+    this.tx.addEventListener('characteristicvaluechanged', e=>{
+      this.buf += dec.decode(e.target.value); let i;
+      while((i=this.buf.indexOf('\n'))>=0){ this.line(this.buf.slice(0,i).trim()); this.buf=this.buf.slice(i+1); }
+      if(this.buf.length>20000) this.buf='';
+    });
+    await this.tx.startNotifications();
+    this.dev.addEventListener('gattserverdisconnected', ()=>{ if(this.state!=='done') this.set(this.ota ? 'connection lost (it restarts with its old firmware)' : 'disconnected'); this.ota=null; });
+    this.set(this.och ? 'ready' : 'no BLE update in this firmware (USB once)');
+    this.send('H');
+  }
+  send(s){ const data = new TextEncoder().encode(s+'\n');
+    this.q = this.q.then(async ()=>{ for(let o=0;o<data.length;o+=20) await this.rx.writeValueWithoutResponse(data.slice(o,o+20)); }).catch(()=>{}); }
+  set(s){ this.state=s; mDraw(); }
+  line(l){
+    if(l.startsWith('H ')){ const m=/mtu (\d+)/.exec(l); if(m) this.mtu=+m[1]; return; }
+    if(!l.startsWith('U ') || !this.ota) return;
+    const a=l.split(' '), o=this.ota;
+    if(a[1]==='OK'){ o.go=true; o.t0=performance.now(); this.set('sending'); this.pump(); }
+    else if(a[1]==='A'){ o.acked=+a[2]; if(o.sent<o.acked) o.sent=o.acked; this.pct=Math.round(100*o.acked/o.data.length);
+      const s=Math.max(0.1,(performance.now()-o.t0)/1000); this.set('sending '+this.pct+' %  '+(o.acked/1024/s).toFixed(1)+' KB/s'); this.pump(); }
+    else if(a[1]==='R'){ const now=performance.now(); if(now-o.lastR>250){ o.lastR=now; o.sent=Math.max(o.acked,+a[2]); } this.pump(); }
+    else if(a[1]==='DONE'){ this.pct=100; this.set('done'); this.ota=null; }
+    else if(a[1]==='ERR'){ this.set('failed: '+l.slice(6)); this.ota=null; }
+  }
+  async start(data){
+    if(!this.och){ this.set('no BLE update in this firmware (USB once)'); return; }
+    const m0=this.mtu; this.send('H'); for(let k=0;k<10 && this.mtu===m0;k++) await new Promise(r=>setTimeout(r,100));
+    this.ota={data, sent:0, acked:0, busy:false, go:false, t0:performance.now(), lastR:0}; this.pct=0;
+    this.send('U '+data.length+' '+crc32(data).toString(16)); this.set('asking…');
+    const me=this.ota; setTimeout(()=>{ if(this.ota===me && !me.go){ this.set('no answer to "U"'); this.ota=null; } }, 6000);
+  }
+  async pump(){
+    const o=this.ota; if(!o || o.busy || !o.go) return; o.busy=true;
+    const size=Math.max(16, Math.min(240, this.mtu-3)-4);
+    try{
+      while(this.ota===o && o.sent<o.data.length && o.sent-o.acked<8192){
+        const at=o.sent, n=Math.min(size, o.data.length-at);
+        const pk=new Uint8Array(4+n); new DataView(pk.buffer).setUint32(0, at, true); pk.set(o.data.subarray(at, at+n), 4);
+        await this.och.writeValueWithoutResponse(pk);
+        if(o.sent===at) o.sent=at+n;
+      }
+    }catch(e){ if(this.ota===o){ this.set('sending failed: '+e.message); this.ota=null; } }
+    o.busy=false;
+    if(this.ota===o && o.sent-o.acked<8192 && o.sent<o.data.length) this.pump();
+  }
+}
+const mLinks=[];
+function mDraw(){
+  $('mRows').innerHTML = mLinks.map(k=>`<div class="row"><span class="lbl">${k.dev.name||'Cafe'}</span><div class="bar" style="flex:1"><i style="width:${k.pct}%"></i></div><small>${k.state}</small></div>`).join('');
+}
+async function mAdd(){
+  if(!navigator.bluetooth){ msg('This browser has no Web Bluetooth (use Chrome).', true); return; }
+  let dev; try{ dev = await navigator.bluetooth.requestDevice({filters:[{services:[NUS]},{namePrefix:'Cafe'}], optionalServices:[NUS]}); }catch(e){ return; }
+  if(mLinks.some(k=>k.dev.id===dev.id)){ $('mNote').textContent = dev.name+' is already in the list'; return; }
+  if(ble && ble.dev.id===dev.id) bleDisconnect();               // (the main link would get its U lines too)
+  const k=new OtaLink(dev); mLinks.push(k); k.set('connecting…');
+  try{ await k.connect(); }catch(e){ k.set('could not connect: '+e.message); }
+}
+async function mWrite(file){
+  const data=new Uint8Array(await file.arrayBuffer());
+  if(data[0]!==0xE9){ msg(file.name+' is not an ESP32 app image (use esp_cafe_duo.ino.bin).', true); return; }
+  if(data.length>1310720){ msg(file.name+' is too big for the update slot.', true); return; }
+  const ready=mLinks.filter(k=>k.dev.gatt.connected && k.och && !k.ota);
+  if(!ready.length){ msg('Add the Cafes first (+ Cafe, one chooser each).', true); return; }
+  if(!confirm('Write '+file.name+' ('+(data.length/1024).toFixed(0)+' KB) to '+ready.map(k=>k.dev.name).join(' and ')+' at the same time?\nThe sound stops, the tapes are cleared and the Cafes restart.')) return;
+  $('mNote').textContent=file.name;
+  ready.forEach(k=>k.start(data));                              // side by side: each has its own link and acks
+}
+
 // ---------- ui ----------
 function msg(t, warn){ const m=$('msg'); m.textContent=t; m.className = 'card' + (warn?' warn':''); }
 function ui(){
@@ -418,6 +516,9 @@ $('bBle').onclick = ()=> ble ? bleDisconnect() : bleConnect();
 $('bCheck').onclick = ()=> send('H');
 $('bOta').onclick = ()=>{ if(!ble){ msg('Connect with BLE first (the update goes over Bluetooth).', true); return; } if(ota) return; $('otaFile').value=''; $('otaFile').click(); };
 $('otaFile').onchange = e=>{ const f=e.target.files[0]; if(f) otaStart(f); };
+$('mAdd').onclick = ()=> mAdd();
+$('mWrite').onclick = ()=>{ $('mFile').value=''; $('mFile').click(); };
+$('mFile').onchange = e=>{ const f=e.target.files[0]; if(f) mWrite(f); };
 $('bLog').onclick = ()=>{ const L=$('log'); L.hidden=!L.hidden; if(!L.hidden){ L.textContent=logText||'(nothing yet)'; L.scrollTop=L.scrollHeight; } };
 setInterval(()=>{ const L=$('log'); if(!L.hidden){ const atEnd = L.scrollTop+L.clientHeight >= L.scrollHeight-20; L.textContent=logText; if(atEnd) L.scrollTop=L.scrollHeight; } }, 500);
 $('speed').oninput = e => { const v=+e.target.value; $('speedv').textContent=(v/1000).toFixed(2)+'x'; send('S '+v); };
