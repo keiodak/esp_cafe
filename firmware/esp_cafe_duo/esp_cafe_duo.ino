@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.20"
+#define FW_VERSION "3.21"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -178,6 +178,43 @@ void ble_line(const char *s) {                     // one text line -> notificat
   }
 }
 void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out over BLE
+
+// ------------------------------------------
+// THE POOL (k.odk): every preset this firmware has. Ids 0..10 = ours (as above), 11.. = Apple π's (ieat31415,
+// namespace ie). The phone picks up to 11 of them as the playlist ("L ..."), kept in flash (NVS).
+// "G <id>" loads any pool id directly.
+// ------------------------------------------
+void (*pool[])() = {
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi, arpdelay,
+    ie::coco_og, ie::echo_mod, ie::flanger, ie::karplus, ie::reverb_spring, ie::reverb_granular, ie::reverb_feedback,
+    ie::harmonizer, ie::external_sync, ie::window, ie::splicer, ie::scrambler, ie::dissolve, ie::sampler,
+    ie::sampler_4x, ie::granular, ie::phasing, ie::bytebeats_mod, ie::megabytebeats, ie::arcade, ie::FX,
+    ie::wavetable, ie::drone, ie::groovebox, ie::polyrhythms
+};
+#define POOL_N ((int)(sizeof(pool) / sizeof(pool[0])))
+#include <Preferences.h>
+static void pl_save() {
+  Preferences pr; if (!pr.begin("cafe", false)) return;
+  uint8_t b[11]; for (int i = 0; i < 11; i++) b[i] = i < active_preset_count ? (uint8_t)pl_id[i] : 0xFF;
+  pr.putBytes("pl", b, 11); pr.end();
+}
+static void pl_load() {
+  Preferences pr; uint8_t b[11]; int n = 0;
+  if (pr.begin("cafe", true)) {
+    if (pr.getBytes("pl", b, 11) == 11) for (int i = 0; i < 11 && b[i] < POOL_N; i++) pl_id[n++] = b[i];
+    pr.end();
+  }
+  if (n == 0) { for (int i = 0; i < 11; i++) pl_id[i] = i; n = 11; }
+  active_preset_count = n;
+  for (int i = 0; i < n; i++) presets[i] = pool[pl_id[i]];
+}
+static int pl_index(int id) { for (int i = 0; i < active_preset_count; i++) if (pl_id[i] == id) return i; return -1; }
+static void pl_report() {
+  char b[80]; int k = snprintf(b, sizeof(b), "L");
+  for (int i = 0; i < active_preset_count; i++) k += snprintf(b + k, sizeof(b) - k, " %d", pl_id[i]);
+  pc_out(b);
+}
+
 
 // ==========================================
 // LINK (k.odk) --- text protocol, over BLE only in this build
@@ -588,7 +625,19 @@ void pc_line(char *s) {
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
     case 'R': pc_rec = atol(s + 1) != 0; break;
-    case 'G': { long n = atol(s + 1); if (n >= 0 && n < active_preset_count) pc_goto = (int)n; } break;
+    case 'G': { long n = atol(s + 1); if (n >= 0 && n < POOL_N) pc_goto = (int)n; } break;
+    case 'L': {                            // L = report the playlist · L <id> <id> ... = set it (up to 11 pool ids) and keep it
+                char *q = s + 1; int ids[11], n = 0;
+                while (n < 11) { char *e; long v = strtol(q, &e, 10); if (e == q) break; q = e; if (v >= 0 && v < POOL_N) ids[n++] = (int)v; }
+                if (n > 0) {
+                  bool same = n == active_preset_count;
+                  for (int i = 0; i < n && same; i++) same = pl_id[i] == ids[i];
+                  for (int i = 0; i < n; i++) { pl_id[i] = ids[i]; presets[i] = pool[ids[i]]; }
+                  active_preset_count = n;
+                  if (!same) pl_save();              // flash only when it really changed
+                }
+                pl_report();
+              } break;
     case 'M': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
                 if (id >= 0 && id < 17) {
                   if (val < 0) val = 0; if (val > 1000) val = 1000;
@@ -755,6 +804,18 @@ void (*playlist_main[])() = {
 
 
 //////ORIGINAL FIRMWARE
+// EARTH on core 0 (the audio interrupt lives on core 1): ADC2 channel 0 = GPIO 4, 1000x a second
+static StaticTask_t ea_tcb;
+RTC_DATA_ATTR static StackType_t ea_stack[1536];    // in RTC slow memory (DRAM is kept for the Bluetooth heap)
+static void earth_task(void *) {
+  for (;;) {
+    int r = 0;
+    if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
+    else earth_fail++;
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
 
   // FOR DEBUGGING
@@ -782,6 +843,7 @@ void setup() {
   Serial.printf("[1] SETUPPERS Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
   // EARTH on ADC2 channel 0 (GPIO 4), 12 bits, 2.5 dB like the original pattern table (ADC2_PATT = 0x0D)
   adc2_config_channel_atten(ADC2_CHANNEL_0, ADC_ATTEN_DB_2_5);
+  xTaskCreateStaticPinnedToCore(earth_task, "earth", sizeof(ea_stack), NULL, 2, ea_stack, &ea_tcb, 0);
   { int r = 0; esp_err_t e = adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r);
     if (e == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
     Serial.printf("[1] EARTH (GPIO 4, ADC2) now %d / 4095 (%s)\n", r, e == ESP_OK ? "ok" : esp_err_to_name(e)); }
@@ -827,11 +889,8 @@ void setup() {
 
   // PRESET PLAYLIST ROUTER
   // counts the presets in the ACTIVE_PLAYLIST   
-  active_preset_count = sizeof(ACTIVE_PLAYLIST) / sizeof(ACTIVE_PLAYLIST[0]);
-  
-  for (int i = 0; i < active_preset_count; i++) {
-      presets[i] = ACTIVE_PLAYLIST[i];
-  }  
+  pl_load();                                  // the playlist the phone chose (default: our 11)
+  preset = pl_id[0]; preset_counter = 0;
   Serial.printf("[2] Routing Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
 
   DOUBLECLK
@@ -852,7 +911,7 @@ void setup() {
      for (int i = 0; i < 16; i++) co_p[i] = co_default[i];
      for (int e = 0; e < FX_N; e++) for (int i = 0; i < 8; i++) fx_p[e][i] = fx_default[e][i];
      all_update();
-     PRESETTER(presets[0])
+     PRESETTER(pool[preset])
   // ------------------------------------------
   // ------------------------------------------
 
@@ -907,19 +966,9 @@ void loop() {
     REG(IO_MUX_GPIO34_REG)[0] |= FUN_IE; REG(IO_MUX_GPIO35_REG)[0] |= FUN_IE;   // input enabled
   }
 
-  // EARTH: ADC2 channel 0 (GPIO 4), read here 1000 times a second, one conversion at a time
-  // (GPIO 34 is SKIP, not EARTH — v3.12 broke SKIP by making it an analog pin)
-  static uint32_t ea_us = 0;
-  if ((uint32_t)(micros() - ea_us) >= 1000) {
-    ea_us = micros();
-    int r = 0;
-    if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) {
-      earth_raw12 = r;
-      earth_now = r >> 4;
-    } else {
-      earth_fail++;
-    }
-  }
+  // EARTH: read by its own task on core 0 (see earth_task) — not here: adc2_get_raw holds a spinlock that
+  // shuts interrupts off on its core for each conversion, and on this core that stalled the audio interrupt
+  // 1000x a second (YELLOW's organ crackled).
 
   // GRAIN works in samples: keep its times right when the SPEED knob moves the clock
   static uint32_t hz_t = 0, hz_n = 0;
@@ -960,9 +1009,9 @@ void loop() {
     if (n != preset) {
       REG(I2S_CONF_REG)[0] &= ~(BIT(5));
       detachInterrupt(2);
-      preset = n; preset_counter = n;
+      preset = n; { int k = pl_index(n); if (k >= 0) preset_counter = k; }
       preset_gen++;
-      PRESETTER(presets[preset]);
+      PRESETTER(pool[preset]);
       REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
       REG(I2S_CONF_REG)[0] |= (BIT(5));
       Serial.printf("[phone] preset %d\n", preset + 1);
@@ -1099,7 +1148,7 @@ void loop() {
 
     // Load the new preset safely while everything is paused
     preset_gen++;
-    PRESETTER(presets[preset]);
+    PRESETTER(pool[preset]);
 
 
     // Resume Audio Engine

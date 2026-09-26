@@ -27,7 +27,11 @@
 import Foundation
 
 enum Preset {
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "ARP_DELAY"]
+    /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "ARP_DELAY",
+                        "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
+                        "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
+                        "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
@@ -40,25 +44,57 @@ enum Preset {
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
         "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
+        "Apple π · the original Cocoquantus coco · EARTH = record switch",
+        "Apple π · prime-number delay / reverb · EARTH = low-pass · SKIP = room",
+        "Apple π · very short delay · EARTH = head spread · ASH + YELLOW = stereo",
+        "Apple π · plucked string",
+        "Apple π · spring reverb · EARTH = damping · FLIP = surf / lush",
+        "Apple π · live granular reverb · EARTH = grain size · FLIP = shimmer",
+        "Apple π · feedback delay network · EARTH = room size",
+        "Apple π · pitch-tracking over / under tones",
+        "Apple π · delay locked to a clock on SKIP · FLIP = reverse",
+        "Apple π · buffer length without pitch · reverb <-> delay",
+        "Apple π · loop start / end on EARTH (FLIP = which) · SKIP = jump",
+        "Apple π · stutter in segments · EARTH = segment · FLIP = random",
+        "Apple π · the loop slowly falls apart · EARTH = drop-outs",
+        "Apple π · one-shot sampler · BUTTON = mode · SKIP = trigger",
+        "Apple π · 4 slices · EARTH = slice · SKIP / FLIP = one-shots",
+        "Apple π · 16 grains · SKIP = trigger · EARTH = position",
+        "Apple π · 4 drifting play heads · BUTTON = rec / play",
+        "Apple π · bytebeat synth",
+        "Apple π · more bytebeats",
+        "Apple π · 8-bit arcade sounds",
+        "Apple π · bytebeat effects",
+        "Apple π · wavetable voice",
+        "Apple π · drone voices",
+        "Apple π · drum machine",
+        "Apple π · polyrhythmic drums",
     ]
+    /// how many the firmware has (the pool) and how many the playlist may hold
+    static let poolCount = 36
+    static let maxPlaylist = 11
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
     static let charDefaults: [Double] = [0, 1, 0, 0, 0.714, 0, 1, 0, 0, 0, 0]
-    /// presets that exist in the firmware
+    /// our own presets (0–10): the ones with CHAR values and phone pads
     static let count = 11
     static let ble = 2
     static let harmony = 6
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
-    /// the order of the list (and the numbers shown): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones.
-    /// (The firmware keeps its own indices: G <n> still sends those.)
-    static let order = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
-    static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? n) + 1 }
+    /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
+    static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
+    /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
+    static var order = defaultPlaylist
+    static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
     static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
-    static func tag(_ n: Int) -> String { String(format: "%02ld_", number(n)) + (n >= 0 && n < names.count ? names[n] : "—") }
+    static func tag(_ n: Int) -> String {
+        let k = number(n)
+        return (k > 0 ? String(format: "%02ld_", k) : "--_") + (n >= 0 && n < names.count ? names[n] : "—")
+    }
 }
 
 /// what the 8 pads are right now
@@ -198,6 +234,15 @@ final class Rig: ObservableObject {
     @Published var charV: [[Double]] = (Rig.d.array(forKey: "rig.char") as? [[Double]]).flatMap { $0.count == 2 && $0.allSatisfy { $0.count == Preset.count } ? $0 : nil }
         ?? [Preset.charDefaults, Preset.charDefaults] {
         didSet { Self.d.set(charV, forKey: "rig.char") }
+    }
+    /// the playlist: up to 11 pool ids, in order (PRESET DESIGN edits it; it goes to the Cafes as "L …")
+    @Published var playlist: [Int] = {
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount } ?? []
+        let v = p.isEmpty ? Preset.defaultPlaylist : Array(p.prefix(Preset.maxPlaylist))
+        Preset.order = v
+        return v
+    }() {
+        didSet { Preset.order = playlist; Self.d.set(playlist, forKey: "rig.playlist") }
     }
     @Published var link = false
     @Published var dlHold = false

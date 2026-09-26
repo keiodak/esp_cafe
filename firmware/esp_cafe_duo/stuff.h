@@ -358,6 +358,9 @@ int preset;
 //void (*presets[PRESETAMT])(); //updated to tie to the PRESETAMT in .ino
 // PLAYLIST MEMORY
 int active_preset_count = 1; 
+// the playlist (k.odk): up to 11 pool ids — what the BUTTON menu steps through and the phone lists.
+// "preset" is always a pool id (see pool[] in the .ino); the menu turns its count into one through pl_id.
+int pl_id[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 void (*presets[32])(); // hardware ceiling of 32 presets per playlist
 
 // =========================================================
@@ -408,7 +411,7 @@ void IRAM_ATTR doubleclicker() {
           } else {
             // Exiting mode: Apply the new preset.
             //preset = preset_counter % PRESETAMT; 
-            preset = preset_counter % active_preset_count;
+            preset = pl_id[preset_counter % active_preset_count];
             // set audio_frozen_state so preset changing doesn't 
             // record over transferred buffers
             audio_frozen_state = true; 

@@ -1,7 +1,7 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
-//   PRESETS  numbered in this order (BLE, MULTI, ARP_DELAY, HARMONY, the Cafe ones). A · & · B on each row:
-//            where each Cafe is, and a tap puts A / both / B there (that is also who the pads go to).
+//   PRESETS  the playlist, numbered in its order. A · B on each row: where each Cafe is, and a tap puts it there
+//            (that is also who the pads go to); the row itself = both. 12 = PRESET DESIGN (edit the playlist).
 //   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on
 //   (TEMPO and UPDATE live in the CAFES panel.)
 
@@ -13,16 +13,40 @@ struct PresetManagerView: View {
     @ObservedObject var rig: Rig
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
+    @State private var design = false
 
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
-                PanelCard(title: "PRESETS", note: "A · & · B = which Cafe", spacing: 3) {
-                    ForEach(Preset.order, id: \.self) { n in
+                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
+                    ForEach(rig.playlist, id: \.self) { n in
                         PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
                     }
+                    // 12: PRESET DESIGN — which presets are in the list (and the Cafe's BUTTON menu)
+                    HStack(spacing: 6) {
+                        HudTag(text: "12", fill: design ? PastelTheme.hudOrange : PastelTheme.hudBlack, size: 9)
+                        Text("PRESET_DESIGN")
+                            .font(.hudBig(13))
+                            .foregroundStyle(PastelTheme.hudBlack)
+                        Text("add / remove presets (up to 11) · Apple π's are here too")
+                            .font(.hud(7.5))
+                            .foregroundStyle(PastelTheme.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: design ? "chevron.right.circle.fill" : "chevron.right.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(design ? PastelTheme.hudOrange : PastelTheme.hudBlack)
+                    }
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 3)
+                    .background(Rectangle().fill(design ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
+                    .contentShape(Rectangle())
+                    .onTapGesture { design.toggle() }
                 }
             } right: {
+                if design {
+                    DesignCard(d: d, rig: rig)
+                } else {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
                         ForEach(0..<4, id: \.self) { m in
@@ -43,8 +67,57 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
+                }
             }
         }
+    }
+}
+
+/// PRESET DESIGN: the playlist (up to 11, in order: ▲ ▼ move, − takes out) and everything else the firmware has (+ puts in).
+/// Every change goes to the Cafes at once ("L …"); their BUTTON menu follows, and they keep it.
+private struct DesignCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        let list = rig.playlist
+        PanelCard(title: "PRESET DESIGN", note: "\(list.count) / \(Preset.maxPlaylist)", spacing: 3) {
+            ForEach(Array(list.enumerated()), id: \.element) { i, n in
+                HStack(spacing: 5) {
+                    HudTag(text: String(format: "%02ld", i + 1), size: 8)
+                    Text(Preset.names[n]).font(.hud(9, .semibold)).foregroundStyle(PastelTheme.hudBlack)
+                    Spacer(minLength: 0)
+                    small("▲", i > 0) { var l = list; l.swapAt(i, i - 1); d.setPlaylist(l) }
+                    small("▼", i < list.count - 1) { var l = list; l.swapAt(i, i + 1); d.setPlaylist(l) }
+                    small("−", list.count > 1) { var l = list; l.remove(at: i); d.setPlaylist(l) }
+                }
+            }
+            Text("NOT IN THE LIST")
+                .font(.hud(7, .semibold)).tracking(1.2)
+                .foregroundStyle(PastelTheme.hudOrange)
+                .padding(.top, 6)
+            ForEach((0..<Preset.poolCount).filter { !list.contains($0) }, id: \.self) { n in
+                HStack(spacing: 5) {
+                    Text(Preset.names[n]).font(.hud(9, .semibold)).foregroundStyle(PastelTheme.hudBlack)
+                        .frame(width: 84, alignment: .leading)
+                    Text(Preset.notes[n]).font(.hud(7)).foregroundStyle(PastelTheme.textSecondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    small("+", list.count < Preset.maxPlaylist) { d.setPlaylist(list + [n]) }
+                }
+            }
+            ChipButton(title: "BACK TO THE DEFAULT 11", filled: false) { d.setPlaylist(Preset.defaultPlaylist) }
+                .padding(.top, 6)
+        }
+    }
+
+    private func small(_ t: String, _ on: Bool, _ act: @escaping () -> Void) -> some View {
+        Text(t)
+            .font(.hud(10, .semibold))
+            .foregroundStyle(on ? PastelTheme.hudBlack : PastelTheme.hudLine)
+            .frame(width: 24, height: 18)
+            .overlay(Rectangle().strokeBorder(on ? PastelTheme.hudBlack : PastelTheme.hudLine, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onTapGesture { if on { act() } }
     }
 }
 
@@ -180,8 +253,8 @@ private struct ArpCard: View {
     }
 }
 
-/// one preset: its number (the order in this list), name, what it is, and A · & · B —
-/// each shows where that Cafe is and puts it there (& = both). Tapping the row itself = both too.
+/// one preset: its number (the order in this list), name, what it is, and A · B —
+/// each shows where that Cafe is and puts it there. Tapping the row itself = both.
 private struct PresetRow: View {
     let n: Int
     @ObservedObject var rig: Rig
@@ -206,7 +279,6 @@ private struct PresetRow: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             mark("A", onA, a.isConnected) { choose(0) }
-            mark("&", onA && onB, a.isConnected || b.isConnected) { choose(2) }
             mark("B", onB, b.isConnected) { choose(1) }
         }
         .padding(.vertical, 2)

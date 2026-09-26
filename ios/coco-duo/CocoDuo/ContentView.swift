@@ -81,6 +81,7 @@ final class Director: ObservableObject {
     /// put a Cafe on its preset (and mode), then give it every pad
     func sendAll(to u: CafeUnit) {
         let s = u.slot
+        u.send("L " + rig.playlist.map(String.init).joined(separator: " "))
         u.send("G \(rig.preset[s])")
         u.send("K \(Int((rig.bpm * 10).rounded()))")
         let pr = rig.preset[s]
@@ -106,7 +107,7 @@ final class Director: ObservableObject {
     }
 
     func setPreset(_ n: Int) {
-        guard n >= 0 && n < Preset.count else { return }
+        guard n >= 0 && n < Preset.poolCount else { return }
         var p = rig.preset
         for s in rig.slots { p[s] = n }
         rig.preset = p
@@ -114,6 +115,17 @@ final class Director: ObservableObject {
         for s in rig.slots where units[s].isConnected { sendAll(to: units[s]) }
         refresh()
         syncIfPair()
+    }
+
+    /// one Cafe only (the knob screen's halves): the other keeps its preset
+    func setPreset(_ n: Int, only s: Int) {
+        guard n >= 0 && n < Preset.poolCount, s == 0 || s == 1 else { return }
+        var p = rig.preset
+        p[s] = n
+        rig.preset = p
+        if n == Preset.arp { arp.startAudio() }
+        if units[s].isConnected { sendAll(to: units[s]) }
+        refresh()
     }
 
     func setMode(_ m: Int) {
@@ -128,6 +140,15 @@ final class Director: ObservableObject {
     func cycleMode() { if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % 4) } }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
+
+    /// PRESET DESIGN: a new playlist (up to 11 pool ids) -> both Cafes (their BUTTON menu follows)
+    func setPlaylist(_ p: [Int]) {
+        let v = Array(p.filter { $0 >= 0 && $0 < Preset.poolCount }.prefix(Preset.maxPlaylist))
+        guard !v.isEmpty else { return }
+        rig.playlist = v
+        let line = "L " + v.map(String.init).joined(separator: " ")
+        units.filter { $0.isConnected }.forEach { $0.send(line) }
+    }
 
     /// both Cafes on the same thing: start them together (grain score / coco loop / the click)
     func syncIfPair() {
@@ -455,7 +476,7 @@ private struct MainScreen: View {
 
     @ViewBuilder private var pads: some View {
         if rig.padSet == .knob {
-            KnobPlacard(rig: rig, a: hub.units[0], b: hub.units[1])
+            KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
@@ -628,49 +649,83 @@ private struct TapPad: View {
 }
 
 /// knob presets: nothing to play here, the Cafe is played with its own controls
+/// knob presets: the Cafe is played with its own controls. Split down the middle — A left, B right, side by side —
+/// each half shows its Cafe's preset and the playlist to change it (A and B can be on different presets).
 private struct KnobPlacard: View {
+    let d: Director
     @ObservedObject var rig: Rig
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
 
     var body: some View {
-        let n = rig.ctxPreset
         ZStack {
             Rectangle().fill(PastelTheme.padScreen)
             HudDots(step: 12)
             Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
             HudCorners(arm: 12).stroke(PastelTheme.hudBlack, lineWidth: 1.4).padding(4)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    HudTag(text: "KNOB_CONTROL", size: 9)
-                    HudTag(text: rig.target == 2 ? "A+B" : (rig.target == 0 ? "A" : "B"), fill: PastelTheme.hudOrange, size: 9)
-                }
-                Text(Preset.tag(n))
-                    .font(.hudBig(46))
-                    .foregroundStyle(PastelTheme.hudBlack)
-                Rectangle().fill(PastelTheme.hudOrange).frame(width: 120, height: 3)
-                Text(n >= 0 && n < Preset.notes.count ? Preset.notes[n].uppercased() : "")
-                    .font(.hud(11, .medium))
-                    .tracking(0.8)
-                    .foregroundStyle(PastelTheme.textSecondary)
-                HStack(spacing: 14) {
-                    side("A", a)
-                    side("B", b)
-                }
-                .padding(.top, 6)
+            HStack(spacing: 0) {
+                KnobHalf(d: d, rig: rig, unit: a)
+                Rectangle().fill(PastelTheme.hudLine).frame(width: 1).padding(.vertical, 14)
+                KnobHalf(d: d, rig: rig, unit: b)
             }
-            .padding(.horizontal, 28)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
 
-    private func side(_ name: String, _ u: CafeUnit) -> some View {
-        HStack(spacing: 5) {
-            HudTag(text: name, fill: u.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 8)
-            Text(u.isConnected ? Preset.tag(u.preset) : "NO_LINK")
-                .font(.hud(9, .semibold))
+private struct KnobHalf: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+    @ObservedObject var unit: CafeUnit
+
+    var body: some View {
+        let s = unit.slot
+        let n = unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[s]
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                HudTag(text: s == 0 ? "A" : "B", fill: unit.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 9)
+                Text(unit.isConnected ? (unit.name ?? "") : "NO_LINK")
+                    .font(.hud(8, .semibold))
+                    .foregroundStyle(PastelTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            Text(Preset.tag(n))
+                .font(.hudBig(24))
                 .foregroundStyle(PastelTheme.hudBlack)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Rectangle().fill(PastelTheme.hudOrange).frame(width: 70, height: 2)
+            Text(n >= 0 && n < Preset.notes.count ? Preset.notes[n].uppercased() : "")
+                .font(.hud(8, .medium))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(2)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)], alignment: .leading, spacing: 3) {
+                ForEach(rig.playlist, id: \.self) { p in
+                    Button { d.setPreset(p, only: s) } label: {
+                        HStack(spacing: 3) {
+                            Text(String(format: "%02ld", Preset.number(p)))
+                                .font(.hud(7.5, .semibold))
+                                .foregroundStyle(p == n ? Color.white : PastelTheme.hudBlack)
+                                .frame(width: 16, height: 16)
+                                .background(Rectangle().fill(p == n ? PastelTheme.hudOrange : Color.clear))
+                            Text(Preset.names[p])
+                                .font(.hud(8, .semibold))
+                                .foregroundStyle(PastelTheme.hudBlack)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(height: 18)
+                        .background(Rectangle().fill(p == n ? PastelTheme.hudOrange.opacity(0.15) : PastelTheme.padScreen))
+                        .overlay(Rectangle().strokeBorder(p == n ? PastelTheme.hudOrange : PastelTheme.hudLine, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 2)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -1017,7 +1072,7 @@ private struct CharControl: View {
     let preset: Int
 
     var body: some View {
-        let p = min(max(preset, 0), Preset.count - 1)
+        let p = min(max(preset, 0), Preset.count - 1)          // (Apple π presets have no CHAR: hidden below)
         let v = rig.charV[slot][p]
         let isHarmony = p == Preset.harmony
         HStack(spacing: 5) {
@@ -1042,5 +1097,7 @@ private struct CharControl: View {
         .frame(height: 18)
         .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
         .fixedSize()
+        .opacity(preset >= 0 && preset < Preset.count ? 1 : 0)
+        .allowsHitTesting(preset >= 0 && preset < Preset.count)
     }
 }
