@@ -18,14 +18,8 @@ struct PresetManagerView: View {
 
     @State private var sel: Int? = nil          // PRESET DESIGN: the slot picked on the left
 
-    /// PRESET DESIGN, on the left: tap a slot to pick it; tap another slot = the two swap places
-    private func tapSlot(_ i: Int) {
-        if let s = sel, s != i {
-            var l = rig.design; l.swapAt(s, i); d.setDesign(l); sel = nil
-        } else {
-            sel = sel == i ? nil : i
-        }
-    }
+    /// PRESET DESIGN, on the left: tap a slot to pick it (to move a preset, pick a slot and tap that preset on the right)
+    private func tapSlot(_ i: Int) { sel = i }
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
@@ -59,7 +53,7 @@ struct PresetManagerView: View {
                     .padding(.horizontal, 3)
                     .background(Rectangle().fill(design ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
                     .contentShape(Rectangle())
-                    .onTapGesture { design.toggle(); sel = nil }
+                    .onTapGesture { design.toggle(); sel = design ? 0 : nil }      // opens with slot 01 picked
                 }
             } right: {
                 if design {
@@ -125,7 +119,7 @@ private struct DesignCard: View {
     @Binding var sel: Int?
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { "slot \(String(format: "%02ld", $0 + 1)) → pick a preset" } ?? "pick a slot on the left", spacing: 4, fill: true) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { "slot \(String(format: "%02ld", $0 + 1)) → pick a preset" } ?? "pick a slot on the left", spacing: 4) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
                 ForEach(0..<Preset.poolCount, id: \.self) { n in
                     let at = rig.design.firstIndex(of: n)
@@ -168,7 +162,7 @@ private struct DesignCard: View {
     /// a preset into the picked slot (none picked: the first empty one)
     private func put(_ n: Int) {
         var l = rig.design
-        guard let s = sel ?? l.firstIndex(of: -1) else { return }
+        let s = sel ?? l.firstIndex(of: -1) ?? 0
         if let j = l.firstIndex(of: n) { l.swapAt(s, j) } else { l[s] = n }
         d.setDesign(l)
         if sel != nil { sel = min(s + 1, Preset.maxPlaylist - 1) }      // next slot, for filling in a row
