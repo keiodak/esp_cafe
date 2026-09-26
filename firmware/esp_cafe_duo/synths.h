@@ -2286,7 +2286,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   ct += (td_T - ct) >> 11;
   int32_t tl = td_clean ? ct : ct + ((fx_emq * td_wow) >> 8);         // EARTH, smoothed: bends, never crackles
   if (tl < (64 << 8)) tl = 64 << 8; if (tl > (32000 << 8)) tl = 32000 << 8;
-  int32_t tr = (int32_t)(((int64_t)tl * td_ratio) >> 12);
+  int32_t tr = td_clean ? tl : (int32_t)(((int64_t)tl * td_ratio) >> 12);   // ARP_DELAY: L and R on the same beat (no smear)
   if (tr < (64 << 8)) tr = 64 << 8; if (tr > (32000 << 8)) tr = 32000 << 8;
   int32_t rq = (int32_t)(w << 8) - tl;
   int32_t i = (rq >> 8) & 0x7FFF, f = rq & 255;
@@ -2302,7 +2302,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   else { fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone); }
   hpl += (lpl - hpl) >> 8; hpr += (lpr - hpr) >> 8;                  // ...but always the DC blocker: the input's offset
                                                                      // must not pile up in the feedback (it did: noise)
-  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 3) >> 2 : td_fb);
+  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 9) >> 4 : td_fb);   // ARP_DELAY: fewer repeats, each one clear
   int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
   int32_t il = hold ? 0 : in, ir = hold ? 0 : (td_clean ? in : ((in * (256 - pp)) >> 8));   // ARP_DELAY: a mono input fills both sides
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
