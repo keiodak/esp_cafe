@@ -120,10 +120,9 @@ final class ArpEngine {
         }
         engine.attach(n)
         engine.connect(n, to: engine.mainMixerNode, format: fmt)
-        let outFmt = engine.outputNode.outputFormat(forBus: 0)
-        if let f = AVAudioFormat(standardFormatWithSampleRate: sr, channels: max(2, outFmt.channelCount)) {
-            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: f)   // both sides, never one
-        }
+        // the mixer -> output in the output's own format (nil): a USB interface with more than two channels has no
+        // "standard" format of its own — asking for one gave nothing, and the mixer was left unconnected (silence)
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
         node = n
         do { try engine.start(); running = true } catch { running = false }
     }
@@ -142,9 +141,7 @@ final class ArpEngine {
         if outFmt.channelCount != mixFmt.channelCount || abs(outFmt.sampleRate - mixFmt.sampleRate) > 1 {
             engine.stop()
             engine.disconnectNodeOutput(engine.mainMixerNode)
-            if let f = AVAudioFormat(standardFormatWithSampleRate: outFmt.sampleRate, channels: max(2, outFmt.channelCount)) {
-                engine.connect(engine.mainMixerNode, to: engine.outputNode, format: f)
-            }
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)   // (the output as it is now)
         }
         if hw > 1000 && abs(hw - sr) > 1 {
             engine.stop()
