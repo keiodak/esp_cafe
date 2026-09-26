@@ -926,7 +926,7 @@ struct CafesView: View {
 
     var body: some View {
         PanelScaffold(title: "CAFES") {
-            PanelColumns {
+            PanelColumns(equalHeight: true) {
                 // left, tight: both Cafes, who is nearby, the camera
                 PanelCard(title: "CAFES", note: hub.bluetoothReady ? "searching" : "bluetooth off", spacing: 4) {
                     CafeLine(hub: hub, unit: hub.units[0])
@@ -1025,7 +1025,7 @@ private struct CameraCard: View {
     @ObservedObject var camera: CameraRig
 
     var body: some View {
-        PanelCard(title: "CAMERA", toggle: $camera.enabled) {
+        PanelCard(title: "CAMERA", toggle: $camera.enabled, fill: true) {
             VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
                 HStack(spacing: PanelMetrics.rowGap) {
                     label("MODE")

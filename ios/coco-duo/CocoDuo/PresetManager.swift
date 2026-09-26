@@ -15,12 +15,44 @@ struct PresetManagerView: View {
     @ObservedObject var b: CafeUnit
     @State private var design = false
 
+    /// PRESET DESIGN drops: "N<id>" = from the right (a new one), "P<id>" = a row of the list.
+    /// before = the row it lands on (nil = the end, -1 = back to the right: take it out of the list)
+    private func drop(_ item: String?, before target: Int?) -> Bool {
+        guard let item, let kind = item.first, let id = Int(item.dropFirst()), id >= 0, id < Preset.poolCount else { return false }
+        var l = rig.playlist
+        if target == -1 {
+            guard kind == "P", l.count > 1 else { return false }
+            l.removeAll { $0 == id }
+        } else {
+            if kind == "P" { l.removeAll { $0 == id } }
+            else if l.contains(id) || l.count >= Preset.maxPlaylist { return false }
+            if let t = target, let i = l.firstIndex(of: t) { l.insert(id, at: i) } else { l.append(id) }
+        }
+        d.setPlaylist(l)
+        return true
+    }
+
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
                 PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
                     ForEach(rig.playlist, id: \.self) { n in
-                        PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
+                        if design {
+                            PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
+                                .draggable("P\(n)")
+                                .dropDestination(for: String.self) { items, _ in drop(items.first, before: n) }
+                        } else {
+                            PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
+                        }
+                    }
+                    if design {
+                        // drop here = to the end of the list
+                        Text(rig.playlist.count < Preset.maxPlaylist ? "＋ drop here (\(rig.playlist.count) / \(Preset.maxPlaylist))" : "the list is full (11)")
+                            .font(.hud(8, .semibold))
+                            .foregroundStyle(PastelTheme.textSecondary)
+                            .frame(maxWidth: .infinity, minHeight: 22)
+                            .overlay(Rectangle().stroke(PastelTheme.hudLine, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+                            .dropDestination(for: String.self) { items, _ in drop(items.first, before: nil) }
                     }
                     // 12: PRESET DESIGN — which presets are in the list (and the Cafe's BUTTON menu)
                     HStack(spacing: 6) {
@@ -45,7 +77,7 @@ struct PresetManagerView: View {
                 }
             } right: {
                 if design {
-                    DesignCard(d: d, rig: rig)
+                    DesignCard(d: d, rig: rig) { item in drop(item, before: -1) }
                 } else {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
@@ -73,94 +105,38 @@ struct PresetManagerView: View {
     }
 }
 
-/// PRESET DESIGN: the playlist (up to 11, in order: ▲ ▼ move, − takes out) and everything else the firmware has (+ puts in).
-/// Every change goes to the Cafes at once ("L …"); their BUTTON menu follows, and they keep it.
+/// PRESET DESIGN (right): everything the firmware has that is not in the list. Drag one onto the list (on a row = in
+/// front of it, on the dashed box = at the end); drag a list row back here to take it out; drag rows to reorder.
 private struct DesignCard: View {
     let d: Director
     @ObservedObject var rig: Rig
+    let dropBack: (String?) -> Bool
 
     var body: some View {
-        let list = rig.playlist
-        PanelCard(title: "PRESET DESIGN", note: "\(list.count) / \(Preset.maxPlaylist)", spacing: 3) {
-            ForEach(Array(list.enumerated()), id: \.element) { i, n in
-                HStack(spacing: 5) {
-                    HudTag(text: String(format: "%02ld", i + 1), size: 8)
-                    Text(Preset.names[n]).font(.hud(9, .semibold)).foregroundStyle(PastelTheme.hudBlack)
-                    Spacer(minLength: 0)
-                    small("▲", i > 0) { var l = list; l.swapAt(i, i - 1); d.setPlaylist(l) }
-                    small("▼", i < list.count - 1) { var l = list; l.swapAt(i, i + 1); d.setPlaylist(l) }
-                    small("−", list.count > 1) { var l = list; l.remove(at: i); d.setPlaylist(l) }
+        let rest = (0..<Preset.poolCount).filter { !rig.playlist.contains($0) }
+        PanelCard(title: "PRESET DESIGN", note: "drag ← in · drag → out", spacing: 4, fill: true) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)], alignment: .leading, spacing: 4) {
+                ForEach(rest, id: \.self) { n in
+                    Text(Preset.names[n])
+                        .font(.hud(8.5, .semibold))
+                        .foregroundStyle(PastelTheme.hudBlack)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 5)
+                        .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                        .background(Rectangle().fill(n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08)))
+                        .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+                        .draggable("N\(n)")
                 }
             }
-            Text("NOT IN THE LIST")
-                .font(.hud(7, .semibold)).tracking(1.2)
-                .foregroundStyle(PastelTheme.hudOrange)
-                .padding(.top, 6)
-            ForEach((0..<Preset.poolCount).filter { !list.contains($0) }, id: \.self) { n in
-                HStack(spacing: 5) {
-                    Text(Preset.names[n]).font(.hud(9, .semibold)).foregroundStyle(PastelTheme.hudBlack)
-                        .frame(width: 84, alignment: .leading)
-                    Text(Preset.notes[n]).font(.hud(7)).foregroundStyle(PastelTheme.textSecondary).lineLimit(1)
-                    Spacer(minLength: 0)
-                    small("+", list.count < Preset.maxPlaylist) { d.setPlaylist(list + [n]) }
-                }
-            }
-            ChipButton(title: "BACK TO THE DEFAULT 11", filled: false) { d.setPlaylist(Preset.defaultPlaylist) }
-                .padding(.top, 6)
-        }
-    }
-
-    private func small(_ t: String, _ on: Bool, _ act: @escaping () -> Void) -> some View {
-        Text(t)
-            .font(.hud(10, .semibold))
-            .foregroundStyle(on ? PastelTheme.hudBlack : PastelTheme.hudLine)
-            .frame(width: 24, height: 18)
-            .overlay(Rectangle().strokeBorder(on ? PastelTheme.hudBlack : PastelTheme.hudLine, lineWidth: 1))
-            .contentShape(Rectangle())
-            .onTapGesture { if on { act() } }
-    }
-}
-
-/// UPDATE (in the CAFES panel): write a new firmware over Bluetooth to A / B / both
-struct UpdateCard: View {
-    let d: Director
-    @ObservedObject var rig: Rig
-    @ObservedObject var a: CafeUnit
-    @ObservedObject var b: CafeUnit
-    @State private var picking = false
-    @State private var fileNote = ""
-    private let who = ["A", "B", "A + B"]
-
-    var body: some View {
-        PanelCard(title: "UPDATE", note: "firmware over bluetooth", spacing: 5) {
             HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(0..<3, id: \.self) { t in
-                    ChipButton(title: who[t], filled: rig.updTarget == t) { rig.updTarget = t }
-                }
+                Text("orange = Apple π").font(.hud(7)).foregroundStyle(PastelTheme.textSecondary)
+                Spacer(minLength: 0)
+                ChipButton(title: "DEFAULT 11", filled: false) { d.setPlaylist(Preset.defaultPlaylist) }
+                    .frame(width: 84)
             }
-            ChipButton(title: "CHOOSE .BIN AND WRITE", filled: a.ota != nil || b.ota != nil) {
-                if a.ota == nil && b.ota == nil { picking = true }
-            }
-            UpdateRow(unit: a)
-            UpdateRow(unit: b)
-            if !fileNote.isEmpty {
-                Text(fileNote)
-                    .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
-                    .foregroundStyle(PastelTheme.textSecondary)
-            }
-            Text("Arduino IDE: Sketch > Export Compiled Binary → esp_cafe_duo.ino.bin (not .merged / .bootloader). The Cafe restarts with it.")
-                .font(.hud(8))
-                .foregroundStyle(PastelTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.data]) { result in
-            guard case .success(let url) = result else { return }
-            let ok = url.startAccessingSecurityScopedResource()
-            defer { if ok { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { fileNote = "could not read the file"; return }
-            fileNote = "\(url.lastPathComponent) · \(data.count / 1024) KB"
-            d.update([UInt8](data))
-        }
+        .dropDestination(for: String.self) { items, _ in dropBack(items.first) }
     }
 }
 
