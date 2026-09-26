@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.12"
+#define FW_VERSION "3.13"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -71,6 +71,8 @@
 #define OTA_RX  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"   // firmware update: binary pieces (write without response)
 #include <Update.h>
 #include <esp_ota_ops.h>
+#include <driver/adc.h>
+volatile uint32_t earth_fail = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
 static volatile bool ble_conn = false;
 static volatile uint16_t ble_mtu = 23;
@@ -549,9 +551,9 @@ void pc_line(char *s) {
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
-    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a34 %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
+    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
-                (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
+                (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)earth_fail, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
                 (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
@@ -740,11 +742,11 @@ void setup() {
 
   SETUPPERS
   Serial.printf("[1] SETUPPERS Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
-  // EARTH on ADC1 channel 6 (GPIO 34), 12 bits, 0 dB like the original pattern table (ADC1_PATT)
-  analogReadResolution(12);
-  analogSetPinAttenuation(34, ADC_0db);
-  earth_raw12 = analogRead(34); earth_now = earth_raw12 >> 4;
-  Serial.printf("[1] EARTH (GPIO 34) now %d / 4095\n", earth_raw12);
+  // EARTH on ADC2 channel 0 (GPIO 4), 12 bits, 2.5 dB like the original pattern table (ADC2_PATT = 0x0D)
+  adc2_config_channel_atten(ADC2_CHANNEL_0, ADC_ATTEN_DB_2_5);
+  { int r = 0; esp_err_t e = adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r);
+    if (e == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
+    Serial.printf("[1] EARTH (GPIO 4, ADC2) now %d / 4095 (%s)\n", r, e == ESP_OK ? "ok" : esp_err_to_name(e)); }
 
 
   //theCoolWifiInitiation();
@@ -851,13 +853,18 @@ void loop() {
   pc_service();   // lines from the phone (BLE)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
-  // EARTH: ADC1 channel 6 (GPIO 34), read here 2000 times a second (works with Bluetooth on)
+  // EARTH: ADC2 channel 0 (GPIO 4), read here 1000 times a second, one conversion at a time
+  // (GPIO 34 is SKIP, not EARTH — v3.12 broke SKIP by making it an analog pin)
   static uint32_t ea_us = 0;
-  if ((uint32_t)(micros() - ea_us) >= 500) {
+  if ((uint32_t)(micros() - ea_us) >= 1000) {
     ea_us = micros();
-    int r = analogRead(34);
-    earth_raw12 = r;
-    earth_now = r >> 4;
+    int r = 0;
+    if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) {
+      earth_raw12 = r;
+      earth_now = r >> 4;
+    } else {
+      earth_fail++;
+    }
   }
 
   // GRAIN works in samples: keep its times right when the SPEED knob moves the clock
@@ -873,8 +880,8 @@ void loop() {
   static uint32_t dbg_t = 0;
   if (millis() - dbg_t >= 1000) {
     dbg_t = millis();
-    Serial.printf("[earth] %s a34 %4lu earth %d flip %d skip %d | sarctl %08lx rd1 %08lx rd2 %08lx st1 %08lx st2 %08lx wait2 %08lx i2s %08lx\n",
-      cafe_no_ble ? "noBLE" : "BLE", (unsigned long)pc_fifo, (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0,
+    Serial.printf("[earth] %s a4 %4lu fail %lu earth %d flip %d skip %d | sarctl %08lx rd1 %08lx rd2 %08lx st1 %08lx st2 %08lx wait2 %08lx i2s %08lx\n",
+      cafe_no_ble ? "noBLE" : "BLE", (unsigned long)pc_fifo, (unsigned long)earth_fail, (int)pc_earth, (FLIPPERAT) ? 1 : 0, (SKIPPERAT) ? 1 : 0,
       (unsigned long)REG(APB_SARADC_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL_REG)[0], (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0],
       (unsigned long)REG(SENS_SAR_MEAS_START1_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0],
       (unsigned long)REG(SENS_SAR_MEAS_WAIT2_REG)[0], (unsigned long)REG(I2S_CONF_REG)[0]);

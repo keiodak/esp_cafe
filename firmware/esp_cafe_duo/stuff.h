@@ -83,7 +83,7 @@ bool lamp; // declare the lamp variable for lampaflip
 // =========================================================
 // EARTH
 // =========================================================
-// k.odk: EARTH is read in loop() straight from ADC1 (GPIO 34), 2000 times a second, and kept here.
+// k.odk: EARTH is read in loop() straight from ADC2 channel 0 (GPIO 4), 1000 times a second, and kept here.
 // (The original read it inside the audio interrupt through the I2S FIFO of the SAR ADC's digital controller;
 //  with Bluetooth running that path delivers nothing — EARTH read 0 in every preset.)
 volatile int earth_now = 0;        // 0..255
