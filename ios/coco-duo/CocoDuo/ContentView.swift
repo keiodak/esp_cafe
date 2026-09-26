@@ -295,7 +295,8 @@ final class Director: ObservableObject {
     /// read the line (written, not spoken aloud) and loop it
     func say() {
         let text = rig.speechText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !rig.speaking else { return }
+        guard !rig.speaking else { return }
+        if text.isEmpty { speechDice(); return }                     // nothing written: write something at random
         let vs = SpeechRenderer.voices
         let voice = vs.isEmpty ? nil : vs[min(max(rig.speechVoice, 0), vs.count - 1)]
         rig.speaking = true
@@ -310,6 +311,15 @@ final class Director: ObservableObject {
             self.arp.speech.playing = true
             self.rig.speechPlaying = true
         }
+    }
+    /// DICE: a new line at random (in the voice's language), read at once
+    func speechDice() {
+        let vs = SpeechRenderer.voices
+        let lang = vs.isEmpty ? "en" : vs[min(max(rig.speechVoice, 0), vs.count - 1)].language
+        let l = SpeechScraps.line(language: lang)
+        guard !l.isEmpty else { return }
+        rig.speechText = l
+        say()
     }
     /// play / stop the loop (no loop yet: read the line first)
     func speechToggle() {
@@ -514,8 +524,8 @@ final class Director: ObservableObject {
     }
 
     func setNzSpeed(_ s: Int) {
-        rig.nzSpeed = s
-        ctxUnits().forEach { $0.send("N 15 \(s * 500)") }
+        rig.nzSpeed = s == 1 ? 1 : 0
+        ctxUnits().forEach { $0.send("N 15 \(rig.nzSpeed * 500)") }
     }
 
     func noiseDice() {
@@ -973,9 +983,6 @@ private struct HudBar: View {
             switch n {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
-            case 2: key(["hare", "tortoise", "tortoise.fill"][rig.nzSpeed], on: rig.nzSpeed > 0) {   // FAST / SLOW / CRAWL
-                        d.setNzSpeed((rig.nzSpeed + 1) % 3)
-                    }
             default: blank
             }
         case .arp:
@@ -991,7 +998,7 @@ private struct HudBar: View {
             switch n {
             case 0: key(rig.speechPlaying ? "stop.fill" : "play.fill", on: rig.speechPlaying) { d.speechToggle() }
             case 1: key("text.bubble", on: rig.speaking) { d.say() }                    // SAY: read the line again
-            case 2: key("backward.end") { d.ctxUnits().forEach { $0.send("C 17 1") } }  // the Cafe's loop from its start
+            case 2: key("dice", on: rig.speaking) { d.speechDice() }                    // DICE: a random line, read
             default: key("arrow.triangle.2.circlepath") { d.speechSync() }
             }
         case .multi:
@@ -1017,8 +1024,8 @@ private struct HudBar: View {
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
-        "hare": "FAST", "wave.3.forward": "FOLD",
-        "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
+        "wave.3.forward": "FOLD",
+        "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
 

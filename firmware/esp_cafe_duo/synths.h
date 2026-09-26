@@ -1549,15 +1549,25 @@ static inline int32_t IRAM_ATTR nz_fold(int32_t x) {  // reflect into ±2048 (tr
   return tf - 2048;
 }
 volatile bool nz_shclk = false;  // set by nz_tick on every source clock
+volatile uint32_t nz_lfoinc = 0;  // LFO: rate (Q32 per sample), SHIFT pad X (0.02 .. 5 Hz)
+volatile int32_t nz_wander = 0;  // SLOW / CRAWL: the source, gliding (-1536 .. 1536) — moves pitch, fold and filter slowly
 static int32_t nz_osc(int32_t ring, int32_t *side) {
   static uint32_t ph = 0;
   static int32_t prev = 0, sprev = 0, s1 = 0, shoct = 0;
-  if (nz_olvl <= 0) {
+  const bool slow = nz_slow > 0;
+  const int32_t olvl = slow && nz_olvl < 170 ? 170 : nz_olvl;   // SLOW / CRAWL: the folded voice is the sound, always on
+  if (olvl <= 0) {
     *side = 0;
     prev = 0;
     return 0;
   }
-  const int32_t F = nz_ofold;  // 0..4096
+  int32_t F = nz_ofold;  // 0..4096
+  if (slow) {                                             // the fold breathes with the wandering source
+    if (F < 1400) F = 1400;
+    F += (int32_t)(((int64_t)nz_wander * 1600) >> 11);
+    if (F < 0) F = 0;
+    if (F > 4096) F = 4096;
+  }
   int32_t a1 = (F * 3) >> 1;
   if (a1 > 4096) a1 = 4096;  // the stages open one after another
   int32_t a2 = ((F * 3) >> 1) - 1024;
@@ -1569,7 +1579,12 @@ static int32_t nz_osc(int32_t ring, int32_t *side) {
   int32_t fb = 600 + ((F * 3) >> 2);                        // feedback Q12, 0.15 .. 0.9
   const int32_t wS = 1024, wF = 1229, wP = 819, wW = 1024;  // SYNC · FM · PITCH · WAVE (Q12, sum 1)
   // S&H on the pitch, clocked by the source
-  if (nz_shclk) {
+  if (slow) {                                             // no steps: the pitch glides with the source
+    nz_shclk = false;
+    shoct = (int32_t)(((int64_t)nz_wander * (nz_self + 128)) >> 11);
+    if (shoct > 512) shoct = 512;
+    if (shoct < -768) shoct = -768;
+  } else if (nz_shclk) {
     nz_shclk = false;
     shoct = (int32_t)(((int64_t)s1 * nz_self) >> 11);
     if (shoct > 512) shoct = 512;
@@ -1611,8 +1626,8 @@ static int32_t nz_osc(int32_t ring, int32_t *side) {
   }
   int32_t out = F > 0 ? nz_tanh(v3) : v3;
   prev += (out - prev) >> 2;  // (smoothed: a raw one-sample loop sings at Nyquist)
-  *side = (v2 * nz_olvl) >> 8;
-  return (out * nz_olvl) >> 8;
+  *side = (v2 * olvl) >> 8;
+  return (out * olvl) >> 8;
 }
 
 static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
@@ -1664,13 +1679,22 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
     vq += (((tgt << 12) - vq) >> k);
     val = vq >> 12;
   }
+  if (nz_slow) {                                            // LFO: a smooth, round swing instead of the noise source
+    static uint32_t lph = 0;
+    lph += nz_lfoinc;
+    int32_t x = (int32_t)(lph >> 20) - 2048;
+    int32_t sn = (int32_t)(((int64_t)x * (2048 - (x < 0 ? -x : x))) >> 9);   // ±2048
+    val = sn;
+    if (nz_slow == 1) nz_shclk = false;
+  }
   val = (val * 3) >> 2;
   // gate
-  gph += nz_ginc;
+  gph += nz_slow == 2 ? (nz_ginc >> 8) : nz_slow ? (nz_ginc >> 5) : nz_ginc;   // the gate slows down too
   bool open = nz_burst || gph < nz_duty;
   env += ((open ? 4096 : 0) - env) >> 7;
   nz_gate = open ? 1 : 0;
-  int32_t os2 = 0, osc = nz_osc(lastc, &os2);
+  nz_wander = val;
+  int32_t os2 = 0, osc = nz_osc(nz_slow ? 0 : lastc, &os2);   // (SLOW: the ring's hiss stays out of it)
   int32_t ex = ((val * env) >> 12) + ((in * nz_in) >> 8) + (osc >> 2);
 
   // the ring
@@ -1703,7 +1727,9 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
   if (fq > 4096) fq = 4096;
   if (fq < 1) fq = 1;
-  int32_t xl = ((a + b) >> 2) + osc, xr = ((c - b) >> 2) + os2;  // the folded voice leads, the ring under it
+  int32_t xl, xr;
+  if (nz_slow) { xl = osc; xr = os2; }                     // SLOW / CRAWL: no hiss at all — only the voice, moving slowly
+  else { xl = ((a + b) >> 2) + osc; xr = ((c - b) >> 2) + os2; }  // the folded voice leads, the ring under it
   la += (fq * ba) >> 12;
   int32_t hl = xl - la - ((nz_q * ba) >> 12);
   ba += (fq * hl) >> 12;

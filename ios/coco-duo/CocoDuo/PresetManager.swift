@@ -40,9 +40,8 @@ struct PresetManagerView: View {
                     }
                     if rig.padSet == .noise {
                         HStack(spacing: PanelMetrics.chipSpacing) {
-                            ForEach(0..<3, id: \.self) { s in
-                                ChipButton(title: ["FAST", "SLOW", "CRAWL"][s], filled: rig.nzSpeed == s) { d.setNzSpeed(s) }
-                            }
+                            ChipButton(title: "FAST", filled: rig.nzSpeed == 0) { d.setNzSpeed(0) }
+                            ChipButton(title: "LFO", filled: rig.nzSpeed == 1) { d.setNzSpeed(1) }
                         }
                     }
                 }
@@ -405,6 +404,7 @@ private struct SpeechControls: View {
             .background(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
         HStack(spacing: PanelMetrics.chipSpacing) {
             ChipButton(title: rig.speaking ? "…" : "SAY", filled: rig.speaking) { d.say() }
+            ChipButton(title: "DICE", filled: false) { d.speechDice() }
             ChipButton(title: rig.speechPlaying ? "STOP" : "PLAY", filled: rig.speechPlaying) { d.speechToggle() }
             ChipButton(title: "SYNC", filled: false) { d.speechSync() }
             ChipButton(title: "◀", filled: false) { d.speechVoiceStep(-1) }

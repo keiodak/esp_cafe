@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.43"
+#define FW_VERSION "3.44"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -396,7 +396,7 @@ static const int16_t nz_default[16] = {450, 500, 700, 350, 600, 0, 350, 600, 650
 void nz_update() {
   float hz = clock_hz(), p[15];
   for (int i = 0; i < 15; i++) p[i] = nz_p[i] / 1000.0f;
-  nz_slow = nz_p[15] >= 750 ? 2 : nz_p[15] > 0 ? 1 : 0;           // 15 = FAST 0 · SLOW 500 · CRAWL 1000
+  nz_slow = nz_p[15] > 0 ? 1 : 0;                                // 15 = FAST 0 · LFO 500 (a round LFO moves pitch, fold and filter; no hiss)
   float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
   float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
   for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
@@ -404,6 +404,7 @@ void nz_update() {
   nz_grit = (int32_t)(p[3] * 4096.0f);
   float fs = 20.0f * powf(2.0f, p[4] * 11.0f); if (fs > hz * 0.5f) fs = hz * 0.5f;
   nz_sinc = (uint32_t)(fs / hz * 4294967295.0f);
+  { float lf = 0.02f * powf(250.0f, p[4]); nz_lfoinc = (uint32_t)(lf / hz * 4294967295.0f); }   // LFO: 0.02 .. 5 Hz (SHIFT X)
   nz_loop = nz_p[5] > 0 ? 2 + (int32_t)((1.0f - p[5]) * (1.0f - p[5]) * 1000.0f) : 0;
   float fg = 0.1f * powf(400.0f, p[6]);                          // 0.1 .. 40 Hz
   nz_ginc = (uint32_t)(fg / hz * 4294967295.0f);

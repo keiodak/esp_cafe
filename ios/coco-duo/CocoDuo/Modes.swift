@@ -303,7 +303,7 @@ final class Rig: ObservableObject {
     @Published var fxPadLink = false       // LINK PADS: the XY pads move both Cafes
     @Published var fxHold = false
     @Published var fxDrift = false         // DRIFT: the pads wander by themselves
-    @Published var nzSpeed = 0             // NOISE source: 0 FAST · 1 SLOW · 2 CRAWL ("N 15 0|500|1000")
+    @Published var nzSpeed = 0             // NOISE: 0 FAST · 1 LFO ("N 15 0|500")
     @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
