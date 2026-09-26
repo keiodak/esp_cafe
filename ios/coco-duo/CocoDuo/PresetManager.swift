@@ -130,6 +130,7 @@ private struct DesignCard: View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
             grid([2, 9, 10])
+            Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)
             }
