@@ -645,6 +645,7 @@ private struct TapPad: View {
                     .tracking(1)
                     .foregroundStyle(PastelTheme.hudOrange)
             }
+            .offset(y: 4)                                   // the digits' box is taller below: down to the true centre
         }
         .overlay(alignment: .topLeading) {
             HudTag(text: tag, size: 7).padding(.leading, 7).padding(.top, 6)
@@ -785,10 +786,13 @@ private struct HudBar: View {
                 if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
             if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
+                // centre the digits themselves (their cap height), not the font's box: it sat high
                 Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
                     .font(.hudBig(14))
                     .foregroundStyle(PastelTheme.hudBlack)
+                    .alignmentGuide(VerticalAlignment.center) { d in d[.firstTextBaseline] - 14 * 0.36 }
                 Text("BPM").font(.hud(7, .medium)).foregroundStyle(PastelTheme.textSecondary)
+                    .alignmentGuide(VerticalAlignment.center) { d in d[.firstTextBaseline] - 7 * 0.36 }
                 if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
             // the preset manager lives behind this box: say so
