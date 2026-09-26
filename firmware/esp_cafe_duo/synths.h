@@ -2284,10 +2284,12 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   int32_t vr = a + (((b - a) * f) >> 8) - 2048;
   if (fill < 40000) fill++;
   if (fill <= (uint32_t)(((tl > tr ? tl : tr) >> 8) + 2)) { vl = 0; vr = 0; }   // the lines still hold old tape
-  fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone);
-  hpl += (lpl - hpl) >> 8; hpr += (lpr - hpr) >> 8;                  // the repeats lose a little low end each time: clean, not muddy
+  if (td_clean) { lpl = vl; lpr = vr; }                                  // ARP_DELAY: no tone filter...
+  else { fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone); }
+  hpl += (lpl - hpl) >> 8; hpr += (lpr - hpr) >> 8;                  // ...but always the DC blocker: the input's offset
+                                                                     // must not pile up in the feedback (it did: noise)
   int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 3) >> 2 : td_fb);
-  int32_t xl = hold || td_clean ? vl : lpl - hpl, xr = hold || td_clean ? vr : lpr - hpr;
+  int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
   int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
   int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);

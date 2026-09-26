@@ -196,14 +196,20 @@ final class ArpEngine {
         let kr = exp(-1.0 / (sr * 0.030))                           // release after the gate (soft: no click)
         let gl = glide <= 0.001 ? 1.0 : 1.0 - exp(-1.0 / (sr * glide * 0.25))
         let atk = Int(sr * 0.006)                                   // (6 ms: a clean start, no click)
+        // the audio thread must never wait: the voices and the settings are copied into locals for the whole buffer
+        // (no per-sample access checks on the object's properties), the channels' pointers are taken once
         let st = stereo
+        let r1 = rateIndex, r2 = rateIndex2, s1 = swing, s2 = swing2, e1 = earth, e2 = earth2
+        var a0 = v0, a1 = v1
+        if restartFlag { restartFlag = false; a0.step = 0; a0.toNext = 0; a1.step = 0; a1.toNext = 0 }
+        let pl = abl.count > 0 ? abl[0].mData?.assumingMemoryBound(to: Float.self) : nil
+        let pr = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : nil
         for f in 0..<frames {
-            if restartFlag { restartFlag = false; v0.step = 0; v0.toNext = 0; v1.step = 0; v1.toNext = 0 }
-            let a = tick(&v0, rate: rateIndex, swing: swing, earth: earth, kd: kd, kr: kr, gl: gl, atk: atk)
-            let b = st ? tick(&v1, rate: rateIndex2, swing: swing2, earth: earth2, kd: kd, kr: kr, gl: gl, atk: atk) : a
-            for (k, buf) in abl.enumerated() {
-                if let p = buf.mData?.assumingMemoryBound(to: Float.self) { p[f] = k == 0 ? a : b }
-            }
+            let a = tick(&a0, rate: r1, swing: s1, earth: e1, kd: kd, kr: kr, gl: gl, atk: atk)
+            let b = st ? tick(&a1, rate: r2, swing: s2, earth: e2, kd: kd, kr: kr, gl: gl, atk: atk) : a
+            pl?[f] = a
+            pr?[f] = b
         }
+        v0 = a0; v1 = a1
     }
 }
