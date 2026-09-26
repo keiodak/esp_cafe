@@ -84,8 +84,27 @@ final class ArpEngine {
     }
 
     /// start the audio (once); the arpeggio itself starts with play()
+    private var observers: [NSObjectProtocol] = []
+
+    /// start the audio, or bring it back: iOS stops the engine when the output changes (a USB mixer such as the
+    /// TX-6 reconnecting, a new sample rate, a call...) and it stays silent unless we start it again
     func startAudio() {
-        guard !running else { return }
+        if running, node != nil {
+            if !engine.isRunning { try? AVAudioSession.sharedInstance().setActive(true); try? engine.start() }
+            return
+        }
+        if observers.isEmpty {
+            let nc = NotificationCenter.default
+            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+                self?.rebuildAudio()
+            })
+            observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.startAudio()
+            })
+            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.startAudio()
+            })
+        }
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, options: [.mixWithOthers])
         try? s.setActive(true)
@@ -99,6 +118,14 @@ final class ArpEngine {
         engine.connect(n, to: engine.mainMixerNode, format: fmt)
         node = n
         do { try engine.start(); running = true } catch { running = false }
+    }
+
+    /// the output changed under us: build the node again at the new sample rate and start
+    private func rebuildAudio() {
+        engine.stop()
+        if let n = node { engine.detach(n) }
+        node = nil; running = false
+        startAudio()
     }
 
     func play() { startAudio(); restartFlag = true; playing = true }

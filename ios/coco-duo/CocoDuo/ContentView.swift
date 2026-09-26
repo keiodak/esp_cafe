@@ -891,7 +891,9 @@ private struct HudBar: View {
         case .arp:
             switch n {
             case 0: key(rig.arpPlaying ? "stop.fill" : "play.fill", on: rig.arpPlaying) { d.arpToggle() }
-            case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }
+            case 1: key(rig.arpStereo ? "speaker.wave.2" : "speaker", on: rig.arpStereo) {   // MONO / STEREO
+                        rig.arpStereo.toggle(); d.applyArp(); d.refresh()
+                    }
             case 2: key("hand.tap") { d.tapTempo() }
             default: key("arrow.triangle.2.circlepath") { d.arpSync() }
             }
@@ -917,7 +919,7 @@ private struct HudBar: View {
         "snowflake": "FREEZE", "metronome": "PERC", "waveform.path": "PITCH", "arrow.triangle.2.circlepath": "SYNC",
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
-        "play.fill": "PLAY", "stop.fill": "STOP",
+        "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
 
