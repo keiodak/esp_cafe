@@ -161,8 +161,8 @@ int tapsz=sizeof(myPlacers)>>2;
 // ASH + main out = wet echo only
 // YELLOW = a steady organ: 5 octaves of square waves (A2 110Hz .. 1760Hz at 44.1k), 2 pins each,
 //          like a divide-down combo organ. one phase counter -> the pitch never wanders.
-// EARTH  = FM: organ pitch follows EARTH, 0 .. ~4x — only when FLIP has turned it on (default OFF = a steady A2)
-// FLIP   = trigger: EARTH FM OFF -> x1 (0..4x) -> x2 (0..8x) -> OFF
+// EARTH  = FM: the organ's pitch follows EARTH in octaves, ±1 octave around A2 (unplugged = a steady A2)
+// FLIP   = trigger: EARTH FM ±1 oct (default) -> ±2 oct -> OFF -> ±1 oct
 // SKIP   = trigger: WOBBLE on/off. the 4 echo taps drift like worn tape (slow wow + a little flutter),
 //          each tap on its own phase -> the echoes smear and detune against each other.
 //          it fades in/out over ~0.2s
@@ -181,7 +181,7 @@ void IRAM_ATTR echo_og() {
   static int unpatch_timer = 0;
   static int32_t rate_s = 256 << 8;                // slewed FM rate (Q16)
   static int32_t rg = 1024;                          // recording gain 0..1024 (freeze ramp)
-  static int fm_mode = 0;                           // FLIP: EARTH FM off (default) -> x1 -> x2 -> off
+  static int fm_mode = 1;                           // FLIP: EARTH FM ±1 oct (default) -> ±2 oct -> off -> ...
   static bool wob_on = false;                       // SKIP: wobble
   static int32_t wob = 0;                           // wobble depth 0..8192 (ramped)
   static uint32_t wph = 0;                          // wobble LFO phase
@@ -260,7 +260,7 @@ void IRAM_ATTR echo_og() {
   if (FLIPPERAT) { if (flip_int < 2000) flip_int += 500; }
   else           { if (flip_int > 0) flip_int -= 50; }
   if (flip_int > 1500) {
-    if (!flip_latch) { flip_latch = true; fm_mode = (fm_mode + 1) % 3; }
+    if (!flip_latch) { flip_latch = true; fm_mode = fm_mode == 1 ? 2 : (fm_mode == 2 ? 0 : 1); }
   } else if (flip_int < 100) flip_latch = false;
 
   // --- EARTH (12 bit) ---
@@ -292,7 +292,11 @@ void IRAM_ATTR echo_og() {
     if (patched && spread > 0 && fm_mode > 0) {
       int32_t k = ((int32_t)(e - cal_min) << 12) / spread;   // 0..4096, fine steps
       if (k > 4096) k = 4096; if (k < 0) k = 0;
-      rate = fm_mode == 2 ? (k >> 1) : (k >> 2);             // FM: 0 .. 4x  (x2: 0 .. 8x)
+      // FM in octaves around A2, exponential like a pitch CV: ±1 octave (FLIP: ±2)
+      int32_t o = fm_mode == 2 ? ((k - 2048) >> 2) : ((k - 2048) >> 3);   // 1/256 octave
+      int32_t ip = o >> 8, fr = o & 255;
+      int32_t m = 256 + ((fr * (168 + ((fr * 88) >> 8))) >> 8);           // 2^(fr/256), Q8 (±0.3 %)
+      rate = ip >= 0 ? (m << ip) : (m >> -ip);
     }                                                // else: jitter / nothing patched -> plain organ
   }
 
