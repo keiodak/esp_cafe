@@ -1,8 +1,8 @@
 // ==========================================
 // CAFE MONO (k.odk) — esp_cafe_duo cut down to four presets, played with the Cafe's own controls:
 //   1 COCO_MOD · 2 ECHO (echo + the organ on YELLOW, EARTH FM) · 3 RUNGLER · 4 SELF_READ (loaded files steer it)
-// Bluetooth stays (the phone app / coco-pc: LOAD a file, SAVE the tape, WAVE, BLE update). The ids are the duo's
-// (0, 1, 7, 8), so the app speaks to it unchanged; the list is fixed (the app's PRESET DESIGN does not change it).
+// No Bluetooth at all: the radio stays off and EARTH is read every sample, as in the original firmware
+// (full audio-rate EARTH FM on the ECHO organ). Flash it over USB. BUTTON menu: 1 COCO_MOD 2 ECHO 3 RUNGLER 4 SELF_READ.
 // ==========================================
 // MENU
 // ==========================================
@@ -62,7 +62,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "1.0"
+#define FW_VERSION "1.1"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -842,10 +842,8 @@ void setup() {
   pinMode(34, INPUT); pinMode(35, INPUT);
   pinMode(32, INPUT);                                  // BUTTON (GPIO 32), low = pressed
   delay(5);
-  cafe_no_ble = true;                                  // held down for the whole 0.3 s = no Bluetooth
-  for (int i = 0; i < 30 && cafe_no_ble; i++) { if (REG(GPIO_IN1_REG)[0] & 0x1) cafe_no_ble = false; delay(10); }
-  if (cafe_no_ble) Serial.println("[1b] BUTTON held at power-on: Bluetooth OFF, original ADC setup (EARTH test)");
-  else ble_begin();
+  cafe_no_ble = true;                                  // cafe_mono: never any Bluetooth — the original ADC setup,
+  Serial.println("[1b] cafe_mono: no Bluetooth (EARTH read every sample, as the original)");   // EARTH every sample
   Serial.printf("[1b] BLE %s, name %s. Free Heap: %d bytes, largest block %u\n", ble_ok ? "advertising" : "FAILED", ble_name, ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   Serial.println("[1] Running SETUPPERS (Hardware Init)...");
 

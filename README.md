@@ -51,6 +51,5 @@ Chrome page (Web Serial / Web Bluetooth): the Cafe's tape as a waveform, loop / 
 ## cafe_mono (firmware/cafe_mono)
 
 esp_cafe_duo cut down to four presets, played with the Cafe's own controls: **COCO_MOD**, **ECHO** (echo + the organ on
-YELLOW, EARTH FM), **RUNGLER**, **SELF_READ** (loaded files steer its play head). Bluetooth stays, so the app / coco-pc
-can LOAD a file, SAVE the tape, show WAVE and update the firmware. Flash it the same way as esp_cafe_duo
-(Partition Scheme: Default). More heap and a smaller image than the duo.
+YELLOW, EARTH FM), **RUNGLER**, **SELF_READ**. No Bluetooth: the radio stays off and EARTH is read every sample, as in
+the original firmware (full audio-rate FM on the ECHO organ). Flash it over USB (Partition Scheme: Default).
