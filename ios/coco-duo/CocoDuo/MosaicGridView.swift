@@ -11,23 +11,45 @@ struct MosaicGridView: View {
     /// [row][col] の明るさ(0...1)。
     let brightness: [[Double]]
 
+    /// halftone: each cell becomes 3 × 3 ink dots, sized by how dark the camera sees it there
+    /// (the brightness is interpolated between cells, so the picture flows instead of stepping);
+    /// the brightest spots get a small orange dot — the HUD's one accent
+    private static let sub = 3
+
     var body: some View {
         Canvas(opaque: false, rendersAsynchronously: false) { context, size in
             let rows = brightness.count
             guard rows > 0 else { return }
             let cols = brightness[0].count
             guard cols > 0 else { return }
-            let w = size.width / CGFloat(cols)
-            let h = size.height / CGFloat(rows)
-            for r in 0..<rows {
-                let row = brightness[r]
-                for c in 0..<min(cols, row.count) {
-                    // 0.5pt はみ出させて、マスの間に隙間が出ないようにする。
-                    let rect = CGRect(x: CGFloat(c) * w, y: CGFloat(r) * h,
-                                      width: w + 0.5, height: h + 0.5)
-                    context.fill(Path(rect), with: .color(PastelTheme.inkTone(row[c])))
+            let n = Self.sub
+            let gx = cols * n, gy = rows * n
+            let w = size.width / CGFloat(gx), h = size.height / CGFloat(gy)
+            let rMax = min(w, h) * 0.48
+            func b(_ x: Double, _ y: Double) -> Double {          // bilinear, x/y in cell units (centres at .5)
+                let fx = min(max(x - 0.5, 0), Double(cols - 1)), fy = min(max(y - 0.5, 0), Double(rows - 1))
+                let x0 = Int(fx), y0 = Int(fy), x1 = min(x0 + 1, cols - 1), y1 = min(y0 + 1, rows - 1)
+                let tx = fx - Double(x0), ty = fy - Double(y0)
+                func v(_ r: Int, _ c: Int) -> Double { c < brightness[r].count ? brightness[r][c] : 0.5 }
+                let top = v(y0, x0) * (1 - tx) + v(y0, x1) * tx
+                let bot = v(y1, x0) * (1 - tx) + v(y1, x1) * tx
+                return top * (1 - ty) + bot * ty
+            }
+            var ink = Path(), glow = Path()
+            for j in 0..<gy {
+                for i in 0..<gx {
+                    let v = b((Double(i) + 0.5) / Double(n), (Double(j) + 0.5) / Double(n))
+                    let cx = (CGFloat(i) + 0.5) * w, cy = (CGFloat(j) + 0.5) * h
+                    let r = rMax * CGFloat(pow(max(0, 1 - v), 0.75))
+                    if r > 0.4 { ink.addEllipse(in: CGRect(x: cx - r, y: cy - r, width: 2 * r, height: 2 * r)) }
+                    if v > 0.82 {
+                        let g = rMax * CGFloat((v - 0.82) / 0.18) * 0.7
+                        glow.addEllipse(in: CGRect(x: cx - g, y: cy - g, width: 2 * g, height: 2 * g))
+                    }
                 }
             }
+            context.fill(ink, with: .color(PastelTheme.hudBlack.opacity(0.78)))
+            context.fill(glow, with: .color(PastelTheme.hudOrange))
         }
         .allowsHitTesting(false)
     }
