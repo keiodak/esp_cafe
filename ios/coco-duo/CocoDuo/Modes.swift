@@ -246,6 +246,11 @@ final class Rig: ObservableObject {
     }() {
         didSet { Preset.order = playlist; Self.d.set(playlist, forKey: "rig.playlist") }
     }
+    /// PRESET DESIGN memories 1–5: saved sets of the 11 slots ([] = nothing saved)
+    @Published var designBank: [[Int]] = (Rig.d.array(forKey: "rig.designBank") as? [[Int]]).flatMap { $0.count == 5 ? $0 : nil }
+        ?? Array(repeating: [], count: 5) {
+        didSet { Self.d.set(designBank, forKey: "rig.designBank") }
+    }
     /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
     @Published var design: [Int] = {
         let v = (Rig.d.array(forKey: "rig.design") as? [Int]) ?? []

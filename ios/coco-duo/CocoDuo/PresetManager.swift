@@ -131,18 +131,43 @@ private struct DesignCard: View {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
             }
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: "🗑 EMPTY SLOT", filled: false) {
-                    if let s = sel { var l = rig.design; l[s] = -1; d.setDesign(l) }
+            // bottom row: bin · INIT · memories 1–5 (tap = recall, SAVE then a number = store the 11 slots there)
+            HStack(spacing: 3) {
+                small("🗑", on: false, enabled: sel != nil) { if let s = sel { var l = rig.design; l[s] = -1; d.setDesign(l) } }
+                small("INIT", on: false) { d.setDesign(Preset.defaultPlaylist); sel = 0 }
+                Rectangle().fill(PastelTheme.hudLine).frame(width: 1, height: 14).padding(.horizontal, 3)
+                small("SAVE", on: saving) { saving.toggle() }
+                ForEach(0..<5, id: \.self) { k in
+                    small("\(k + 1)", on: false, filled: !rig.designBank[k].isEmpty) {
+                        if saving {
+                            var b = rig.designBank; b[k] = rig.design; rig.designBank = b; saving = false
+                        } else if !rig.designBank[k].isEmpty {
+                            d.setDesign(rig.designBank[k]); sel = 0
+                        }
+                    }
                 }
-                .frame(width: 104)
-                .disabled(sel == nil)
-                .unlit(sel == nil)
-                ChipButton(title: "DEFAULT 11", filled: false) { d.setDesign(Preset.defaultPlaylist); sel = nil }
-                    .frame(width: 84)
                 Spacer(minLength: 0)
+                Text(saving ? "tap a number to save" : "tap = recall")
+                    .font(.hud(7)).foregroundStyle(saving ? PastelTheme.hudOrange : PastelTheme.textSecondary)
             }
+            .padding(.top, 3)
         }
+    }
+
+    @State private var saving = false
+
+    /// a small square key: on = orange, filled = a thin ink bar under the text (a memory with something in it)
+    private func small(_ t: String, on: Bool, filled: Bool = false, enabled: Bool = true, _ act: @escaping () -> Void) -> some View {
+        Text(t)
+            .font(.hud(8, .semibold))
+            .foregroundStyle(on ? Color.white : (enabled ? PastelTheme.hudBlack : PastelTheme.hudLine))
+            .padding(.horizontal, 4)
+            .frame(minWidth: 20, minHeight: 18)
+            .background(Rectangle().fill(on ? PastelTheme.hudOrange : PastelTheme.padScreen))
+            .overlay(Rectangle().strokeBorder(enabled ? PastelTheme.hudBlack : PastelTheme.hudLine, lineWidth: 1))
+            .overlay(alignment: .bottom) { if filled { Rectangle().fill(PastelTheme.hudBlack).frame(height: 3).padding(.horizontal, 3).padding(.bottom, 2) } }
+            .contentShape(Rectangle())
+            .onTapGesture { if enabled { act() } }
     }
 
     static let groups: [(String, [Int])] = [
