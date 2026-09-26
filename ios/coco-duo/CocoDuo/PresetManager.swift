@@ -339,6 +339,8 @@ private struct MultiCard: View {
                 ChipButton(title: "LINK PADS", filled: rig.fxPadLink) { d.setFxPadLink(!rig.fxPadLink) }
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
                 ChipButton(title: "DRIFT", filled: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }
+            }
+            HStack(spacing: PanelMetrics.chipSpacing) {                    // (one row ran out of the card)
                 ChipButton(title: "TAKE SAMPLE", filled: false) { d.fxSetting("F 92") }
                 ChipButton(title: "TRIGGER", filled: false) { d.fxSetting("F 93") }
                 ChipButton(title: "SYNC", filled: false) { d.fxSetting("Z") }
@@ -363,7 +365,12 @@ private struct ArpCard: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
-        PanelCard(title: "ARP", note: "phone audio -> Cafe input") {
+        PanelCard(title: "ARP_DELAY", note: "phone audio -> Cafe input") {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
+                ChipButton(title: "SPEECH", filled: rig.arpMode == 1) { d.setArpMode(1) }
+            }
+            if rig.arpMode == 1 { SpeechControls(d: d, rig: rig) } else {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: rig.arpPlaying ? "STOP" : "PLAY", filled: rig.arpPlaying) { d.arpToggle() }
                 ChipButton(title: "SYNC", filled: false) { d.arpSync() }
@@ -379,7 +386,44 @@ private struct ArpCard: View {
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+}
+
+/// ARP_DELAY · SPEECH: the line, SAY / PLAY, the voice, how fast it reads, the level (the Cafe is on COCO)
+private struct SpeechControls: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        TextField("", text: $rig.speechText, axis: .vertical)
+            .lineLimit(2...3)
+            .font(.hud(10))
+            .foregroundStyle(PastelTheme.hudBlack)
+            .padding(5)
+            .background(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+        HStack(spacing: PanelMetrics.chipSpacing) {
+            ChipButton(title: rig.speaking ? "…" : "SAY", filled: rig.speaking) { d.say() }
+            ChipButton(title: rig.speechPlaying ? "STOP" : "PLAY", filled: rig.speechPlaying) { d.speechToggle() }
+            ChipButton(title: "SYNC", filled: false) { d.speechSync() }
+            ChipButton(title: "◀", filled: false) { d.speechVoiceStep(-1) }
+            Text(voiceName)
+                .font(.hud(8, .semibold))
+                .foregroundStyle(PastelTheme.hudBlack)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            ChipButton(title: "▶", filled: false) { d.speechVoiceStep(1) }
+        }
+        PanelRow(label: "RATE", value: Binding(get: { rig.speechRate }, set: { rig.speechRate = $0 }))
+        PanelRow(label: "LEVEL", value: Binding(get: { rig.speechLevel }, set: { rig.speechLevel = $0; d.applySpeech() }))
+    }
+
+    private var voiceName: String {
+        let vs = SpeechRenderer.voices
+        guard !vs.isEmpty else { return "NO VOICE" }
+        let v = vs[min(max(rig.speechVoice, 0), vs.count - 1)]
+        return "\(v.language.prefix(2).uppercased()) · \(v.name.uppercased())"
     }
 }
 

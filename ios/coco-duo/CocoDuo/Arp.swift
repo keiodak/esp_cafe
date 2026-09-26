@@ -46,6 +46,9 @@ final class ArpEngine {
     var earth2 = 0.0
     private(set) var playing = false
     private(set) var running = false
+    /// SPEECH (ARP_DELAY's second layer): the phone reads a line instead of arpeggiating (Speech.swift)
+    let speech = SpeechVoice()
+    var speechOn = false
 
     // the notes of the chord over the octaves (a fixed buffer: the audio thread never sees an array change)
     private let notes = UnsafeMutablePointer<Int32>.allocate(capacity: 32)
@@ -240,6 +243,15 @@ final class ArpEngine {
         if restartFlag { restartFlag = false; a0.step = 0; a0.toNext = 0; a1.step = 0; a1.toNext = 0 }
         let pl = abl.count > 0 ? abl[0].mData?.assumingMemoryBound(to: Float.self) : nil
         let pr = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : nil
+        if speechOn {                                                // SPEECH: the voice on both sides
+            let sp = speech, rate = sr
+            for f in 0..<frames {
+                let s = sp.next(rate)
+                pl?[f] = s
+                pr?[f] = s
+            }
+            return
+        }
         for f in 0..<frames {
             let a = tick(&a0, rate: r1, swing: s1, earth: e1, kd: kd, kr: kr, gl: gl, atk: atk)
             let b = st ? tick(&a1, rate: r2, swing: s2, earth: e2, kd: kd, kr: kr, gl: gl, atk: atk) : a

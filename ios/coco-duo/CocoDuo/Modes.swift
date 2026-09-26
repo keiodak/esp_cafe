@@ -100,7 +100,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, knob }
+enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -120,6 +120,29 @@ enum ArpPad {
         case 1: return "\(ArpEngine.patterns[pattern(x)]) ×\(octaves(y))"
         case 2: return "\(ArpEngine.rateNames[rate(x)]) · SWING \(Int(y * 60))%"
         case 3: return "GATE \(Int((0.05 + x * 0.9) * 100))%"
+        default: return ""
+        }
+    }
+}
+
+/// ARP_DELAY's SPEECH layer: top row = the phone's voice chain (Speech.swift), bottom row = the Cafe on COCO
+enum SpPad {
+    static let titles = ["PITCH · HARMONY", "RESONATOR", "FREEZE · SIZE", "SPEED · GAP",
+                         "SPEED · DUB", "LOOP", "EARTH FM", "FILTER"]
+    static let starts: [(Double, Double)] = [(0.5, 0.0), (0.3, 0.0), (0.0, 0.3), (0.5, 0.15)]
+    /// bottom pad -> COCO's pad
+    static let coPad = [0, 1, 2, 4]
+    static func semis(_ x: Double) -> Double { ((x - 0.5) * 24).rounded() }          // -12 … +12, in semitones
+    static func resHz(_ x: Double) -> Double { 55 * pow(2, x * 4) }                  // 55 … 880 Hz
+    static func grainMs(_ y: Double) -> Double { 30 + y * y * 470 }                  // 30 … 500 ms
+    static func speed(_ x: Double) -> Double { pow(2, (x - 0.5) * 2) }               // ×0.5 … ×2
+    static func gap(_ y: Double) -> Double { y * y * 4 }                             // 0 … 4 s
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 0: let s = Int(semis(x)); return "\(s > 0 ? "+" : "")\(s) st · 5TH \(Int(y * 100))%"
+        case 1: return x < 0.001 && y < 0.01 ? "OFF" : "\(Int(resHz(x))) Hz · \(Int(y * 100))%"
+        case 2: return x < 0.02 ? "OFF · \(Int(grainMs(y))) ms" : "\(Int(x * 100))% · \(Int(grainMs(y))) ms"
+        case 3: return String(format: "×%.2f · GAP %.1f s", speed(x), gap(y))
         default: return ""
         }
     }
@@ -287,6 +310,17 @@ final class Rig: ObservableObject {
 
     // ARP_DELAY
     let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }
+    /// SPEECH: its own four on top, COCO's SPEED · DUB, LOOP, EARTH FM and FILTER below (the same pads as BLE's COCO)
+    let spTop: [PadAxis] = SpPad.starts.map { PadAxis($0) }
+    var spAxes: [PadAxis] { spTop + SpPad.coPad.map { coAxes[$0] } }
+    /// ARP_DELAY's layer: 0 = ARP (arpeggio -> tap delay) · 1 = SPEECH (voice -> COCO)
+    @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
+    @Published var speechText: String = Rig.d.string(forKey: "rig.speechText") ?? "" { didSet { Self.d.set(speechText, forKey: "rig.speechText") } }
+    @Published var speechVoice: Int = (Rig.d.object(forKey: "rig.speechVoice") as? Int) ?? SpeechRenderer.homeVoice { didSet { Self.d.set(speechVoice, forKey: "rig.speechVoice") } }
+    @Published var speechRate = 0.35
+    @Published var speechLevel = 0.8
+    @Published var speaking = false
+    @Published var speechPlaying = false
     @Published var arpPlaying = false
     @Published var arpGlide = 0.0
     @Published var arpFifth = 0.0
@@ -310,7 +344,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         if ctxPreset == Preset.multi { return .multi }
-        if ctxPreset == Preset.arp { return .arp }
+        if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .coco, .delay, .noise][min(max(ctxMode, 0), 3)]
     }

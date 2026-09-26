@@ -1516,7 +1516,7 @@ volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
 volatile int32_t nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
 volatile int32_t nz_oxfm = 0;                // cross FM between the three oscillators, Q8
 volatile bool nz_reset = true, nz_burst = false;
-volatile int nz_slow = 0;  // source speed, all gliding: 0 FAST (clock/64) · 1 SLOW (/1024, LFO-like) · 2 CRAWL (/16384)
+volatile int nz_slow = 0;  // source speed, all gliding: 0 FAST (clock/64) · 1 SLOW (/4096, LFO) · 2 CRAWL (/131072, minutes)
 volatile int nz_gate = 0;
 
 static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
@@ -1638,8 +1638,8 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   // k near 2 = a tent map: chaotic, noise-like, but made of folds. GRIT pushes k up (rougher).
   // LOOP restarts it from the same seed (a pitched cycle). SLOW = 64x slower clock and a glide between steps.
   uint32_t os = sph;
-  uint32_t sinc = nz_slow == 2 ? (nz_sinc >> 14) : nz_slow ? (nz_sinc >> 10)
-                                                           : (nz_sinc >> 6);  // FAST · SLOW (LFO-like) · CRAWL
+  uint32_t sinc = nz_slow == 2 ? (nz_sinc >> 17) : nz_slow ? (nz_sinc >> 12)
+                                                           : (nz_sinc >> 6);  // FAST · SLOW (LFO) · CRAWL (minutes)
   sph += sinc + ((lastc > 0 && nz_self) ? (sinc >> 1) : 0);
   if (sph < os) {
     if (!freeze) {
@@ -1659,7 +1659,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   }
   {
     static int32_t vq = 0;  // the glide, with 12 extra bits (long glides must not stall)
-    int k = nz_slow == 2 ? 17 : nz_slow ? 14
+    int k = nz_slow == 2 ? 19 : nz_slow ? 16
                                         : 11;
     vq += (((tgt << 12) - vq) >> k);
     val = vq >> 12;
@@ -3568,11 +3568,18 @@ void IRAM_ATTR multi() {
 // the phone sends it ("K"), and SKIP on the Cafe = tap tempo (the phone's arpeggio follows).
 // FLIP / BUTTON / the phone's HOLD = hold (the repeats go on). EARTH = wow (depth F 95).
 // Parameters: the same as MULTI's TAP DELAY ("F 1 <id> <v>"). main out = L, ASH = R, YELLOW = click on the beat.
+// SPEECH (F 97 1): the phone speaks instead of arpeggiating, and this Cafe is COCO (the BLE preset's mode 1):
+// a record head on the tape and a play head in a loop, EARTH = FM of the speed ("C <id> <v>" as in BLE COCO).
+// SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
+volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;
   static int click = 0;
+  static int cur = -1;
+  static int32_t mg = 0, rg = 0;
+  static uint32_t wpos = 0;
   if (preset_mode) {
     was_in_menu = true;
   } else if (was_in_menu || gen_seen != preset_gen) {
@@ -3594,9 +3601,12 @@ void IRAM_ATTR arpdelay() {
     fx_emq = es;
   }  // Q8 of fx_em, slewed
   if (skip_press()) {
-    tap_note();
-    bc = 0;
-    click = 300;
+    if (ad_mode) co_restart = true;                  // SPEECH: back to the loop start
+    else {
+      tap_note();
+      bc = 0;
+      click = 300;
+    }
   }
   if (fx_sync) {
     fx_sync = false;
@@ -3605,10 +3615,30 @@ void IRAM_ATTR arpdelay() {
   }
   bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;
   int32_t in = gyo - 2048, l, r;
-  bool rs = fx_rs[1];
-  fx_rs[1] = false;
-  td_clean = true;  // ARP_DELAY: the light, clean digital delay
-  l = td_tick(in, &r, hold, rs);
+  // which of the two, with a short fade when it changes
+  int want = ad_mode ? 1 : 0;
+  if (cur < 0) { cur = want; if (cur) co_reset = true; else fx_rs[1] = true; }
+  if (want != cur) {
+    if (mg > 0) mg -= 16;
+    else { cur = want; if (cur) { co_reset = true; rg = 0; } else fx_rs[1] = true; }
+  } else if (mg < 4096) mg += 16;
+  if (cur == 1) {
+    // SPEECH: COCO — the record head writes the input (the phone's voice), the play head loops it
+    if (rg < 256) rg++;
+    int32_t old = dread(wpos);
+    dwrite(wpos, old + (((gyo - old) * ((rg * co_dub) >> 8)) >> 8));
+    wpos = (wpos + 1) & 0x1FFFF;
+    l = co_tick(wpos, in, rg, FLIPPERAT);
+    r = l;
+    fx_rs[1] = true;                                  // the delay starts clean when ARP comes back
+  } else {
+    bool rs = fx_rs[1];
+    fx_rs[1] = false;
+    td_clean = true;  // ARP_DELAY: the light, clean digital delay
+    l = td_tick(in, &r, hold, rs);
+  }
+  l = (l * mg) >> 12;
+  r = (r * mg) >> 12;
   int32_t v = l + 2048;
   if (v > 4095) v = 4095;
   if (v < 0) v = 0;
@@ -3621,7 +3651,9 @@ void IRAM_ATTR arpdelay() {
     bc = 0;
     click = 300;
   }
-  if (click > 0) {
+  if (cur == 1) {                                   // SPEECH: a pulse at every wrap of the loop
+    if (co_pulse > 0) { co_pulse--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
+  } else if (click > 0) {
     click--;
     YELLOW_PULSE(4095);
   } else {

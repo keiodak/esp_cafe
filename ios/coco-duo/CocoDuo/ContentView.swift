@@ -52,6 +52,7 @@ final class Director: ObservableObject {
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
             let onArp = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.arp }
             if !onArp && self.arp.playing { self.arp.stop(); self.rig.arpPlaying = false }
+            if !onArp && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
         for u in units {
             u.onReady = { [weak self, weak u] in
@@ -72,6 +73,8 @@ final class Director: ObservableObject {
         camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
         camera.warm()
         applyArp()
+        arp.speechOn = rig.arpMode == 1
+        applySpeech()
     }
 
     /// the 8 pads of the current set (the camera moves these)
@@ -84,6 +87,7 @@ final class Director: ObservableObject {
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
+        case .speech: return rig.spAxes
         case .knob: return []
         }
     }
@@ -114,7 +118,8 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            rig.arpDelayAll().forEach(u.send)
+            u.send("F 97 \(rig.arpMode)")                            // ARP (tap delay) or SPEECH (COCO)
+            if rig.arpMode == 1 { rig.coAll(slot: s).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
         default:
             break
         }
@@ -153,7 +158,10 @@ final class Director: ObservableObject {
         syncIfPair()
     }
 
-    func cycleMode() { if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % 4) } }
+    func cycleMode() {
+        if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % 4) }
+        else if rig.ctxPreset == Preset.arp { setArpMode(1 - rig.arpMode) }       // ARP <-> SPEECH
+    }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
 
@@ -221,6 +229,9 @@ final class Director: ObservableObject {
             for r in rows where rig.inCtx(r) && units[r].isConnected {
                 rig.fxCommands(slot: r, e: e, k: k).forEach(units[r].send)
             }
+        case .speech:
+            if i < 4 { applySpeech() }
+            else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
         case .arp:
             if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
@@ -251,6 +262,69 @@ final class Director: ObservableObject {
     }
     /// the arpeggio from its first note, and the Cafes' clicks with it
     func arpSync() { arp.restart(); ctxUnits().forEach { $0.send("Z") } }
+
+    // MARK: SPEECH (ARP_DELAY's second layer)
+
+    /// ARP_DELAY: 0 = ARP · 1 = SPEECH. The Cafes on it change too (tap delay <-> COCO).
+    func setArpMode(_ m: Int) {
+        rig.arpMode = m == 1 ? 1 : 0
+        arp.speechOn = rig.arpMode == 1
+        if rig.arpMode == 1 {
+            if arp.playing { arp.stop(); rig.arpPlaying = false }
+            arp.startAudio()
+        } else {
+            arp.speech.playing = false; rig.speechPlaying = false
+        }
+        applySpeech()
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
+            u.send("F 97 \(rig.arpMode)")
+            if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
+        }
+        refresh()
+    }
+    /// the top pads and the sliders -> the voice chain
+    func applySpeech() {
+        let a = rig.spTop, v = arp.speech
+        v.semis = SpPad.semis(a[0].x); v.harmony = a[0].y
+        v.resHz = SpPad.resHz(a[1].x); v.resAmt = a[1].y
+        v.freeze = a[2].x < 0.02 ? 0 : a[2].x; v.grainMs = SpPad.grainMs(a[2].y)
+        v.speed = SpPad.speed(a[3].x); v.gap = SpPad.gap(a[3].y)
+        v.level = rig.speechLevel
+    }
+    private let speaker = SpeechRenderer()
+    /// read the line (written, not spoken aloud) and loop it
+    func say() {
+        let text = rig.speechText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !rig.speaking else { return }
+        let vs = SpeechRenderer.voices
+        let voice = vs.isEmpty ? nil : vs[min(max(rig.speechVoice, 0), vs.count - 1)]
+        rig.speaking = true
+        speaker.render(text, voice: voice, rate: Float(0.12 + rig.speechRate * 0.48)) { [weak self] s in
+            guard let self else { return }
+            self.rig.speaking = false
+            guard s.count > 2048 else { return }
+            self.arp.speech.load(s)
+            self.applySpeech()
+            self.arp.speechOn = true
+            self.arp.startAudio()
+            self.arp.speech.playing = true
+            self.rig.speechPlaying = true
+        }
+    }
+    /// play / stop the loop (no loop yet: read the line first)
+    func speechToggle() {
+        if !arp.speech.hasLoop { say(); return }
+        arp.speech.playing.toggle()
+        if arp.speech.playing { arp.speechOn = true; arp.startAudio(); arp.speech.restart() }
+        rig.speechPlaying = arp.speech.playing
+    }
+    /// the voice from the top, and the Cafe's loop from its start
+    func speechSync() { arp.speech.restart(); ctxUnits().forEach { $0.send("C 17 1") } }
+    func speechVoiceStep(_ d: Int) {
+        let n = SpeechRenderer.voices.count
+        guard n > 0 else { return }
+        rig.speechVoice = (rig.speechVoice + d + n) % n
+    }
 
     // MARK: MULTI
 
@@ -408,6 +482,7 @@ final class Director: ObservableObject {
     /// the arpeggio only sounds while a Cafe is on ARP_DELAY
     private func arpFollowPresets() {
         if !rig.preset.contains(Preset.arp) && arp.playing { arp.stop(); rig.arpPlaying = false }
+        if !rig.preset.contains(Preset.arp) && arp.speech.playing { arp.speech.playing = false; rig.speechPlaying = false }
     }
 
     func setBpm(_ b: Double) {
@@ -547,6 +622,7 @@ private struct MainScreen: View {
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
+        case .speech: return (rig.spAxes[i], SpPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -560,6 +636,9 @@ private struct MainScreen: View {
             return { x, y in ArpPad.caption(i, x, y) }
         case .harmony:
             return { x, y in HdPad.caption(i % 4, x, y) }
+        case .speech:
+            if i >= 4 { return nil }
+            return { x, y in SpPad.caption(i, x, y) }
         default:
             return nil
         }
@@ -774,8 +853,9 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
-                            enabled: rig.ctxPreset == Preset.ble) { d.cycleMode() }
+                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 1 ? "waveform.and.mic" : "pianokeys")
+                                                        : Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
+                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
                 }
                 contextKey(top ? 0 : 1)
@@ -907,6 +987,13 @@ private struct HudBar: View {
             case 2: key("hand.tap") { d.tapTempo() }
             default: key("arrow.triangle.2.circlepath") { d.arpSync() }
             }
+        case .speech:
+            switch n {
+            case 0: key(rig.speechPlaying ? "stop.fill" : "play.fill", on: rig.speechPlaying) { d.speechToggle() }
+            case 1: key("text.bubble", on: rig.speaking) { d.say() }                    // SAY: read the line again
+            case 2: key("backward.end") { d.ctxUnits().forEach { $0.send("C 17 1") } }  // the Cafe's loop from its start
+            default: key("arrow.triangle.2.circlepath") { d.speechSync() }
+            }
         case .multi:
             switch n {
             case 0: key("forward.end") { d.fxNext(0) }
@@ -930,7 +1017,8 @@ private struct HudBar: View {
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
-        "hare": "FAST", "wave.3.forward": "FOLD", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
+        "hare": "FAST", "wave.3.forward": "FOLD",
+        "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
 
