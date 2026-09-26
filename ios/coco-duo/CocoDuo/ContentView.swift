@@ -650,7 +650,7 @@ private struct TapPad: View {
 
 /// knob presets: nothing to play here, the Cafe is played with its own controls
 /// knob presets: the Cafe is played with its own controls. Split down the middle — A left, B right, side by side —
-/// each half shows its Cafe's preset and the playlist to change it (A and B can be on different presets).
+/// each half shows its Cafe's preset, big (they can be on different presets; change them in the preset manager).
 private struct KnobPlacard: View {
     let d: Director
     @ObservedObject var rig: Rig
@@ -689,43 +689,19 @@ private struct KnobHalf: View {
                     .lineLimit(1)
             }
             Text(Preset.tag(n))
-                .font(.hudBig(24))
+                .font(.hudBig(44))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Rectangle().fill(PastelTheme.hudOrange).frame(width: 70, height: 2)
+                .minimumScaleFactor(0.5)
+            Rectangle().fill(PastelTheme.hudOrange).frame(width: 110, height: 3)
             Text(n >= 0 && n < Preset.notes.count ? Preset.notes[n].uppercased() : "")
-                .font(.hud(8, .medium))
+                .font(.hud(10, .medium))
+                .tracking(0.6)
                 .foregroundStyle(PastelTheme.textSecondary)
-                .lineLimit(2)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)], alignment: .leading, spacing: 3) {
-                ForEach(rig.playlist, id: \.self) { p in
-                    Button { d.setPreset(p, only: s) } label: {
-                        HStack(spacing: 3) {
-                            Text(String(format: "%02ld", Preset.number(p)))
-                                .font(.hud(7.5, .semibold))
-                                .foregroundStyle(p == n ? Color.white : PastelTheme.hudBlack)
-                                .frame(width: 16, height: 16)
-                                .background(Rectangle().fill(p == n ? PastelTheme.hudOrange : Color.clear))
-                            Text(Preset.names[p])
-                                .font(.hud(8, .semibold))
-                                .foregroundStyle(PastelTheme.hudBlack)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(height: 18)
-                        .background(Rectangle().fill(p == n ? PastelTheme.hudOrange.opacity(0.15) : PastelTheme.padScreen))
-                        .overlay(Rectangle().strokeBorder(p == n ? PastelTheme.hudOrange : PastelTheme.hudLine, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 2)
+                .lineLimit(3)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
