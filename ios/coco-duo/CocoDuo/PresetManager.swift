@@ -19,7 +19,10 @@ struct PresetManagerView: View {
     @State private var sel: Int? = nil          // PRESET DESIGN: the slot picked on the left
 
     /// PRESET DESIGN, on the left: tap a slot to pick it (to move a preset, pick a slot and tap that preset on the right)
-    private func tapSlot(_ i: Int) { sel = i }
+    private func tapSlot(_ i: Int) {
+        if bin { var l = rig.design; l[i] = -1; d.setDesign(l) } else { sel = i }
+    }
+    @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
@@ -30,8 +33,13 @@ struct PresetManagerView: View {
                                 .onTapGesture { tapSlot(i) }
                         }
                     } else {
-                        ForEach(rig.playlist, id: \.self) { n in
-                            PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
+                        ForEach(0..<Preset.maxPlaylist, id: \.self) { i in
+                            let n = rig.design[i]
+                            if n >= 0 {
+                                PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
+                            } else {
+                                SlotRow(i: i, n: -1, picked: false).opacity(0.5)
+                            }
                         }
                     }
                     // 12: PRESET DESIGN — which presets are in the list (and the Cafe's BUTTON menu)
@@ -40,10 +48,6 @@ struct PresetManagerView: View {
                         Text("PRESET_DESIGN")
                             .font(.hudBig(13))
                             .foregroundStyle(PastelTheme.hudBlack)
-                        Text("choose the 11 slots · Apple π's are here too")
-                            .font(.hud(7.5))
-                            .foregroundStyle(PastelTheme.textSecondary)
-                            .lineLimit(1)
                         Spacer(minLength: 0)
                         Image(systemName: design ? "chevron.right.circle.fill" : "chevron.right.circle")
                             .font(.system(size: 13))
@@ -53,11 +57,11 @@ struct PresetManagerView: View {
                     .padding(.horizontal, 3)
                     .background(Rectangle().fill(design ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
                     .contentShape(Rectangle())
-                    .onTapGesture { design.toggle(); sel = design ? 0 : nil }      // opens with slot 01 picked
+                    .onTapGesture { design.toggle(); sel = design ? 0 : nil; bin = false }      // opens with slot 01 picked
                 }
             } right: {
                 if design {
-                    DesignCard(d: d, rig: rig, sel: $sel)
+                    DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
                 } else {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
@@ -117,47 +121,40 @@ private struct DesignCard: View {
     let d: Director
     @ObservedObject var rig: Rig
     @Binding var sel: Int?
+    @Binding var bin: Bool
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { "slot \(String(format: "%02ld", $0 + 1)) → pick a preset" } ?? "pick a slot on the left", spacing: 4) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
-                Text(g.0)
-                    .font(.hud(7, .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(PastelTheme.textSecondary)
-                    .padding(.top, 2)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), alignment: .leading, spacing: 2) {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
             }
-            // bottom row: bin · INIT · memories 1–5 (tap = recall, SAVE then a number = store the 11 slots there)
+            // bin · INIT · memories 1–5 (tap = recall, hold = save, with the bin on: tap = erase)
             HStack(spacing: 3) {
-                small("🗑", on: false, enabled: sel != nil) { if let s = sel { var l = rig.design; l[s] = -1; d.setDesign(l) } }
-                small("INIT", on: false) { d.setDesign(Preset.defaultPlaylist); sel = 0 }
+                small("🗑", on: bin) { bin.toggle() }
+                small("INIT", on: false) { d.setDesign(Preset.defaultPlaylist); sel = 0; bin = false }
                 Rectangle().fill(PastelTheme.hudLine).frame(width: 1, height: 14).padding(.horizontal, 3)
-                small("SAVE", on: saving) { saving.toggle() }
                 ForEach(0..<5, id: \.self) { k in
-                    small("\(k + 1)", on: false, filled: !rig.designBank[k].isEmpty) {
-                        if saving {
-                            var b = rig.designBank; b[k] = rig.design; rig.designBank = b; saving = false
+                    small("\(k + 1)", on: false, filled: !rig.designBank[k].isEmpty, hold: {
+                        var b = rig.designBank; b[k] = rig.design; rig.designBank = b
+                    }) {
+                        if bin {
+                            var b = rig.designBank; b[k] = []; rig.designBank = b
                         } else if !rig.designBank[k].isEmpty {
                             d.setDesign(rig.designBank[k]); sel = 0
                         }
                     }
                 }
                 Spacer(minLength: 0)
-                Text(saving ? "tap a number to save" : "tap = recall")
-                    .font(.hud(7)).foregroundStyle(saving ? PastelTheme.hudOrange : PastelTheme.textSecondary)
             }
             .padding(.top, 3)
         }
     }
 
-    @State private var saving = false
-
     /// a small square key: on = orange, filled = a thin ink bar under the text (a memory with something in it)
-    private func small(_ t: String, on: Bool, filled: Bool = false, enabled: Bool = true, _ act: @escaping () -> Void) -> some View {
+    private func small(_ t: String, on: Bool, filled: Bool = false, enabled: Bool = true, hold: (() -> Void)? = nil, _ act: @escaping () -> Void) -> some View {
         Text(t)
             .font(.hud(8, .semibold))
             .foregroundStyle(on ? Color.white : (enabled ? PastelTheme.hudBlack : PastelTheme.hudLine))
@@ -168,6 +165,7 @@ private struct DesignCard: View {
             .overlay(alignment: .bottom) { if filled { Rectangle().fill(PastelTheme.hudBlack).frame(height: 3).padding(.horizontal, 3).padding(.bottom, 2) } }
             .contentShape(Rectangle())
             .onTapGesture { if enabled { act() } }
+            .onLongPressGesture(minimumDuration: 0.6) { if enabled, let hold { hold() } }
     }
 
     static let groups: [(String, [Int])] = [
@@ -192,7 +190,7 @@ private struct DesignCard: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 3)
-        .frame(height: 19)
+        .frame(height: 17)
         .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
         .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
         .contentShape(Rectangle())
@@ -280,10 +278,6 @@ private struct GrainOptions: View {
                 .unlit(grain.marks == 0)
             ChipButton(title: "CLEAR", filled: false) { grain.clearMarks(d.ctxUnits()) }
         }
-        Text("MARK keeps the place of the grain you just heard (up to 8, shown as the boxes). ONLY MARKS: grains then come only from those places — a phrase you like, again and again. CLEAR forgets them.")
-            .font(.hud(8))
-            .foregroundStyle(PastelTheme.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
         Text("MOVE PITCH: every grain its own pitch from all intervals, gliding up or down. Off: pitch held for phrases (PITCH / REV·HOLD pads).")
             .font(.hud(8))
             .foregroundStyle(PastelTheme.textSecondary)
