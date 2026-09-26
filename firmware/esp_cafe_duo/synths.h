@@ -2304,7 +2304,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
                                                                      // must not pile up in the feedback (it did: noise)
   int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 3) >> 2 : td_fb);
   int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
-  int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
+  int32_t il = hold ? 0 : in, ir = hold ? 0 : (td_clean ? in : ((in * (256 - pp)) >> 8));   // ARP_DELAY: a mono input fills both sides
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
   int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
   dwrite(TD_L + w, soft_clip(wl) + 2048);

@@ -60,6 +60,7 @@ final class ArpEngine {
     private struct Voice {
         var toNext = 0.0, step = 0, phase = 0.0, freq = 220.0, target = 220.0, env = 0.0
         var attackLeft = 0, gateLeft = 0, noteGain = 1.0
+        var gain = 1.0, aFrom = 0.0, aLen = 1          // gain glides to noteGain; the attack's start and length
         var seed: UInt32
     }
     private var v0 = Voice(seed: 0x2545F491)
@@ -116,6 +117,10 @@ final class ArpEngine {
         }
         engine.attach(n)
         engine.connect(n, to: engine.mainMixerNode, format: fmt)
+        let outFmt = engine.outputNode.outputFormat(forBus: 0)
+        if let f = AVAudioFormat(standardFormatWithSampleRate: sr, channels: max(2, outFmt.channelCount)) {
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: f)   // both sides, never one
+        }
         node = n
         do { try engine.start(); running = true } catch { running = false }
     }
@@ -127,6 +132,17 @@ final class ArpEngine {
     private func followOutput() {
         guard let n = node else { return }
         let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        // the mixer -> output connection keeps the format of the output the app started on: if that was a
+        // one-channel route, a stereo interface later got only its left side. Reconnect it to the output as it is now.
+        let outFmt = engine.outputNode.outputFormat(forBus: 0)
+        let mixFmt = engine.outputNode.inputFormat(forBus: 0)
+        if outFmt.channelCount != mixFmt.channelCount || abs(outFmt.sampleRate - mixFmt.sampleRate) > 1 {
+            engine.stop()
+            engine.disconnectNodeOutput(engine.mainMixerNode)
+            if let f = AVAudioFormat(standardFormatWithSampleRate: outFmt.sampleRate, channels: max(2, outFmt.channelCount)) {
+                engine.connect(engine.mainMixerNode, to: engine.outputNode, format: f)
+            }
+        }
         if hw > 1000 && abs(hw - sr) > 1 {
             engine.stop()
             engine.detach(n)
@@ -193,25 +209,29 @@ final class ArpEngine {
                 v.noteGain = 1.0 + low * below * 0.6
                 if gl >= 1.0 { v.freq = v.target }
                 v.gateLeft = Int(len * gate)
-                v.attackLeft = atk
+                v.attackLeft = atk; v.aLen = max(atk, 1); v.aFrom = v.env
                 v.step += 1
             }
         }
         v.freq += (v.target - v.freq) * gl
-        if v.attackLeft > 0 { v.env += (1.0 - v.env) / Double(v.attackLeft); v.attackLeft -= 1 }
+        if v.attackLeft > 0 {                              // a raised-cosine rise from where the last note was: no corner, no tick
+            let k = Double(v.aLen - v.attackLeft + 1) / Double(v.aLen)
+            v.env = v.aFrom + (1.0 - v.aFrom) * (0.5 - 0.5 * cos(Double.pi * k)); v.attackLeft -= 1
+        }
         else if v.gateLeft > 0 { v.env *= kd }
         else { v.env *= kr }
         if v.gateLeft > 0 { v.gateLeft -= 1 }
         v.phase += 2.0 * Double.pi * v.freq / sr; if v.phase > 2.0 * Double.pi { v.phase -= 2.0 * Double.pi }
         // a pure sine, at a level that leaves the Cafe's input headroom
-        return Float(sin(v.phase) * v.env * level * 0.45 * v.noteGain)
+        v.gain += (v.noteGain - v.gain) * 0.002                 // LOW's per-note gain glides (a jump was a click)
+        return Float(sin(v.phase) * v.env * level * 0.45 * v.gain)
     }
 
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
         let kd = exp(-1.0 / (sr * (0.03 + decay * decay * 1.5)))   // decay while the note is held
         let kr = exp(-1.0 / (sr * 0.030))                           // release after the gate (soft: no click)
         let gl = glide <= 0.001 ? 1.0 : 1.0 - exp(-1.0 / (sr * glide * 0.25))
-        let atk = Int(sr * 0.006)                                   // (6 ms: a clean start, no click)
+        let atk = Int(sr * 0.012)                                   // (12 ms raised cosine: a clean start, no click)
         // the audio thread must never wait: the voices and the settings are copied into locals for the whole buffer
         // (no per-sample access checks on the object's properties), the channels' pointers are taken once
         let st = stereo
@@ -224,7 +244,7 @@ final class ArpEngine {
             let a = tick(&a0, rate: r1, swing: s1, earth: e1, kd: kd, kr: kr, gl: gl, atk: atk)
             let b = st ? tick(&a1, rate: r2, swing: s2, earth: e2, kd: kd, kr: kr, gl: gl, atk: atk) : a
             pl?[f] = a
-            pr?[f] = b
+            pr?[f] = b                                             // MONO: b = a, the same on both sides
         }
         v0 = a0; v1 = a1
     }
