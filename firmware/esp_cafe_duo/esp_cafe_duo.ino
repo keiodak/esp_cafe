@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.45"
+#define FW_VERSION "3.46"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -423,24 +423,24 @@ void nz_update() {
 }
 
 // ---- SIDRAX parameters (k.odk). "S <id> <0..1000>" ----
-//  0 root (30 Hz .. ~1 kHz)  1 spread (a plate's range: 0 .. 2 octaves)  2 couple (FM between the voices)  3 chaos
-//  4 fold  5 sync  6 cutoff  7 decay (after lifting: 20 ms .. 6 s)  8 aligned (0 free, 1000 aligned)
+//  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
+//  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 pitch (30 Hz .. ~1 kHz)  7 spread (0 .. 2 oct)
+//  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
   sx_base = (uint32_t)(30.0f / hz * 4294967295.0f);
-  sx_root = (int32_t)(p[0] * 5.0f * 256.0f);
-  sx_spread = (int32_t)(p[1] * 2.0f * 256.0f);
-  sx_couple = (int32_t)(p[2] * p[2] * 4096.0f);
-  sx_chaos = (int32_t)(p[3] * 4096.0f);
-  { float cr = 0.3f * powf(60.0f, p[3]); sx_crate = (uint32_t)(cr * 2.0f / hz * 4294967295.0f * 0.875f); }   // 0.3 .. 18 Hz, faster with more chaos
-  sx_drift = (int32_t)(p[3] * 40.0f);
-  sx_fold = (int32_t)(p[4] * 4096.0f);
-  sx_sync = (int32_t)(p[5] * 3900.0f);
-  sx_fc = (int32_t)(p[6] * 9.5f * 256.0f);
-  sx_q = (int32_t)(4096.0f * (1.0f - 0.9f * 0.3f));
-  float sec = 0.02f * powf(300.0f, p[7]);
-  sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (sec * hz))) * 6.0f) + 1;
+  sx_scale = (int32_t)(p[0] * 6.99f);
+  sx_key = ((int32_t)(p[1] * 11.99f)) * 256 / 12;
+  sx_mfm = (int32_t)(p[2] * p[2] * 4096.0f);
+  sx_self = (int32_t)(p[3] * p[3] * 4096.0f);
+  sx_chaos = (int32_t)(p[4] * p[4] * 4096.0f);
+  sx_glitch = (int32_t)(p[5] * 4096.0f);
+  sx_root = (int32_t)(p[6] * 5.0f * 256.0f);
+  sx_spread = (int32_t)(p[7] * 2.0f * 256.0f);
+  sx_tone = 4096;
+  sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.35f * hz))) * 6.0f) + 1;   // 0.35 s after lifting
+  sx_pan = 2048;
   sx_aligned = sx_p[8] >= 500;
 }
 
