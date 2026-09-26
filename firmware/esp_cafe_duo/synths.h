@@ -1241,7 +1241,7 @@ volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
 volatile int32_t  nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
 volatile int32_t  nz_oxfm = 0;               // cross FM between the three oscillators, Q8
 volatile bool     nz_reset = true, nz_burst = false;
-volatile int      nz_slow = 0;               // 0 FAST · 1 SLOW (64x slower, gliding) · 2 CRAWL (1024x slower, a long glide)
+volatile int      nz_slow = 0;               // source speed, all gliding: 0 FAST (clock/64) · 1 SLOW (/1024, LFO-like) · 2 CRAWL (/16384)
 volatile int      nz_gate = 0;
 
 static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
@@ -1323,7 +1323,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   // k near 2 = a tent map: chaotic, noise-like, but made of folds. GRIT pushes k up (rougher).
   // LOOP restarts it from the same seed (a pitched cycle). SLOW = 64x slower clock and a glide between steps.
   uint32_t os = sph;
-  uint32_t sinc = nz_slow == 2 ? (nz_sinc >> 10) : nz_slow ? (nz_sinc >> 6) : nz_sinc;
+  uint32_t sinc = nz_slow == 2 ? (nz_sinc >> 14) : nz_slow ? (nz_sinc >> 10) : (nz_sinc >> 6);   // FAST · SLOW (LFO-like) · CRAWL
   sph += sinc + ((lastc > 0 && nz_self) ? (sinc >> 1) : 0);
   if (sph < os) {
     if (!freeze) {
@@ -1337,7 +1337,10 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
     tgt = fx_x;
     nz_shclk = true;
   }
-  if (nz_slow == 2) val += (tgt - val) >> 14; else if (nz_slow) val += (tgt - val) >> 11; else val = tgt;
+  { static int32_t vq = 0;                                   // the glide, with 12 extra bits (long glides must not stall)
+    int k = nz_slow == 2 ? 17 : nz_slow ? 14 : 11;
+    vq += (((tgt << 12) - vq) >> k);
+    val = vq >> 12; }
   val = (val * 3) >> 2;
   // gate
   gph += nz_ginc;
