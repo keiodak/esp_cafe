@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.27"
+#define FW_VERSION "3.28"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -841,7 +841,7 @@ void setup() {
   Serial.printf("[1] SETUPPERS Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
   // EARTH on ADC2 channel 0 (GPIO 4), 12 bits, 2.5 dB like the original pattern table (ADC2_PATT = 0x0D)
   adc2_config_channel_atten(ADC2_CHANNEL_0, ADC_ATTEN_DB_2_5);
-  { esp_timer_create_args_t ta = {}; ta.callback = earth_tick; ta.name = "earth";
+  if (!cafe_no_ble) { esp_timer_create_args_t ta = {}; ta.callback = earth_tick; ta.name = "earth";
     esp_timer_handle_t th; if (esp_timer_create(&ta, &th) == ESP_OK) esp_timer_start_periodic(th, 500); }
   { int r = 0; esp_err_t e = adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r);
     if (e == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }

@@ -268,7 +268,7 @@ void IRAM_ATTR echo_og() {
   // a small dead band keeps the idle noise out; 1 octave per 1024 counts (FLIP: 2), clamped at ±2 (±3) octaves.
   // PITCH (FLIP 1st): three slews, smooth — for LFOs / slow CVs
   // AUDIO (FLIP 2nd): one light slew only, so an audio-rate signal on EARTH really frequency-modulates the organ
-  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> (fm_mode == 2 ? 4 : 8);
+  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> (fm_mode == 2 ? (cafe_no_ble ? 1 : 4) : 8);   // (no Bluetooth: EARTH is fresh every sample)
   s_earth2 += (s_earth - s_earth2) >> (fm_mode == 2 ? 2 : 8);
   s_earth3 += (s_earth2 - s_earth3) >> (fm_mode == 2 ? 1 : 8);
   int e = s_earth3 >> 8;                             // 0..4095

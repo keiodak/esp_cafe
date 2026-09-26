@@ -209,6 +209,10 @@ static int __attribute__((noinline)) grit_do(int p, int *cnt, int *held) {
 }
 static inline int grit_m(int p) {
   static int c = 0, h = 2048;
+  // Bluetooth OFF (BUTTON held at power-on): EARTH comes from the original ADC path, fresh every sample (as the
+  // original firmware) — read here because every preset writes the DAC once a sample. With Bluetooth the radio
+  // owns ADC2 and EARTH is read 2000x a second instead (earth_tick).
+  if (cafe_no_ble) { int r = (REG(I2S_FIFO_RD_REG)[0] & 0x7FF) << 1; earth_raw12 = r; earth_now = r >> 4; }
   if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
   return grit_do(p, &c, &h);
 }
