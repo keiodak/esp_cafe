@@ -44,6 +44,10 @@ private struct CafeWaveCard: View {
                     if unit.isConnected && !decoding && unit.loadProgress == nil { picking = true }
                 }
                 .frame(width: 44)
+                ChipButton(title: "SAVE", filled: unit.saveProgress != nil) {
+                    if unit.isConnected && unit.saveProgress == nil { unit.saveTape() }
+                }
+                .frame(width: 44)
             }
             HStack(spacing: PanelMetrics.chipSpacing) {
                 OutWindow(outs: unit.outs, title: "ASH", yellow: false)
@@ -51,6 +55,30 @@ private struct CafeWaveCard: View {
             }
             .frame(height: 34)
             .opacity(unit.isConnected ? 1 : 0.4)
+            if unit.saveProgress != nil || !unit.saveNote.isEmpty {
+                HStack(spacing: PanelMetrics.rowGap) {
+                    Text("SAVE")
+                        .font(.hud(PanelMetrics.labelFont, .medium))
+                        .foregroundStyle(PastelTheme.textPrimary)
+                    if let p = unit.saveProgress {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Rectangle().strokeBorder(PastelTheme.textPrimary.opacity(0.45), lineWidth: 1)
+                                Rectangle().fill(PastelTheme.hudOrange)
+                                    .frame(width: max(0, (geo.size.width - 2) * CGFloat(p)))
+                                    .padding(1)
+                            }
+                        }
+                        .frame(height: 6)
+                    } else {
+                        Text(unit.saveNote)
+                            .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                            .foregroundStyle(PastelTheme.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
             if decoding || unit.loadProgress != nil || !unit.loadNote.isEmpty {
                 HStack(spacing: PanelMetrics.rowGap) {
                     Text("FILE")
@@ -104,6 +132,11 @@ private struct CafeWaveCard: View {
                 .lineLimit(1)
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { loadFile($0) }
+        // SAVE: once the tape is in, hand the WAV to Files
+        .fileExporter(isPresented: Binding(get: { unit.savedWav != nil }, set: { if !$0 { unit.savedWav = nil } }),
+                      document: WavDoc(data: unit.savedWav ?? Data()),
+                      contentType: .wav,
+                      defaultFilename: "\(unit.name ?? "Cafe")-tape") { _ in unit.savedWav = nil }
     }
 
     /// decode off the main thread, then hand the samples to the Cafe link
@@ -221,4 +254,13 @@ private struct OutWindow: View {
                 .padding(3)
         }
     }
+}
+
+/// the tape as a WAV file, for the SAVE button's exporter
+struct WavDoc: FileDocument {
+    static var readableContentTypes: [UTType] { [.wav] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }

@@ -100,6 +100,16 @@ final class CafeUnit: ObservableObject {
     private var loadTimer: Timer?
     private static let loadChunk = 128
     private static let loadWindow = 3
+    // saving the tape as a file: "D <start> <n>" -> "d <start> <2 chars per sample>", up to 3 waiting
+    @Published var saveProgress: Double? = nil
+    @Published var saveNote = ""
+    /// the finished file (16-bit mono WAV at the Cafe's clock), for the WAVE panel to hand to Files
+    @Published var savedWav: Data? = nil
+    private var saveBuf: [UInt16]? = nil
+    private var saveFrom = 0                    // tape position the file starts at (the oldest sound)
+    private var saveSent = 0, saveDone = 0
+    private var savePending: [Int: (t: Date, tries: Int)] = [:]
+    private var saveTimer: Timer?
     /// called once the Cafe is ready, so the pads can send their current values
     var onReady: (() -> Void)?
 
@@ -223,6 +233,17 @@ final class CafeUnit: ObservableObject {
             polls += 1
         case "U":
             otaLine(l)
+        case "d":
+            let a = l.split(separator: " ", maxSplits: 2)
+            guard a.count >= 3, let st = Int(a[1]), savePending.removeValue(forKey: st) != nil, saveBuf != nil else { return }
+            let b = Array(a[2].utf8)
+            var i = 0, k = st
+            while i + 1 < b.count && k < st + Self.loadChunk {
+                saveBuf![k & (TAPE - 1)] = UInt16((Int(b[i]) - 48) & 63) << 6 | UInt16((Int(b[i + 1]) - 48) & 63)
+                i += 2; k += 1
+            }
+            saveDone += 1
+            saveFill()
         case "w":
             let a = l.split(separator: " ")
             guard a.count >= 2, let st = Int(a[1]), loadPending.removeValue(forKey: st) != nil else { return }
@@ -306,6 +327,73 @@ final class CafeUnit: ObservableObject {
         loadTimer?.invalidate(); loadTimer = nil
         loadBuf = nil; loadPending = [:]; loadProgress = nil
         loadNote = why
+    }
+
+    // MARK: saving the tape
+
+    /// read the whole tape back (131072 samples), oldest first (from the write head), into a WAV file
+    func saveTape() {
+        guard rx != nil, saveBuf == nil, loadBuf == nil, ota == nil else { return }
+        saveBuf = [UInt16](repeating: 2048, count: TAPE)
+        saveFrom = scope.rec & (TAPE - 1)
+        saveSent = 0; saveDone = 0; savePending = [:]
+        saveProgress = 0; saveNote = ""; savedWav = nil
+        saveTimer?.invalidate()
+        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.saveWatch() }
+        saveFill()
+    }
+
+    private func sendD(_ k: Int) { send("D \((saveFrom + k) & (TAPE - 1)) \(Self.loadChunk)") }
+
+    private func saveFill() {
+        guard saveBuf != nil else { return }
+        while savePending.count < Self.loadWindow && saveSent < TAPE {
+            savePending[(saveFrom + saveSent) & (TAPE - 1)] = (Date(), 1)
+            sendD(saveSent)
+            saveSent += Self.loadChunk
+        }
+        saveProgress = Double(saveDone) / Double(TAPE / Self.loadChunk)
+        if savePending.isEmpty && saveSent >= TAPE, let tape = saveBuf {
+            saveTimer?.invalidate(); saveTimer = nil
+            // the lines came in by tape position: turn them into time order (oldest first)
+            var ordered = [UInt16](repeating: 2048, count: TAPE)
+            for i in 0..<TAPE { ordered[i] = tape[(saveFrom + i) & (TAPE - 1)] }
+            saveBuf = nil; saveProgress = nil
+            savedWav = Self.wav(ordered, rate: hz > 1000 ? Int(hz.rounded()) : 44100)
+            saveNote = String(format: "saved %.2f s", hz > 1000 ? Double(TAPE) / hz : Double(TAPE) / 44100)
+        }
+    }
+
+    private func saveWatch() {
+        guard saveBuf != nil else { return }
+        guard rx != nil else { cancelSave("connection lost while saving"); return }
+        let now = Date()
+        for (st, p) in savePending where now.timeIntervalSince(p.t) > 1.0 {
+            if p.tries >= 5 { cancelSave("the Cafe stopped answering"); return }
+            savePending[st] = (now, p.tries + 1)
+            send("D \(st) \(Self.loadChunk)")
+        }
+    }
+
+    private func cancelSave(_ why: String) {
+        saveTimer?.invalidate(); saveTimer = nil
+        saveBuf = nil; savePending = [:]; saveProgress = nil
+        saveNote = why
+    }
+
+    /// 12-bit tape samples (0…4095, 2048 = silence) -> 16-bit mono WAV
+    static func wav(_ s: [UInt16], rate: Int) -> Data {
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        let bytes = UInt32(s.count * 2)
+        d.append(contentsOf: Array("RIFF".utf8)); u32(36 + bytes); d.append(contentsOf: Array("WAVE".utf8))
+        d.append(contentsOf: Array("fmt ".utf8)); u32(16); u16(1); u16(1); u32(UInt32(rate)); u32(UInt32(rate * 2)); u16(2); u16(16)
+        d.append(contentsOf: Array("data".utf8)); u32(bytes)
+        var pcm = [Int16](repeating: 0, count: s.count)
+        for i in 0..<s.count { pcm[i] = Int16((Int(s[i]) - 2048) << 4) }
+        pcm.withUnsafeBytes { d.append(contentsOf: $0) }
+        return d
     }
 
     // MARK: firmware update over BLE

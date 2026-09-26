@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.29"
+#define FW_VERSION "3.30"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -683,6 +683,16 @@ void pc_line(char *s) {
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
                 cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;
+    case 'D': {                            // read the tape back (saving a file on the phone): D <start> <n> -> d <start> <2 chars per sample>
+                long st = 0, n = 0; sscanf(s + 1, "%ld %ld", &st, &n);
+                if (n < 1) n = 1; if (n > 128) n = 128;
+                char hb[300]; int k = snprintf(hb, sizeof(hb), "d %ld ", st);
+                for (long i = 0; i < n && k < (int)sizeof(hb) - 3; i++) {
+                  int v = dread((int)((st + i) & 0x1FFFF)) & 0xFFF;
+                  hb[k++] = (char)(48 + (v >> 6)); hb[k++] = (char)(48 + (v & 63));
+                }
+                hb[k] = 0; pc_out(hb);
+              } break;
     case 'W': {                            // write samples into the tape (file loading from the phone)
                 // W <start> <2 chars per sample: each char = 48 + 6 bits, high then low>  ->  "w <start>"
                 char *q = s + 1;
