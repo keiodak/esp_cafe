@@ -868,7 +868,11 @@ private struct HudBar: View {
             switch n {
             case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
             case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
-            case 2: key("waveform.path", on: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
+            case 2:
+                HStack(spacing: 8) {
+                    key("waveform.path", on: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
+                    key("wave.3.forward", on: grain.fold) { grain.setFold(!grain.fold, d.ctxUnits()) }   // FOLD
+                }
             default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .coco:
@@ -928,7 +932,7 @@ private struct HudBar: View {
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
-        "hare": "FAST", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
+        "hare": "FAST", "wave.3.forward": "FOLD", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
 

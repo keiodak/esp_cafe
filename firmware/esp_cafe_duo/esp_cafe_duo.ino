@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.40"
+#define FW_VERSION "3.41"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -285,7 +285,7 @@ void pc_overview() {
 //  6 where (recent .. deep in the tape)  7 scatter  8 filter  9 resonance  10 reverse  11 pitch hold (grains per pitch)
 //  12 layers  13 level  14 offset (this Cafe later, share of a gap)  15 separation  16 which Cafe (0 = A, 1 = B)
 //  20 <n> = mark the last grain's place in slot n  21 = clear the marks  22 <0|1> = grains only from the marks
-//  23 <0|1> = freeze  24 <0|1> = percussion (struck grains)  26 <0|1> = MOVE (a new, gliding pitch every grain)  25 <0|1|2> = duo mode: LOOP / GRAIN / BENJOLIN
+//  23 <0|1> = freeze  24 <0|1> = percussion (struck grains)  26 <0|1> = MOVE (a new, gliding pitch every grain)  27 <0|1> = FOLD  25 <0|1|2> = duo mode: LOOP / GRAIN / BENJOLIN
 volatile float mo_hz = 32000;
 static const int16_t mo_default[17] = {550, 150, 550, 200, 500, 0, 200, 250, 1000, 200, 0, 700, 600, 500, 0, 0, 0};
 void mo_update() {
@@ -650,6 +650,7 @@ void pc_line(char *s) {
                 else if (id == 23) { mo_freeze = val != 0; }
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
+                else if (id == 27) { mo_fold_on = val != 0; }
                 else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"

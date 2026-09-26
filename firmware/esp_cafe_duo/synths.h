@@ -906,6 +906,7 @@ volatile int32_t  mo_hold = 1;               // a pitch is kept for this many gr
 volatile uint8_t  mo_layers = 4;             // grains sounding at once (1..6)
 volatile int32_t  mo_gain = 256;             // output gain, Q8 (includes the overlap normalisation)
 volatile int32_t  mo_fold = 600;             // a little wave fold on the grains, Q12 (more with longer grains)
+volatile bool     mo_fold_on = false;        // FOLD key (M 27)
 volatile int32_t  mo_sep = 0;                // 0 = the common score .. 4096 = this Cafe's own score
 volatile int32_t  mo_offs_us = 0;            // this Cafe's grains come this much later (B side)
 volatile uint32_t mo_salt = 0;               // 0 = Cafe A, 1 = Cafe B (whose "own" score)
@@ -1056,7 +1057,7 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
     gg += ((gopen ? 4096 : 0) - gg) >> 7;                                              // ~4 ms fade, no click
     g = (int32_t)(((int64_t)g * gg) >> 12); }
   // FOLD: a little, like sunnandæg's stage 2 — long grains (the held, sustained moments) get more of it
-  if (mo_fold > 0) {
+  if (mo_fold_on && mo_fold > 0) {
     int32_t d = (int32_t)(((int64_t)g * (4096 + mo_fold * 3)) >> 12);
     int32_t tf = (d + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
     g += (int32_t)(((int64_t)(tf - 2048 - g) * mo_fold) >> 12);
