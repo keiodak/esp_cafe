@@ -47,3 +47,10 @@ Chrome page (Web Serial / Web Bluetooth): the Cafe's tape as a waveform, loop / 
 - Original Cafe firmware: Ciat-Lonbarde (Peter Blasser).
 - The firmware in `firmware/` started from **Apple π** by ieat31415 (alt firmware for the Cafe), trimmed and extended. Its README is kept as `firmware/esp_cafe_apple_pi/README_apple_pi.md`.
 - Additions, BLE link, presets and the apps: k.odk.
+
+## cafe_mono (firmware/cafe_mono)
+
+esp_cafe_duo cut down to four presets, played with the Cafe's own controls: **COCO_MOD**, **ECHO** (echo + the organ on
+YELLOW, EARTH FM), **RUNGLER**, **SELF_READ** (loaded files steer its play head). Bluetooth stays, so the app / coco-pc
+can LOAD a file, SAVE the tape, show WAVE and update the firmware. Flash it the same way as esp_cafe_duo
+(Partition Scheme: Default). More heap and a smaller image than the duo.
