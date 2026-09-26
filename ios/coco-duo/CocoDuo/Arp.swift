@@ -89,26 +89,26 @@ final class ArpEngine {
     /// start the audio, or bring it back: iOS stops the engine when the output changes (a USB mixer such as the
     /// TX-6 reconnecting, a new sample rate, a call...) and it stays silent unless we start it again
     func startAudio() {
-        if running, node != nil {
+        if node != nil {                            // one source node, ever: a second one would run the voices twice
             if !engine.isRunning { try? AVAudioSession.sharedInstance().setActive(true); try? engine.start() }
+            running = engine.isRunning
             return
         }
         if observers.isEmpty {
+            // only ever START a stopped engine again (a little later, once iOS has settled) — never rebuild or
+            // re-set the session from here: that set off new changes in a loop, heard as a loud crackle
             let nc = NotificationCenter.default
-            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-                self?.rebuildAudio()
-            })
-            observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.startAudio()
-            })
-            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.startAudio()
-            })
+            let wake: (Notification) -> Void = { [weak self] _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self?.followOutput() }
+            }
+            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main, using: wake))
+            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main, using: wake))
         }
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, options: [.mixWithOthers])
         try? s.setActive(true)
-        sr = s.sampleRate > 0 ? s.sampleRate : 44100
+        let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        sr = hw > 1000 ? hw : (s.sampleRate > 0 ? s.sampleRate : 44100)
         let fmt = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2)!
         let n = AVAudioSourceNode(format: fmt) { [unowned self] _, _, frameCount, abl -> OSStatus in
             self.render(Int(frameCount), UnsafeMutableAudioBufferListPointer(abl))
@@ -120,12 +120,28 @@ final class ArpEngine {
         do { try engine.start(); running = true } catch { running = false }
     }
 
-    /// the output changed under us: build the node again at the new sample rate and start
-    private func rebuildAudio() {
-        engine.stop()
-        if let n = node { engine.detach(n) }
-        node = nil; running = false
-        startAudio()
+
+    /// the output changed (a USB interface such as the TX-6 plugged in or out): if its sample rate differs, make the
+    /// source node again at the new rate (else the voices run at the old rate: detuned, and a converter in the way);
+    /// then start. The audio session itself is not touched here (that set off changes in a loop).
+    private func followOutput() {
+        guard let n = node else { return }
+        let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        if hw > 1000 && abs(hw - sr) > 1 {
+            engine.stop()
+            engine.detach(n)
+            sr = hw
+            let fmt = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2)!
+            let m = AVAudioSourceNode(format: fmt) { [unowned self] _, _, frameCount, abl -> OSStatus in
+                self.render(Int(frameCount), UnsafeMutableAudioBufferListPointer(abl))
+                return noErr
+            }
+            engine.attach(m)
+            engine.connect(m, to: engine.mainMixerNode, format: fmt)
+            node = m
+        }
+        if !engine.isRunning { try? engine.start() }
+        running = engine.isRunning
     }
 
     func play() { startAudio(); restartFlag = true; playing = true }
