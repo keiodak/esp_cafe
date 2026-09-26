@@ -1044,9 +1044,13 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
     band += (mo_f * high) >> 12;
     if (low > 32767) low = 32767; if (low < -32768) low = -32768;
     if (band > 32767) band = 32767; if (band < -32768) band = -32768;
-    sum = low;
+    sum = low + (band >> 2);                    // a little band-pass on top: closing it doesn't swallow the grains
   }
-  return (sum * mo_gain) >> 8;
+  int32_t g = (sum * mo_gain) >> 8;
+  if (g > 1600) g = 1600 + ((g - 1600) >> 2);   // louder, but it bends instead of clipping hard
+  if (g < -1600) g = -1600 + ((g + 1600) >> 2);
+  if (g > 2047) g = 2047; if (g < -2047) g = -2047;
+  return g;
 }
 
 
@@ -1207,8 +1211,8 @@ static int32_t dl_tick(int32_t in, int32_t *rout, bool hold) {
 // ==========================================
 // Nothing is recorded (the tape is only its scratch memory). Three short delay lines in a ring
 // (A -> B -> C -> A, with a little A -> C across, Fyrall-like), each through a DECIDER:
-// soft clip .. wave fold .. 1-bit comparator. The ring is excited by a 16-bit shift register (noise,
-// clocked at its own rate; LOOP makes it repeat = pitched), opened by a GATE (Rollz-like pulses).
+// soft clip .. wave fold .. 1-bit comparator. The ring is excited by a folding map (no white noise:
+// chaos made of folds, clocked at its own rate; LOOP makes it repeat = pitched; SLOW = a slow wander), opened by a GATE (Rollz-like pulses).
 // A resonant filter follows, its cutoff flipped by the ring's own comparator (SELF).
 // main out = A + B (L), ASH = C - B (R), YELLOW = the gate.
 // SKIP = open the gate (burst) · FLIP = freeze the shift register · BUTTON = 1-bit everywhere
@@ -1230,6 +1234,7 @@ volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
 volatile int32_t  nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
 volatile int32_t  nz_oxfm = 0;               // cross FM between the three oscillators, Q8
 volatile bool     nz_reset = true, nz_burst = false;
+volatile bool     nz_slow = false;           // SLOW: the source steps 64x slower and glides (a wander, not a hiss)
 volatile int      nz_gate = 0;
 
 static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
@@ -1276,22 +1281,31 @@ static int32_t nz_osc(int32_t ring, int32_t *side) {
 
 static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   static uint32_t w = 0, sph = 0, gph = 0;
-  static uint16_t lfsr = 0xACE1;
+  static int32_t fx_x = 1234, tgt = 0;
   static int32_t steps = 0, val = 0, env = 0;
   static int32_t la = 0, ba = 0, lb = 0, bb = 0;
   static int32_t lastc = 0;
-  if (nz_reset) { nz_reset = false; w = 0; sph = gph = 0; lfsr = 0xACE1; steps = 0; val = 0; env = 0; la = ba = lb = bb = 0; lastc = 0; }
+  if (nz_reset) { nz_reset = false; w = 0; sph = gph = 0; fx_x = 1234; tgt = 0; steps = 0; val = 0; env = 0; la = ba = lb = bb = 0; lastc = 0; }
 
-  // shift register noise (SELF also speeds its clock up while the ring is high)
+  // the source: no white noise — a folding map (x -> fold(k·x + c)) iterated at the shift clock.
+  // k near 2 = a tent map: chaotic, noise-like, but made of folds. GRIT pushes k up (rougher).
+  // LOOP restarts it from the same seed (a pitched cycle). SLOW = 64x slower clock and a glide between steps.
   uint32_t os = sph;
-  sph += nz_sinc + ((lastc > 0 && nz_self) ? (nz_sinc >> 1) : 0);
+  uint32_t sinc = nz_slow ? (nz_sinc >> 6) : nz_sinc;
+  sph += sinc + ((lastc > 0 && nz_self) ? (sinc >> 1) : 0);
   if (sph < os) {
     if (!freeze) {
-      lfsr = (lfsr >> 1) ^ (uint16_t)(-(int16_t)(lfsr & 1) & 0xB400);
-      if (nz_loop && ++steps >= nz_loop) { steps = 0; lfsr = 0xACE1; }
+      int32_t k = 7700 + (nz_grit >> 3);                        // Q12: ~1.88 .. 2.0 (x gain inside the fold)
+      int32_t y = (int32_t)(((int64_t)fx_x * k) >> 12) + 311 + (lastc >> 5);
+      int32_t tf = (y + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
+      fx_x = tf - 2048;
+      if (fx_x > -8 && fx_x < 8) fx_x = 977;                     // never settle on the fixed point
+      if (nz_loop && ++steps >= nz_loop) { steps = 0; fx_x = 1234; }
     }
-    val = (int32_t)(lfsr & 0xFFF) - 2048;
+    tgt = fx_x;
   }
+  if (nz_slow) val += (tgt - val) >> 9; else val = tgt;
+  val = (val * 3) >> 2;
   // gate
   gph += nz_ginc;
   bool open = nz_burst || gph < nz_duty;

@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.34"
+#define FW_VERSION "3.35"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -306,7 +306,7 @@ void mo_update() {
   mo_scat = 1 + (int32_t)(p[7] * 65534.0f);
   if (p[8] >= 0.98f) mo_f = 4096;
   else {
-    float fc = 60.0f * powf(2.0f, p[8] * 8.0f);
+    float fc = 220.0f * powf(2.0f, p[8] * 6.5f);             // 220 Hz .. open (the bottom no longer swallows it)
     if (fc > hz / 6) fc = hz / 6;
     mo_f = (int32_t)(4096.0f * 2.0f * sinf(3.14159265f * fc / hz));
   }
@@ -316,7 +316,7 @@ void mo_update() {
   mo_layers = 1 + (uint8_t)(p[12] * 5.0f + 0.5f);
   float overlap = dens * ms / 1000.0f * (1.0f - 0.5f * (0.5f - 0.42f * p[3]) * 2.0f * 0.5f);
   if (overlap > mo_layers) overlap = mo_layers; if (overlap < 1.0f) overlap = 1.0f;
-  mo_gain = (int32_t)(p[13] * 2.0f * 256.0f * 1.2f / sqrtf(overlap));   // keep the level when grains pile up
+  mo_gain = (int32_t)(p[13] * 2.0f * 256.0f * 1.8f / sqrtf(overlap));   // keep the level when grains pile up
   mo_sep = (int32_t)(p[15] * 4096.0f);
   mo_salt = mo_p[16] > 0 ? 1 : 0;
 
@@ -390,11 +390,12 @@ void dl_update() {
 // ---- NOISE parameters (k.odk). "N <id> <0..1000>" ----
 //  0 size (line length)  1 spread (between the three lines)  2 feedback (ring gain)  3 grit (soft .. fold .. 1-bit)
 //  4 shift clock  5 loop (0 = free noise .. short loop = pitched)  6 gate rate  7 gate open (share)  8 cutoff
-//  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)
-static const int16_t nz_default[15] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 500, 0, 400, 0};
+//  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)  15 SLOW (0 | 1000)
+static const int16_t nz_default[16] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 350, 0, 400, 0, 0};
 void nz_update() {
   float hz = clock_hz(), p[15];
   for (int i = 0; i < 15; i++) p[i] = nz_p[i] / 1000.0f;
+  nz_slow = nz_p[15] > 0;                                        // 15 = SLOW
   float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
   float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
   for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
@@ -409,7 +410,7 @@ void nz_update() {
   nz_fc = (int32_t)(p[8] * 9.5f * 256.0f);
   nz_q = (int32_t)(4096.0f * (1.0f - 0.93f * p[9]));
   nz_self = (int32_t)(p[10] * 4.0f * 256.0f);
-  nz_gain = (int32_t)(p[11] * 2.0f * 256.0f);
+  nz_gain = (int32_t)(p[11] * 1.3f * 256.0f);
   nz_in = (int32_t)(p[12] * 256.0f);
   // 13 OSC pitch (20 Hz .. 5 kHz) · 14 FOLD: 0 = off, the first 15 % fades the oscillators in, then it folds
   float fo = 20.0f * powf(2.0f, p[13] * 8.0f);
@@ -678,7 +679,7 @@ void pc_line(char *s) {
                 long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
                 if (s[0] == 'Y' && id >= 0 && id < 13) { dl_p[id] = (int16_t)val; dl_update(); }
-                if (s[0] == 'N' && id >= 0 && id < 15) { nz_p[id] = (int16_t)val; nz_update(); }
+                if (s[0] == 'N' && id >= 0 && id < 16) { nz_p[id] = (int16_t)val; nz_update(); }
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
@@ -919,7 +920,7 @@ void setup() {
      bj_fill_table();
      bj_update();
      for (int i = 0; i < 13; i++) dl_p[i] = dl_default[i];
-     for (int i = 0; i < 15; i++) nz_p[i] = nz_default[i];
+     for (int i = 0; i < 16; i++) nz_p[i] = nz_default[i];
      for (int i = 0; i < 14; i++) hd_p[i] = hd_default[i];
      for (int i = 0; i < 16; i++) co_p[i] = co_default[i];
      for (int e = 0; e < FX_N; e++) for (int i = 0; i < 8; i++) fx_p[e][i] = fx_default[e][i];

@@ -438,6 +438,11 @@ final class Director: ObservableObject {
         ctxUnits().forEach { $0.send("C 16 \(rig.coReverse ? 1 : 0)") }
     }
 
+    func setNzSlow(_ on: Bool) {
+        rig.nzSlow = on
+        ctxUnits().forEach { $0.send("N 15 \(on ? 1000 : 0)") }
+    }
+
     func noiseDice() {
         rig.nzDice()
         for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }

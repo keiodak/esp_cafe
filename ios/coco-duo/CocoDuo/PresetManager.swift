@@ -81,6 +81,12 @@ struct PresetManagerView: View {
                     if rig.padSet == .grain {
                         GrainOptions(d: d, grain: d.grain)
                     }
+                    if rig.padSet == .noise {
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ChipButton(title: "FAST", filled: !rig.nzSlow) { d.setNzSlow(false) }
+                            ChipButton(title: "SLOW", filled: rig.nzSlow) { d.setNzSlow(true) }
+                        }
+                    }
                 }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)

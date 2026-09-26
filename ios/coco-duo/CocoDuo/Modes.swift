@@ -280,6 +280,7 @@ final class Rig: ObservableObject {
     @Published var fxPadLink = false       // LINK PADS: the XY pads move both Cafes
     @Published var fxHold = false
     @Published var fxDrift = false         // DRIFT: the pads wander by themselves
+    @Published var nzSlow = false          // NOISE SLOW: the source wanders slowly ("N 15")
     @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
@@ -437,7 +438,7 @@ final class Rig: ObservableObject {
         guard let p = NzPad(rawValue: i) else { return [] }
         return p.ids.map { nzLine($0, slot: slot) }
     }
-    func nzAll(slot: Int) -> [String] { (0...14).filter { $0 != 11 }.map { nzLine($0, slot: slot) } }
+    func nzAll(slot: Int) -> [String] { (0...14).filter { $0 != 11 }.map { nzLine($0, slot: slot) } + ["N 15 \(nzSlow ? 1000 : 0)"] }
     /// the dice key: somewhere new for every NOISE pad (except the level)
     func nzDice() {
         for p in NzPad.allCases where p != .stereo {
