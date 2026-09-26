@@ -162,7 +162,8 @@ int tapsz=sizeof(myPlacers)>>2;
 // YELLOW = a steady organ: 5 octaves of square waves (A2 110Hz .. 1760Hz at 44.1k), 2 pins each,
 //          like a divide-down combo organ. one phase counter -> the pitch never wanders.
 // EARTH  = the organ's pitch follows EARTH like a pitch CV: 1 oct per ~1/4 of its range (unplugged = a steady A2)
-// FLIP   = trigger: PITCH (smooth, for LFOs; default) -> AUDIO (fast, deep: audio-rate FM) -> OFF -> PITCH
+// FLIP   = trigger: PITCH (smooth, octaves, for LFOs) -> RING (linear through-zero FM, audio-rate: ring-mod-like) -> OFF
+//          (starts on RING without Bluetooth — EARTH is read every sample then — and on PITCH with it)
 // SKIP   = trigger: WOBBLE on/off. the 4 echo taps drift like worn tape (slow wow + a little flutter),
 //          each tap on its own phase -> the echoes smear and detune against each other.
 //          it fades in/out over ~0.2s
@@ -181,7 +182,7 @@ void IRAM_ATTR echo_og() {
   static int unpatch_timer = 0;
   static int32_t rate_s = 256 << 8;                // slewed FM rate (Q16)
   static int32_t rg = 1024;                          // recording gain 0..1024 (freeze ramp)
-  static int fm_mode = 1;                           // FLIP: EARTH FM ±1 oct (default) -> ±2 oct -> off -> ...
+  static int fm_mode = -1;                          // FLIP: PITCH -> RING -> off -> PITCH (first: RING without Bluetooth, PITCH with)
   static bool wob_on = false;                       // SKIP: wobble
   static int32_t wob = 0;                           // wobble depth 0..8192 (ramped)
   static uint32_t wph = 0;                          // wobble LFO phase
@@ -268,13 +269,20 @@ void IRAM_ATTR echo_og() {
   // a small dead band keeps the idle noise out; 1 octave per 1024 counts (FLIP: 2), clamped at ±2 (±3) octaves.
   // PITCH (FLIP 1st): three slews, smooth — for LFOs / slow CVs
   // AUDIO (FLIP 2nd): one light slew only, so an audio-rate signal on EARTH really frequency-modulates the organ
+  if (fm_mode < 0) fm_mode = cafe_no_ble ? 2 : 1;
   s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> (fm_mode == 2 ? (cafe_no_ble ? 1 : 4) : 8);   // (no Bluetooth: EARTH is fresh every sample)
   s_earth2 += (s_earth - s_earth2) >> (fm_mode == 2 ? 2 : 8);
   s_earth3 += (s_earth2 - s_earth3) >> (fm_mode == 2 ? 1 : 8);
   int e = s_earth3 >> 8;                             // 0..4095
   if (boot_timer < 8000) { boot_timer++; if (boot_timer > 4000) initial_earth = e; }   // the resting level
   int32_t rate = 256;                               // Q8, 1.0 = A2
-  if (boot_timer >= 8000 && fm_mode > 0) {
+  if (boot_timer >= 8000 && fm_mode == 2) {
+    // RING: linear, through-zero FM — the organ's speed is A2 × (1 + EARTH), so a strong audio signal pushes it
+    // through zero and backwards: sidebands on both sides, the ring-modulator-like clang
+    int32_t dd = e - initial_earth;
+    dd = dd > 12 ? dd - 12 : (dd < -12 ? dd + 12 : 0);
+    rate = 256 + (dd >> 1);                                              // ±2048 counts -> ×(-3 … +5)
+  } else if (boot_timer >= 8000 && fm_mode > 0) {
     int32_t dd = e - initial_earth;
     dd = dd > 40 ? dd - 40 : (dd < -40 ? dd + 40 : 0);
     int32_t o = fm_mode == 2 ? dd : (dd >> 2);                           // 1/256 octave (AUDIO: 4x deeper)
@@ -288,7 +296,7 @@ void IRAM_ATTR echo_og() {
 
   // --- ORGAN ---
   rate_s += ((rate << 8) - rate_s) >> (fm_mode == 2 ? 1 : 8);   // PITCH: ~6 ms slew · AUDIO: follows at once
-  oph += (uint32_t)(((uint64_t)10713070u * rate_s) >> 16);   // 10713070 = 110 Hz at 44.1k
+  oph += (uint32_t)(int32_t)(((int64_t)10713070 * rate_s) >> 16);   // 10713070 = 110 Hz at 44.1k (negative = backwards)
   int pins = 2 * __builtin_popcount(oph >> 27);     // 5 octave squares x 2 pins = 0..10
   {
     uint32_t mask = 0;
@@ -2256,11 +2264,13 @@ static inline int32_t IRAM_ATTR h_readq(uint32_t posq) {
 }
 
 // ---- 1 ECHO: a clear stereo delay, L line + R line, the repeats ping-pong between them ----
+// td_clean (ARP_DELAY): a light digital stereo delay — no wow / EARTH on the time, no tone filters, gentler feedback
+volatile bool td_clean = false;
 static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lpl = 0, lpr = 0, hpl = 0, hpr = 0;
   if (rs) { w = 0; fill = 0; ct = td_T; lpl = lpr = 0; hpl = hpr = 0; }
   ct += (td_T - ct) >> 11;
-  int32_t tl = ct + ((fx_emq * td_wow) >> 8);                        // EARTH, smoothed: bends, never crackles
+  int32_t tl = td_clean ? ct : ct + ((fx_emq * td_wow) >> 8);         // EARTH, smoothed: bends, never crackles
   if (tl < (64 << 8)) tl = 64 << 8; if (tl > (32000 << 8)) tl = 32000 << 8;
   int32_t tr = (int32_t)(((int64_t)tl * td_ratio) >> 12);
   if (tr < (64 << 8)) tr = 64 << 8; if (tr > (32000 << 8)) tr = 32000 << 8;
@@ -2276,8 +2286,8 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   if (fill <= (uint32_t)(((tl > tr ? tl : tr) >> 8) + 2)) { vl = 0; vr = 0; }   // the lines still hold old tape
   fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone);
   hpl += (lpl - hpl) >> 8; hpr += (lpr - hpr) >> 8;                  // the repeats lose a little low end each time: clean, not muddy
-  int32_t pp = td_pp, fb = hold ? 256 : td_fb;
-  int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
+  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 3) >> 2 : td_fb);
+  int32_t xl = hold || td_clean ? vl : lpl - hpl, xr = hold || td_clean ? vr : lpr - hpr;
   int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
   int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
@@ -2574,7 +2584,7 @@ static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) 
   switch (e) {
     case 0: { int32_t g = cl_g + ((cl_g * fx_em) >> 7); if (g < 0) g = 0;     // EARTH = level (VCA)
               *l = *r = (in * g) >> 8; } break;
-    case 1: *l = td_tick(in, r, hold, rs); break;
+    case 1: td_clean = false; *l = td_tick(in, r, hold, rs); break;
     case 2: *l = sm_tick(in, rs); *r = *l; break;
     case 3: *l = rv_tick(in, rs); *r = *l; break;
     case 4: *l = gl_tick(in, hold, rs); *r = *l; break;
@@ -2699,6 +2709,7 @@ void IRAM_ATTR arpdelay() {
   bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;
   int32_t in = gyo - 2048, l, r;
   bool rs = fx_rs[1]; fx_rs[1] = false;
+  td_clean = true;                                  // ARP_DELAY: the light, clean digital delay
   l = td_tick(in, &r, hold, rs);
   int32_t v = l + 2048; if (v > 4095) v = 4095; if (v < 0) v = 0;
   pout = v;
