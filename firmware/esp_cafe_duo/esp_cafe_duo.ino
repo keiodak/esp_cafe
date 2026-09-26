@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.37"
+#define FW_VERSION "3.38"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -390,12 +390,12 @@ void dl_update() {
 // ---- NOISE parameters (k.odk). "N <id> <0..1000>" ----
 //  0 size (line length)  1 spread (between the three lines)  2 feedback (ring gain)  3 grit (soft .. fold .. 1-bit)
 //  4 shift clock  5 loop (0 = free noise .. short loop = pitched)  6 gate rate  7 gate open (share)  8 cutoff
-//  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)  15 SLOW (0 | 1000)
-static const int16_t nz_default[16] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 350, 0, 400, 0, 0};
+//  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)  15 speed (0 FAST | 500 SLOW | 1000 CRAWL)
+static const int16_t nz_default[16] = {450, 500, 700, 350, 600, 0, 350, 600, 650, 450, 300, 350, 0, 400, 450, 0};
 void nz_update() {
   float hz = clock_hz(), p[15];
   for (int i = 0; i < 15; i++) p[i] = nz_p[i] / 1000.0f;
-  nz_slow = nz_p[15] > 0;                                        // 15 = SLOW
+  nz_slow = nz_p[15] >= 750 ? 2 : nz_p[15] > 0 ? 1 : 0;           // 15 = FAST 0 · SLOW 500 · CRAWL 1000
   float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
   float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
   for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
@@ -415,10 +415,9 @@ void nz_update() {
   // 13 OSC pitch (20 Hz .. 5 kHz) · 14 FOLD: 0 = off, the first 15 % fades the oscillators in, then it folds
   float fo = 20.0f * powf(2.0f, p[13] * 8.0f);
   nz_oinc = (uint32_t)(fo / hz * 4294967295.0f);
-  nz_olvl = (int32_t)((p[14] < 0.15f ? p[14] / 0.15f : 1.0f) * 200.0f);
+  nz_olvl = (int32_t)((p[14] < 0.15f ? p[14] / 0.15f : 1.0f) * 230.0f);
   float fd = p[14] < 0.1f ? 0.0f : (p[14] - 0.1f) / 0.9f;
   nz_ofold = (int32_t)(fd * 4096.0f);
-  nz_oxfm = (int32_t)((0.1f + fd * 1.4f) * 256.0f);
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----

@@ -198,7 +198,7 @@ enum HdPad: Int, CaseIterable {
 enum NzPad: Int, CaseIterable {
     case ring, feedback, shift, gate, filter, selfmod, stereo, osc
     var title: String { ["RING", "FEEDBACK · GRIT", "SHIFT · LOOP", "GATE", "FILTER", "SELF · INPUT", "L · R", "OSC · FOLD"][rawValue] }
-    var start: (Double, Double) { [(0.45, 0.5), (0.85, 0.35), (0.6, 0.0), (0.35, 0.6), (0.65, 0.45), (0.3, 0.0), (0.0, 0.0), (0.4, 0.0)][rawValue] }
+    var start: (Double, Double) { [(0.45, 0.5), (0.85, 0.35), (0.6, 0.0), (0.35, 0.6), (0.65, 0.45), (0.3, 0.0), (0.0, 0.0), (0.4, 0.45)][rawValue] }
     var ids: [Int] {
         switch self {
         case .ring: return [0, 1]
@@ -208,7 +208,7 @@ enum NzPad: Int, CaseIterable {
         case .filter: return [8, 9]
         case .selfmod: return [10, 12]
         case .stereo: return [0, 4, 6, 13]        // B's ring, clock, gate and oscillators drift away from A's
-        case .osc: return [13, 14]               // three cross-modulated oscillators through a folder (Y = 0: off)
+        case .osc: return [13, 14]               // one sine through three folding stages with feedback (sunnandæg), Y = 0: off
         }
     }
 }
@@ -280,7 +280,7 @@ final class Rig: ObservableObject {
     @Published var fxPadLink = false       // LINK PADS: the XY pads move both Cafes
     @Published var fxHold = false
     @Published var fxDrift = false         // DRIFT: the pads wander by themselves
-    @Published var nzSlow = false          // NOISE SLOW: the source wanders slowly ("N 15")
+    @Published var nzSpeed = 0             // NOISE source: 0 FAST · 1 SLOW · 2 CRAWL ("N 15 0|500|1000")
     @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
@@ -438,7 +438,7 @@ final class Rig: ObservableObject {
         guard let p = NzPad(rawValue: i) else { return [] }
         return p.ids.map { nzLine($0, slot: slot) }
     }
-    func nzAll(slot: Int) -> [String] { (0...14).filter { $0 != 11 }.map { nzLine($0, slot: slot) } + ["N 15 \(nzSlow ? 1000 : 0)"] }
+    func nzAll(slot: Int) -> [String] { (0...14).filter { $0 != 11 }.map { nzLine($0, slot: slot) } + ["N 15 \(nzSpeed * 500)"] }
     /// the dice key: somewhere new for every NOISE pad (except the level)
     func nzDice() {
         for p in NzPad.allCases where p != .stereo {

@@ -438,9 +438,9 @@ final class Director: ObservableObject {
         ctxUnits().forEach { $0.send("C 16 \(rig.coReverse ? 1 : 0)") }
     }
 
-    func setNzSlow(_ on: Bool) {
-        rig.nzSlow = on
-        ctxUnits().forEach { $0.send("N 15 \(on ? 1000 : 0)") }
+    func setNzSpeed(_ s: Int) {
+        rig.nzSpeed = s
+        ctxUnits().forEach { $0.send("N 15 \(s * 500)") }
     }
 
     func noiseDice() {
@@ -891,6 +891,9 @@ private struct HudBar: View {
             switch n {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
+            case 2: key(["hare", "tortoise", "tortoise.fill"][rig.nzSpeed], on: rig.nzSpeed > 0) {   // FAST / SLOW / CRAWL
+                        d.setNzSpeed((rig.nzSpeed + 1) % 3)
+                    }
             default: blank
             }
         case .arp:
@@ -925,6 +928,7 @@ private struct HudBar: View {
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
+        "hare": "FAST", "tortoise": "SLOW", "tortoise.fill": "CRAWL",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
 

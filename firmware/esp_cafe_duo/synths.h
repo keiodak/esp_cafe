@@ -1047,6 +1047,13 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
     sum = low + (band >> 2);                    // a little band-pass on top: closing it doesn't swallow the grains
   }
   int32_t g = (sum * mo_gain) >> 8;
+  // GATE: quiet grains are cut to silence (no chopped hiss when the input is only noise)
+  { static int32_t genv = 0, gg = 0; static bool gopen = false;
+    int32_t ag = g < 0 ? -g : g;
+    if (ag > genv) genv = ag; else genv -= (genv >> 10) + 1; if (genv < 0) genv = 0;   // peak, held ~30 ms
+    if (!gopen && genv > 70) gopen = true; else if (gopen && genv < 45) gopen = false;
+    gg += ((gopen ? 4096 : 0) - gg) >> 7;                                              // ~4 ms fade, no click
+    g = (int32_t)(((int64_t)g * gg) >> 12); }
   if (g > 1600) g = 1600 + ((g - 1600) >> 2);   // louder, but it bends instead of clipping hard
   if (g < -1600) g = -1600 + ((g + 1600) >> 2);
   if (g > 2047) g = 2047; if (g < -2047) g = -2047;
@@ -1234,7 +1241,7 @@ volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
 volatile int32_t  nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
 volatile int32_t  nz_oxfm = 0;               // cross FM between the three oscillators, Q8
 volatile bool     nz_reset = true, nz_burst = false;
-volatile bool     nz_slow = false;           // SLOW: the source steps 64x slower and glides (a wander, not a hiss)
+volatile int      nz_slow = 0;               // 0 FAST · 1 SLOW (64x slower, gliding) · 2 CRAWL (1024x slower, a long glide)
 volatile int      nz_gate = 0;
 
 static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
@@ -1248,35 +1255,60 @@ static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
   return fo + (((bit - fo) * (grit - 2048)) >> 11);
 }
 
-// OSC · FOLD (after sunnandæg): three triangle oscillators in a ring, each frequency-modulated by the one before
-// (1 <- 3 <- 2 <- 1, and the noise ring pushes on 1), summed into three folding stages in a row —
-// SATURATE -> TRIANGLE FOLD -> RECTIFY — with the last stage fed back into the first. More FOLD = harder
-// folding, more cross FM and more feedback together. It excites the noise ring and is heard through the filter.
+// OSC · FOLD (after sunnandæg, closely): ONE sine oscillator through three stages in a row —
+// 1 SOFT CLIP (tanh) -> 2 TRIANGLE FOLD -> 3 RECTIFY — and the output fed back into the oscillator four ways at once
+// (SYNC: crossing a threshold pulls the phase to 0 · FM: added to the phase · PITCH: bends the speed ·
+// WAVE: moves the fold of stage 2). FOLD opens the three stages one after another and the feedback with them.
+// S&H: at every clock of the source (FAST / SLOW / CRAWL) stage 1 is sampled and holds the pitch (depth = SELF).
+// The noise ring nudges the phase a little. Heard through the filter; stage 2 goes to the right side.
+static inline int32_t IRAM_ATTR nz_tanh(int32_t u) {             // tanh, Q11 in / out (rational, exact enough)
+  if (u > 6144) u = 6144; if (u < -6144) u = -6144;             // (= 1.0 at 3.0)
+  int64_t u2 = ((int64_t)u * u) >> 11;
+  return (int32_t)(((int64_t)u * (55296 + u2)) / (55296 + 9 * u2));
+}
+static inline int32_t IRAM_ATTR nz_fold(int32_t x) {             // reflect into ±2048 (triangle fold)
+  int32_t tf = (x + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
+  return tf - 2048;
+}
+volatile bool nz_shclk = false;                                  // set by nz_tick on every source clock
 static int32_t nz_osc(int32_t ring, int32_t *side) {
-  static uint32_t ph[3] = {0, 0x55555555u, 0xAAAAAAAAu};
-  static int32_t o[3] = {0, 0, 0}, last3 = 0;
-  static const int32_t ratio[3] = {4096, 6136, 8245};                    // 1 · a flat fifth · a sharp octave
-  if (nz_olvl <= 0) { *side = 0; return 0; }
-  for (int k = 0; k < 3; k++) {
-    int32_t inc = (int32_t)(((uint64_t)nz_oinc * ratio[k]) >> 12);
-    int32_t m = o[(k + 2) % 3] + (k == 0 ? (ring >> 1) : 0);
-    inc += (int32_t)(((int64_t)inc * m * nz_oxfm) >> 19);                 // through zero when it gets deep
-    ph[k] += (uint32_t)inc;
-    int32_t t = (int32_t)(ph[k] >> 20);                                   // 0..4095
-    o[k] = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;                        // triangle, -2048..2047
-  }
-  int32_t f = nz_ofold;                                                   // 0..4096
-  int32_t x = ((o[0] + o[1] + o[2]) * 85) >> 8;
-  x += (last3 * (f >> 1)) >> 12;                                          // stage 3 -> stage 1
-  int32_t x1 = soft_clip((x * (4096 + 3 * f)) >> 12);                    // 1 SATURATE
-  int32_t g = (x1 * (4096 + 6 * f)) >> 12;                                // 2 TRIANGLE FOLD
-  int32_t tf = (g + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
-  int32_t x2 = x1 + (((tf - 2048 - x1) * f) >> 12);
-  int32_t r = (x2 < 0 ? -x2 : x2) * 2 - 2048;                             // 3 RECTIFY
-  int32_t x3 = x2 + (((r - x2) * (f >> 1)) >> 12);
-  last3 = x3;
-  *side = (x2 * nz_olvl) >> 8;
-  return (x3 * nz_olvl) >> 8;
+  static uint32_t ph = 0;
+  static int32_t prev = 0, sprev = 0, s1 = 0, shoct = 0;
+  if (nz_olvl <= 0) { *side = 0; prev = 0; return 0; }
+  const int32_t F = nz_ofold;                                            // 0..4096
+  int32_t a1 = (F * 3) >> 1; if (a1 > 4096) a1 = 4096;                  // the stages open one after another
+  int32_t a2 = ((F * 3) >> 1) - 1024; if (a2 < 0) a2 = 0; if (a2 > 4096) a2 = 4096;
+  int32_t a3 = ((F * 3) >> 1) - 2048; if (a3 < 0) a3 = 0; if (a3 > 4096) a3 = 4096;
+  int32_t fb = 600 + ((F * 3) >> 2);                                    // feedback Q12, 0.15 .. 0.9
+  const int32_t wS = 1024, wF = 1229, wP = 819, wW = 1024;              // SYNC · FM · PITCH · WAVE (Q12, sum 1)
+  // S&H on the pitch, clocked by the source
+  if (nz_shclk) { nz_shclk = false; shoct = (int32_t)(((int64_t)s1 * nz_self) >> 11); if (shoct > 512) shoct = 512; if (shoct < -768) shoct = -768; }
+  uint64_t i64 = ((uint64_t)nz_oinc * bj_exp2(shoct)) >> 16; if (i64 > 0x30000000u) i64 = 0x30000000u;   // (under ~6 kHz)
+  uint32_t inc = (uint32_t)i64;
+  int32_t pf = (int32_t)(((int64_t)prev * fb) >> 11);                   // prev · feedback, Q12
+  inc = (uint32_t)((int64_t)inc + (((int64_t)inc * pf * wP) >> 22));    // PITCH: 1 + prev·fb·4·wP
+  ph += inc;
+  int32_t th = 2048 - (fb >> 1);                                        // SYNC: threshold 1 - fb
+  if (sprev < th && prev >= th) ph = (uint32_t)(((uint64_t)ph * (4096 - wS)) >> 12);
+  sprev = prev;
+  uint32_t p2 = ph + (uint32_t)(((int64_t)pf * wF) << 9) + ((uint32_t)ring << 15);   // FM: + prev·fb·2·wF cycles
+  int32_t x = (int32_t)(p2 >> 20) - 2048;                               // -2048..2047 = -π..π
+  int32_t sn = (int32_t)(((int64_t)x * (2048 - (x < 0 ? -x : x))) >> 9);   // parabolic sine, ±2048
+  // 1 SOFT CLIP
+  int32_t v1 = sn;
+  if (a1 > 0) { int32_t dr = 4096 + a1 * 8; v1 = (int32_t)(((int64_t)nz_tanh((int32_t)(((int64_t)sn * dr) >> 12)) << 11) / nz_tanh(dr >> 1)); }
+  s1 = v1;
+  // 2 FOLD (its amount moved by the feedback: WAVE)
+  int32_t ad = a2 + (int32_t)((((int64_t)pf * wW) >> 12) >> 1); if (ad < 0) ad = 0; if (ad > 4096) ad = 4096;
+  int32_t v2 = v1;
+  if (ad > 0) { int32_t fo = nz_fold((int32_t)(((int64_t)v1 * (4096 + ad * 6)) >> 12)); v2 = v1 + (int32_t)(((int64_t)(fo - v1) * ad) >> 12); }
+  // 3 RECTIFY
+  int32_t v3 = v2;
+  if (a3 > 0) { int32_t r = (v2 < 0 ? -v2 : v2) * 2 - 2048; v3 = v2 + (int32_t)(((int64_t)(r - v2) * a3) >> 12); }
+  int32_t out = F > 0 ? nz_tanh(v3) : v3;
+  prev += (out - prev) >> 2;                                            // (smoothed: a raw one-sample loop sings at Nyquist)
+  *side = (v2 * nz_olvl) >> 8;
+  return (out * nz_olvl) >> 8;
 }
 
 static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
@@ -1291,7 +1323,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   // k near 2 = a tent map: chaotic, noise-like, but made of folds. GRIT pushes k up (rougher).
   // LOOP restarts it from the same seed (a pitched cycle). SLOW = 64x slower clock and a glide between steps.
   uint32_t os = sph;
-  uint32_t sinc = nz_slow ? (nz_sinc >> 6) : nz_sinc;
+  uint32_t sinc = nz_slow == 2 ? (nz_sinc >> 10) : nz_slow ? (nz_sinc >> 6) : nz_sinc;
   sph += sinc + ((lastc > 0 && nz_self) ? (sinc >> 1) : 0);
   if (sph < os) {
     if (!freeze) {
@@ -1303,8 +1335,9 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
       if (nz_loop && ++steps >= nz_loop) { steps = 0; fx_x = 1234; }
     }
     tgt = fx_x;
+    nz_shclk = true;
   }
-  if (nz_slow) val += (tgt - val) >> 9; else val = tgt;
+  if (nz_slow == 2) val += (tgt - val) >> 14; else if (nz_slow) val += (tgt - val) >> 11; else val = tgt;
   val = (val * 3) >> 2;
   // gate
   gph += nz_ginc;
@@ -1333,11 +1366,11 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   lastc = c;
 
   // filter (two: L and R), cutoff flipped by the ring
-  int32_t oc = nz_fc + (c > 0 ? nz_self : -nz_self);
+  int32_t oc = nz_fc + (c > 0 ? nz_self : -nz_self) + ((val * nz_self) >> 11);   // + the source walks the cutoff
   if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
   int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
   if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
-  int32_t xl = ((a + b) >> 1) + osc, xr = ((c - b) >> 1) + os2;
+  int32_t xl = ((a + b) >> 2) + osc, xr = ((c - b) >> 2) + os2;      // the folded voice leads, the ring under it
   la += (fq * ba) >> 12; int32_t hl = xl - la - ((nz_q * ba) >> 12); ba += (fq * hl) >> 12;
   lb += (fq * bb) >> 12; int32_t hr = xr - lb - ((nz_q * bb) >> 12); bb += (fq * hr) >> 12;
   if (la > 32767) la = 32767; if (la < -32768) la = -32768; if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;

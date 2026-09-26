@@ -83,8 +83,9 @@ struct PresetManagerView: View {
                     }
                     if rig.padSet == .noise {
                         HStack(spacing: PanelMetrics.chipSpacing) {
-                            ChipButton(title: "FAST", filled: !rig.nzSlow) { d.setNzSlow(false) }
-                            ChipButton(title: "SLOW", filled: rig.nzSlow) { d.setNzSlow(true) }
+                            ForEach(0..<3, id: \.self) { s in
+                                ChipButton(title: ["FAST", "SLOW", "CRAWL"][s], filled: rig.nzSpeed == s) { d.setNzSpeed(s) }
+                            }
                         }
                     }
                 }
