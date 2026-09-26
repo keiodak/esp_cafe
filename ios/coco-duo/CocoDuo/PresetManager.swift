@@ -1,9 +1,9 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
-//   TARGET   A / B / A + B — who the presets (and the pads) go to
-//   PRESETS  grouped: PLAYED HERE (BLE with its 4 modes under it, MULTI) · iOS + CAFE (ARP_DELAY) · ON THE CAFE.
-//            A / B marks show where each Cafe is. (TEMPO moved to the CAFES panel.)
-//   UPDATE   write a new firmware over Bluetooth to A / B / both (the .ino.bin from "Export Compiled Binary")
+//   PRESETS  numbered in this order (BLE, MULTI, ARP_DELAY, HARMONY, the Cafe ones). A · & · B on each row:
+//            where each Cafe is, and a tap puts A / both / B there (that is also who the pads go to).
+//   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on
+//   (TEMPO and UPDATE live in the CAFES panel.)
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -13,58 +13,29 @@ struct PresetManagerView: View {
     @ObservedObject var rig: Rig
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
-    @State private var picking = false
-    @State private var fileNote = ""
-
-    private let who = ["A", "B", "A + B"]
-
-    private func section(_ t: String, _ c: Color) -> some View {
-        HStack(spacing: 5) {
-            Rectangle().fill(c).frame(width: 3, height: 9)
-            Text(t)
-                .font(.hud(7, .semibold))
-                .tracking(1.2)
-                .foregroundStyle(c)
-        }
-        .padding(.top, 4)
-    }
 
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
-                PanelCard(title: "TARGET", note: "presets and pads go to") {
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<3, id: \.self) { t in
-                            ChipButton(title: who[t], filled: rig.target == t) { d.setTarget(t) }
-                        }
-                    }
-                }
-                PanelCard(title: "PRESETS", note: "tap one", spacing: 3) {
-                    // played from here: BLE (its four modes right under it), MULTI, then iOS + CAFE
-                    section("PLAYED HERE", PastelTheme.cafeBlue)
-                    PresetRow(n: Preset.ble, rig: rig, a: a, b: b) { d.setPreset(Preset.ble) }
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        Text("└").font(.hud(9)).foregroundStyle(PastelTheme.textSecondary).frame(width: 14)
-                        ForEach(0..<4, id: \.self) { m in
-                            ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
-                                if rig.ctxPreset != Preset.ble { d.setPreset(Preset.ble) }
-                                d.setMode(m)
-                            }
-                            .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.mode(m)).frame(height: 2) }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                    PresetRow(n: Preset.multi, rig: rig, a: a, b: b) { d.setPreset(Preset.multi) }
-                    section("iOS + CAFE", PastelTheme.cafePurple)
-                    PresetRow(n: Preset.arp, rig: rig, a: a, b: b, indent: true) { d.setPreset(Preset.arp) }
-                    section("ON THE CAFE", PastelTheme.cafeGreen)
-                    ForEach(Preset.cafeOrder, id: \.self) { n in
-                        PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
+                PanelCard(title: "PRESETS", note: "A · & · B = which Cafe", spacing: 3) {
+                    ForEach(Preset.order, id: \.self) { n in
+                        PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
                     }
                 }
             } right: {
-                if rig.padSet == .grain {
-                    PanelCard(title: "GRAIN", note: "BLE · GRAIN") { GrainOptions(d: d, grain: d.grain) }
+                PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
+                    HStack(spacing: PanelMetrics.chipSpacing) {
+                        ForEach(0..<4, id: \.self) { m in
+                            ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
+                                d.setMode(m)
+                            }
+                        }
+                    }
+                    .disabled(rig.ctxPreset != Preset.ble)
+                    .unlit(rig.ctxPreset != Preset.ble)
+                    if rig.padSet == .grain {
+                        GrainOptions(d: d, grain: d.grain)
+                    }
                 }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
@@ -72,28 +43,42 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
-                PanelCard(title: "UPDATE", note: "firmware over bluetooth") {
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<3, id: \.self) { t in
-                            ChipButton(title: who[t], filled: rig.updTarget == t) { rig.updTarget = t }
-                        }
-                    }
-                    ChipButton(title: "CHOOSE .BIN AND WRITE", filled: a.ota != nil || b.ota != nil) {
-                        if a.ota == nil && b.ota == nil { picking = true }
-                    }
-                    UpdateRow(unit: a)
-                    UpdateRow(unit: b)
-                    if !fileNote.isEmpty {
-                        Text(fileNote)
-                            .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
-                            .foregroundStyle(PastelTheme.textSecondary)
-                    }
-                    Text("Arduino IDE: Sketch > Export Compiled Binary, then pick esp_cafe_duo.ino.bin (not .merged / .bootloader). The sound stops while it writes; the Cafe restarts with the new firmware. Two Cafes can be written at once.")
-                        .font(.hud(8))
-                        .foregroundStyle(PastelTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// UPDATE (in the CAFES panel): write a new firmware over Bluetooth to A / B / both
+struct UpdateCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+    @ObservedObject var a: CafeUnit
+    @ObservedObject var b: CafeUnit
+    @State private var picking = false
+    @State private var fileNote = ""
+    private let who = ["A", "B", "A + B"]
+
+    var body: some View {
+        PanelCard(title: "UPDATE", note: "firmware over bluetooth", spacing: 5) {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ForEach(0..<3, id: \.self) { t in
+                    ChipButton(title: who[t], filled: rig.updTarget == t) { rig.updTarget = t }
                 }
             }
+            ChipButton(title: "CHOOSE .BIN AND WRITE", filled: a.ota != nil || b.ota != nil) {
+                if a.ota == nil && b.ota == nil { picking = true }
+            }
+            UpdateRow(unit: a)
+            UpdateRow(unit: b)
+            if !fileNote.isEmpty {
+                Text(fileNote)
+                    .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                    .foregroundStyle(PastelTheme.textSecondary)
+            }
+            Text("Arduino IDE: Sketch > Export Compiled Binary → esp_cafe_duo.ino.bin (not .merged / .bootloader). The Cafe restarts with it.")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.data]) { result in
             guard case .success(let url) = result else { return }
@@ -195,57 +180,57 @@ private struct ArpCard: View {
     }
 }
 
-/// one preset slot: number, name, what it is, and which Cafe sits on it
+/// one preset: its number (the order in this list), name, what it is, and A · & · B —
+/// each shows where that Cafe is and puts it there (& = both). Tapping the row itself = both too.
 private struct PresetRow: View {
     let n: Int
     @ObservedObject var rig: Rig
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
-    var indent = false
-    let action: () -> Void
+    let choose: (Int) -> Void                    // 0 = A, 1 = B, 2 = both
 
-    private var exists: Bool { n < Preset.count }
     private func on(_ u: CafeUnit) -> Bool { (u.isConnected && u.preset >= 0 ? u.preset : rig.preset[u.slot]) == n }
 
     var body: some View {
-        let chosen = exists && rig.slots.allSatisfy { rig.preset[$0] == n }
+        let onA = on(a), onB = on(b)
         HStack(spacing: 6) {
-            if indent { Text("└").font(.hud(9)).foregroundStyle(PastelTheme.textSecondary).frame(width: 14) }
-            HudTag(text: String(format: "%02ld", n + 1),
-                   fill: chosen ? PastelTheme.hudOrange : (exists ? PastelTheme.hudBlack : PastelTheme.hudLine), size: 9)
+            HudTag(text: String(format: "%02ld", Preset.number(n)),
+                   fill: onA && onB ? PastelTheme.hudOrange : PastelTheme.hudBlack, size: 9)
             Text(Preset.names[n])
                 .font(.hudBig(13))
-                .foregroundStyle(exists ? PastelTheme.hudBlack : PastelTheme.textSecondary)
+                .foregroundStyle(PastelTheme.hudBlack)
                 .frame(width: 78, alignment: .leading)
             Text(Preset.notes[n])
                 .font(.hud(7.5))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            mark("A", on(a), a.isConnected)
-            mark("B", on(b), b.isConnected)
+            mark("A", onA, a.isConnected) { choose(0) }
+            mark("&", onA && onB, a.isConnected || b.isConnected) { choose(2) }
+            mark("B", onB, b.isConnected) { choose(1) }
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 3)
-        .background(Rectangle().fill(chosen ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
+        .background(Rectangle().fill(onA || onB ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
         .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5) }
         .contentShape(Rectangle())
-        .onTapGesture { if exists { action() } }
-        .opacity(exists ? 1 : 0.45)
+        .onTapGesture { choose(2) }
     }
 
-    private func mark(_ s: String, _ here: Bool, _ live: Bool) -> some View {
+    private func mark(_ s: String, _ here: Bool, _ live: Bool, _ tap: @escaping () -> Void) -> some View {
         Text(s)
-            .font(.hud(8, .semibold))
-            .foregroundStyle(here ? Color.white : PastelTheme.hudLine)
-            .frame(width: 14, height: 13)
+            .font(.hud(9, .semibold))
+            .foregroundStyle(here ? Color.white : PastelTheme.hudBlack)
+            .frame(width: 22, height: 17)
             .background(Rectangle().fill(here ? (live ? PastelTheme.hudOrange : PastelTheme.textSecondary) : Color.clear))
             .overlay(Rectangle().strokeBorder(here ? Color.clear : PastelTheme.hudLine, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: tap)
     }
 }
 
 /// one Cafe's firmware update: progress bar and what happened
-private struct UpdateRow: View {
+struct UpdateRow: View {
     @ObservedObject var unit: CafeUnit
 
     var body: some View {

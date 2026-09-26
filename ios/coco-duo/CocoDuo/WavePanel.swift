@@ -29,32 +29,33 @@ private struct CafeWaveCard: View {
 
     var body: some View {
         PanelCard(title: unit.slot == 0 ? "CAFE A" : "CAFE B",
-                  note: unit.name.map { "\($0) · \(unit.state)" } ?? unit.state) {
+                  note: unit.name.map { "\($0) · \(unit.state)" } ?? unit.state, spacing: 4) {
             TapeView(scope: unit.scope, unit: unit)
-                .frame(height: 118)
+                .frame(height: 78)
                 .opacity(unit.isConnected ? 1 : 0.4)
-            PositionLine(scope: unit.scope, unit: unit)
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                PositionLine(scope: unit.scope, unit: unit)
+                Spacer(minLength: 0)
+                ChipButton(title: "REC", filled: unit.isConnected && unit.recording) {
+                    unit.send("R \(unit.recording ? 0 : 1)")
+                }
+                .frame(width: 40)
+                ChipButton(title: "LOAD", filled: decoding || unit.loadProgress != nil) {
+                    if unit.isConnected && !decoding && unit.loadProgress == nil { picking = true }
+                }
+                .frame(width: 44)
+            }
             HStack(spacing: PanelMetrics.chipSpacing) {
                 OutWindow(outs: unit.outs, title: "ASH", yellow: false)
                 OutWindow(outs: unit.outs, title: "YELLOW", yellow: true)
             }
-            .frame(height: 54)
+            .frame(height: 34)
             .opacity(unit.isConnected ? 1 : 0.4)
-
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: "REC", filled: unit.isConnected && unit.recording) {
-                    unit.send("R \(unit.recording ? 0 : 1)")
-                }
-                ChipButton(title: "LOAD", filled: decoding || unit.loadProgress != nil) {
-                    if unit.isConnected && !decoding && unit.loadProgress == nil { picking = true }
-                }
-            }
             if decoding || unit.loadProgress != nil || !unit.loadNote.isEmpty {
                 HStack(spacing: PanelMetrics.rowGap) {
                     Text("FILE")
                         .font(.hud(PanelMetrics.labelFont, .medium))
                         .foregroundStyle(PastelTheme.textPrimary)
-                        .frame(width: PanelMetrics.labelWidth, alignment: .leading)
                     if let p = unit.loadProgress {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
@@ -64,43 +65,43 @@ private struct CafeWaveCard: View {
                                     .padding(1)
                             }
                         }
-                        .frame(height: 8)
+                        .frame(height: 6)
                     } else {
                         Text(decoding ? "reading the file…" : unit.loadNote)
                             .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                             .foregroundStyle(PastelTheme.textSecondary)
+                            .lineLimit(1)
                         Spacer(minLength: 0)
                     }
                 }
             }
-
-            // what the Cafe's own inputs are doing
-            HStack(spacing: PanelMetrics.rowGap) {
+            // the Cafe's own inputs, in one row: EARTH bar · FLIP · SKIP · BUTTON
+            HStack(spacing: 8) {
                 Text("EARTH")
-                    .font(.hud(PanelMetrics.labelFont, .semibold))
-                    .foregroundStyle(PastelTheme.earth)
-                    .frame(width: PanelMetrics.labelWidth, alignment: .leading)
+                    .font(.hud(PanelMetrics.labelFont, .medium))
+                    .foregroundStyle(PastelTheme.textPrimary)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Rectangle().strokeBorder(PastelTheme.textPrimary.opacity(0.45), lineWidth: 1)
-                        Rectangle().fill(PastelTheme.earth)
+                        Rectangle().fill(PastelTheme.textPrimary.opacity(0.8))
                             .frame(width: max(0, (geo.size.width - 2) * CGFloat(unit.earth) / 255))
                             .padding(1)
                     }
                 }
-                .frame(height: 8)
+                .frame(height: 7)
+                lamp("FLIP", unit.flip)
+                lamp("SKIP", unit.skip)
+                lamp("BTN", unit.button)
             }
-            HStack(spacing: 12) {
-                lamp("FLIP", unit.flip, PastelTheme.flip)
-                lamp("SKIP", unit.skip, PastelTheme.skip)
-                lamp("BUTTON", unit.button, PastelTheme.button)
-                Spacer(minLength: 0)
-            }
-            DiagRow("CLOCK", unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")
-            DiagRow("BUFFER", unit.hz > 1000 ? String(format: "%.2f s", Double(TAPE) / unit.hz) : "—")
-            DiagRow("PRESET", unit.preset < 0 ? "—" : Preset.tag(unit.preset))
-            DiagRow("MODE", unit.preset == Preset.ble ? Preset.modeNames[min(max(unit.mode, 0), 3)] : "—")
-            DiagRow("TEMPO", unit.bpm > 0 ? String(format: "%.1f BPM", unit.bpm) : "—")
+            // clock · buffer · preset · mode · tempo, two short lines
+            Text("\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.hz > 1000 ? String(format: "%.2f s", Double(TAPE) / unit.hz) : "—")  ·  \(unit.bpm > 0 ? String(format: "%.1f BPM", unit.bpm) : "—")")
+                .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(1)
+            Text("\(unit.preset < 0 ? "—" : Preset.tag(unit.preset))\(unit.preset == Preset.ble ? "  ·  " + Preset.modeNames[min(max(unit.mode, 0), 3)] : "")")
+                .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(1)
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { loadFile($0) }
     }
@@ -124,15 +125,15 @@ private struct CafeWaveCard: View {
         }
     }
 
-    private func lamp(_ name: String, _ on: Bool, _ c: Color) -> some View {
+    private func lamp(_ name: String, _ on: Bool) -> some View {
         HStack(spacing: 5) {
             Rectangle()
-                .fill(on ? c : Color.clear)
-                .overlay(Rectangle().strokeBorder(c, lineWidth: 1))
+                .fill(on ? PastelTheme.textPrimary : Color.clear)
+                .overlay(Rectangle().strokeBorder(PastelTheme.textPrimary, lineWidth: 1))
                 .frame(width: 8, height: 8)
             Text(name)
-                .font(.hud(PanelMetrics.labelFont, .semibold))
-                .foregroundStyle(c)
+                .font(.hud(PanelMetrics.labelFont, .medium))
+                .foregroundStyle(PastelTheme.textPrimary)
         }
     }
 }
@@ -208,10 +209,15 @@ private struct OutWindow: View {
                     p.move(to: CGPoint(x: x, y: lo))
                     p.addLine(to: CGPoint(x: x, y: min(hi, lo - 0.8)))
                 }
-                ctx.stroke(p, with: .color(yellow ? PastelTheme.yellowJack : PastelTheme.ash), lineWidth: max(1, w * 0.9))
+                ctx.stroke(p, with: .color(yellow ? PastelTheme.hudOrange : PastelTheme.hudBlack), lineWidth: max(1, w * 0.9))
             }
-            Rectangle().strokeBorder(yellow ? PastelTheme.yellowJack : PastelTheme.ash, lineWidth: 1)
-            HudTag(text: title, fill: yellow ? PastelTheme.yellowJack : PastelTheme.ash, size: 7)
+            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
+            Text(title)
+                .font(.hud(7, .semibold))
+                .tracking(1)
+                .foregroundStyle(PastelTheme.hudBlack)
+                .padding(.horizontal, 3)
+                .background(PastelTheme.padScreen)
                 .padding(3)
         }
     }

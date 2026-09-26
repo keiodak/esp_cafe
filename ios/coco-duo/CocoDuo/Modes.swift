@@ -52,11 +52,13 @@ enum Preset {
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
-    /// the preset manager's last group: HARMONY, then the ones played with the Cafe's own controls
-    static let cafeOrder = [6, 0, 1, 3, 4, 5, 7, 8]
+    /// the order of the list (and the numbers shown): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones.
+    /// (The firmware keeps its own indices: G <n> still sends those.)
+    static let order = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
+    static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? n) + 1 }
     static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
-    static func tag(_ n: Int) -> String { String(format: "%02ld_", n + 1) + (n >= 0 && n < names.count ? names[n] : "—") }
+    static func tag(_ n: Int) -> String { String(format: "%02ld_", number(n)) + (n >= 0 && n < names.count ? names[n] : "—") }
 }
 
 /// what the 8 pads are right now
