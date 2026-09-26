@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.18"
+#define FW_VERSION "3.19"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -250,7 +250,7 @@ void mo_update() {
   mo_len = len;
   int32_t edge = (int32_t)(len * (0.5f - 0.42f * p[3])); if (edge < 32) edge = 32;
   mo_edge = edge;
-  mo_rate = (int32_t)(4096.0f * powf(2.0f, (p[4] - 0.5f) * 4.0f));   // -2 .. +2 octaves
+  mo_rate = (int32_t)(4096.0f * powf(2.0f, (p[4] - 0.5f) * (p[4] < 0.5f ? 4.0f : 6.0f)));   // -2 .. 0 .. +3 octaves (centre = 1x)
   mo_spread = 1 + (int)(p[5] * 8.0f + 0.5f);
   mo_back = 256 + (int32_t)(p[6] * p[6] * (131072 - 40000));
   mo_scat = 1 + (int32_t)(p[7] * 65534.0f);
@@ -328,7 +328,9 @@ void dl_update() {
   dl_tone = (int32_t)(300.0f + p[5] * p[5] * 3796.0f);
   dl_wow = (int32_t)(p[6] * 600.0f);
   dl_dry = (int32_t)(p[9] * 256.0f);
+  bool was_held = dl_hold;
   dl_hold = dl_p[10] > 0;
+  if (was_held != dl_hold && !dl_hold) audio_frozen_state = false;   // HOLD off on the phone = everything lets go (also a BUTTON freeze)
   int pair = link ? (dl_p[12] > 0 ? 2 : 1) : 0;
   if (pair != dl_pair) { dl_pair = pair; dl_reset = true; }
   float b = sync ? beat : tl;
@@ -339,10 +341,10 @@ void dl_update() {
 //  0 size (line length)  1 spread (between the three lines)  2 feedback (ring gain)  3 grit (soft .. fold .. 1-bit)
 //  4 shift clock  5 loop (0 = free noise .. short loop = pitched)  6 gate rate  7 gate open (share)  8 cutoff
 //  9 resonance  10 self (ring -> cutoff / clock)  11 level  12 input (live into the ring)
-static const int16_t nz_default[13] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 500, 0};
+static const int16_t nz_default[15] = {450, 500, 850, 350, 600, 0, 350, 600, 650, 450, 300, 500, 0, 400, 0};
 void nz_update() {
-  float hz = clock_hz(), p[13];
-  for (int i = 0; i < 13; i++) p[i] = nz_p[i] / 1000.0f;
+  float hz = clock_hz(), p[15];
+  for (int i = 0; i < 15; i++) p[i] = nz_p[i] / 1000.0f;
   float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
   float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
   for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
@@ -359,6 +361,13 @@ void nz_update() {
   nz_self = (int32_t)(p[10] * 4.0f * 256.0f);
   nz_gain = (int32_t)(p[11] * 2.0f * 256.0f);
   nz_in = (int32_t)(p[12] * 256.0f);
+  // 13 OSC pitch (20 Hz .. 5 kHz) · 14 FOLD: 0 = off, the first 15 % fades the oscillators in, then it folds
+  float fo = 20.0f * powf(2.0f, p[13] * 8.0f);
+  nz_oinc = (uint32_t)(fo / hz * 4294967295.0f);
+  nz_olvl = (int32_t)((p[14] < 0.15f ? p[14] / 0.15f : 1.0f) * 200.0f);
+  float fd = p[14] < 0.1f ? 0.0f : (p[14] - 0.1f) / 0.9f;
+  nz_ofold = (int32_t)(fd * 4096.0f);
+  nz_oxfm = (int32_t)((0.1f + fd * 1.4f) * 256.0f);
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -559,10 +568,10 @@ void pc_line(char *s) {
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
-    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
+    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu dhold %d frz %d",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)EARTHREAD,
                 (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)earth_fail, (unsigned long)(REG(GPIO_IN1_REG)[0] & 0xFF), (unsigned long)REG(RTC_IO_ADC_PAD_REG)[0], (unsigned long)pin_fix, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
-                (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
+                (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix, dl_hold ? 1 : 0, audio_frozen_state ? 1 : 0);
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
     case 'R': pc_rec = atol(s + 1) != 0; break;
@@ -606,7 +615,7 @@ void pc_line(char *s) {
                 long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
                 if (s[0] == 'Y' && id >= 0 && id < 13) { dl_p[id] = (int16_t)val; dl_update(); }
-                if (s[0] == 'N' && id >= 0 && id < 13) { nz_p[id] = (int16_t)val; nz_update(); }
+                if (s[0] == 'N' && id >= 0 && id < 15) { nz_p[id] = (int16_t)val; nz_update(); }
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
@@ -825,7 +834,7 @@ void setup() {
      bj_fill_table();
      bj_update();
      for (int i = 0; i < 13; i++) dl_p[i] = dl_default[i];
-     for (int i = 0; i < 13; i++) nz_p[i] = nz_default[i];
+     for (int i = 0; i < 15; i++) nz_p[i] = nz_default[i];
      for (int i = 0; i < 14; i++) hd_p[i] = hd_default[i];
      for (int i = 0; i < 16; i++) co_p[i] = co_default[i];
      for (int e = 0; e < FX_N; e++) for (int i = 0; i < 8; i++) fx_p[e][i] = fx_default[e][i];

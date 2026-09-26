@@ -154,9 +154,9 @@ enum HdPad: Int, CaseIterable {
 }
 
 enum NzPad: Int, CaseIterable {
-    case ring, feedback, shift, gate, filter, selfmod, stereo, out
-    var title: String { ["RING", "FEEDBACK · GRIT", "SHIFT · LOOP", "GATE", "FILTER", "SELF · INPUT", "L · R", "—"][rawValue] }
-    var start: (Double, Double) { [(0.45, 0.5), (0.85, 0.35), (0.6, 0.0), (0.35, 0.6), (0.65, 0.45), (0.3, 0.0), (0.0, 0.0), (0.5, 0.5)][rawValue] }
+    case ring, feedback, shift, gate, filter, selfmod, stereo, osc
+    var title: String { ["RING", "FEEDBACK · GRIT", "SHIFT · LOOP", "GATE", "FILTER", "SELF · INPUT", "L · R", "OSC · FOLD"][rawValue] }
+    var start: (Double, Double) { [(0.45, 0.5), (0.85, 0.35), (0.6, 0.0), (0.35, 0.6), (0.65, 0.45), (0.3, 0.0), (0.0, 0.0), (0.4, 0.0)][rawValue] }
     var ids: [Int] {
         switch self {
         case .ring: return [0, 1]
@@ -165,8 +165,8 @@ enum NzPad: Int, CaseIterable {
         case .gate: return [6, 7]
         case .filter: return [8, 9]
         case .selfmod: return [10, 12]
-        case .stereo: return [0, 4, 6]            // B's ring, clock and gate drift away from A's
-        case .out: return []                     // (levels are set on the Cafe itself)
+        case .stereo: return [0, 4, 6, 13]        // B's ring, clock, gate and oscillators drift away from A's
+        case .osc: return [13, 14]               // three cross-modulated oscillators through a folder (Y = 0: off)
         }
     }
 }
@@ -356,7 +356,8 @@ final class Rig: ObservableObject {
         case 8: v = a(.filter).x
         case 9: v = a(.filter).y
         case 10: v = a(.selfmod).x
-        case 11: v = a(.out).x
+        case 13: v = a(.osc).x + (b ? lr.x * 0.05 : 0)
+        case 14: v = a(.osc).y
         case 12: v = a(.selfmod).y
         default: v = 0
         }
@@ -367,10 +368,10 @@ final class Rig: ObservableObject {
         guard let p = NzPad(rawValue: i) else { return [] }
         return p.ids.map { nzLine($0, slot: slot) }
     }
-    func nzAll(slot: Int) -> [String] { (0...12).filter { $0 != 11 }.map { nzLine($0, slot: slot) } }
+    func nzAll(slot: Int) -> [String] { (0...14).filter { $0 != 11 }.map { nzLine($0, slot: slot) } }
     /// the dice key: somewhere new for every NOISE pad (except the level)
     func nzDice() {
-        for p in NzPad.allCases where p != .out && p != .stereo {
+        for p in NzPad.allCases where p != .stereo {
             nzAxes[p.rawValue].x = Double.random(in: 0.05...0.95)
             nzAxes[p.rawValue].y = Double.random(in: 0...0.9)
         }

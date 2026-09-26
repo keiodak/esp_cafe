@@ -980,13 +980,13 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
     uint32_t pn = mv ? n : n / (uint32_t)(mo_hold > 0 ? mo_hold : 1);        // MOVE: a new pitch every grain
     uint32_t spr = mv ? 9u : (uint32_t)(mo_spread ? mo_spread : 1);            //       from all nine intervals
     int32_t rate = (mo_rate * mo_iv[(mo_rnd(pn, 2) * spr) >> 16]) >> 12;
-    if (rate < 256) rate = 256; if (rate > 65536) rate = 65536;
+    if (rate < 256) rate = 256; if (rate > 131072) rate = 131072;
     // MOVE: the pitch glides during the grain, up to an octave up or down (a chirp), direction from the score
     int32_t rend = rate;
     if (mv) {
       int32_t g = (int32_t)mo_rnd(n, 7) - 32768;                               // -32768 .. 32767
       rend = g >= 0 ? rate + (int32_t)(((int64_t)rate * g) >> 15) : rate + (int32_t)(((int64_t)rate * g) >> 16);
-      if (rend < 256) rend = 256; if (rend > 65536) rend = 65536;
+      if (rend < 256) rend = 256; if (rend > 131072) rend = 131072;
     }
     int32_t span = (int32_t)(((int64_t)len * rate) >> 12);
     int32_t start = -1;
@@ -1214,8 +1214,9 @@ static int32_t dl_tick(int32_t in, int32_t *rout, bool hold) {
 // A resonant filter follows, its cutoff flipped by the ring's own comparator (SELF).
 // main out = A + B (L), ASH = C - B (R), YELLOW = the gate.
 // SKIP = open the gate (burst) · FLIP = freeze the shift register · BUTTON = 1-bit everywhere
+// OSC · FOLD pad: three cross-modulated oscillators through a sunnandæg-like folder (off at the bottom).
 // EARTH (AC) = bends the line lengths.  Parameters: "N <id> <0..1000>" (see nz_update)
-volatile int16_t  nz_p[14];
+volatile int16_t  nz_p[16];
 volatile int32_t  nz_len[3] = {701, 1103, 1597};
 volatile int32_t  nz_fb = 230;               // ring gain Q8 (above 256 = it screams by itself)
 volatile int32_t  nz_grit = 1000;            // 0 soft clip .. 2048 fold .. 4096 1-bit
@@ -1227,6 +1228,9 @@ volatile int32_t  nz_fc = 1800, nz_q = 2000; // cutoff (1/256 oct above 20 Hz), 
 volatile int32_t  nz_self = 300;             // ring -> cutoff, 1/256 oct
 volatile int32_t  nz_gain = 256, nz_in = 0;  // output Q8, live input into the ring Q8
 volatile int32_t  nz_emod = 64;              // EARTH -> lengths
+volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
+volatile int32_t  nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
+volatile int32_t  nz_oxfm = 0;               // cross FM between the three oscillators, Q8
 volatile bool     nz_reset = true, nz_burst = false;
 volatile int      nz_gate = 0;
 
@@ -1239,6 +1243,37 @@ static inline int32_t IRAM_ATTR nz_decide(int32_t x, int32_t grit) {
   if (grit <= 2048) return s + (((fo - s) * grit) >> 11);
   int32_t bit = x >= 0 ? 1800 : -1800;                        // the comparator
   return fo + (((bit - fo) * (grit - 2048)) >> 11);
+}
+
+// OSC · FOLD (after sunnandæg): three triangle oscillators in a ring, each frequency-modulated by the one before
+// (1 <- 3 <- 2 <- 1, and the noise ring pushes on 1), summed into three folding stages in a row —
+// SATURATE -> TRIANGLE FOLD -> RECTIFY — with the last stage fed back into the first. More FOLD = harder
+// folding, more cross FM and more feedback together. It excites the noise ring and is heard through the filter.
+static int32_t nz_osc(int32_t ring, int32_t *side) {
+  static uint32_t ph[3] = {0, 0x55555555u, 0xAAAAAAAAu};
+  static int32_t o[3] = {0, 0, 0}, last3 = 0;
+  static const int32_t ratio[3] = {4096, 6136, 8245};                    // 1 · a flat fifth · a sharp octave
+  if (nz_olvl <= 0) { *side = 0; return 0; }
+  for (int k = 0; k < 3; k++) {
+    int32_t inc = (int32_t)(((uint64_t)nz_oinc * ratio[k]) >> 12);
+    int32_t m = o[(k + 2) % 3] + (k == 0 ? (ring >> 1) : 0);
+    inc += (int32_t)(((int64_t)inc * m * nz_oxfm) >> 19);                 // through zero when it gets deep
+    ph[k] += (uint32_t)inc;
+    int32_t t = (int32_t)(ph[k] >> 20);                                   // 0..4095
+    o[k] = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;                        // triangle, -2048..2047
+  }
+  int32_t f = nz_ofold;                                                   // 0..4096
+  int32_t x = ((o[0] + o[1] + o[2]) * 85) >> 8;
+  x += (last3 * (f >> 1)) >> 12;                                          // stage 3 -> stage 1
+  int32_t x1 = soft_clip((x * (4096 + 3 * f)) >> 12);                    // 1 SATURATE
+  int32_t g = (x1 * (4096 + 6 * f)) >> 12;                                // 2 TRIANGLE FOLD
+  int32_t tf = (g + 2048) & 8191; if (tf >= 4096) tf = 8191 - tf;
+  int32_t x2 = x1 + (((tf - 2048 - x1) * f) >> 12);
+  int32_t r = (x2 < 0 ? -x2 : x2) * 2 - 2048;                             // 3 RECTIFY
+  int32_t x3 = x2 + (((r - x2) * (f >> 1)) >> 12);
+  last3 = x3;
+  *side = (x2 * nz_olvl) >> 8;
+  return (x3 * nz_olvl) >> 8;
 }
 
 static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
@@ -1264,7 +1299,8 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   bool open = nz_burst || gph < nz_duty;
   env += ((open ? 4096 : 0) - env) >> 7;
   nz_gate = open ? 1 : 0;
-  int32_t ex = ((val * env) >> 12) + ((in * nz_in) >> 8);
+  int32_t os2 = 0, osc = nz_osc(lastc, &os2);
+  int32_t ex = ((val * env) >> 12) + ((in * nz_in) >> 8) + (osc >> 2);
 
   // the ring
   int32_t em = (pc_emod * nz_emod) >> 6;
@@ -1289,7 +1325,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
   int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
   if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
-  int32_t xl = (a + b) >> 1, xr = (c - b) >> 1;
+  int32_t xl = ((a + b) >> 1) + osc, xr = ((c - b) >> 1) + os2;
   la += (fq * ba) >> 12; int32_t hl = xl - la - ((nz_q * ba) >> 12); ba += (fq * hl) >> 12;
   lb += (fq * bb) >> 12; int32_t hr = xr - lb - ((nz_q * bb) >> 12); bb += (fq * hr) >> 12;
   if (la > 32767) la = 32767; if (la < -32768) la = -32768; if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;
@@ -1431,7 +1467,7 @@ void IRAM_ATTR coco_pc() {
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
-    else { cur = want; if (cur == 0) mo_reset = true; else if (cur == 1) co_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true; }
+    else { cur = want; audio_frozen_state = false; if (cur == 0) mo_reset = true; else if (cur == 1) co_reset = true; else if (cur == 2) dl_reset = true; else if (cur == 3) nz_reset = true; }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3;
   bool frz = gmode && mo_freeze;              // FREEZE only exists in GRAIN mode

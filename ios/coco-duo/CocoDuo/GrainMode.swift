@@ -6,7 +6,7 @@
 //
 //   DENSITY  X = grains per second (1 … 80)       Y = jitter (0 = an even stream)
 //   LENGTH   X = grain length (10 … 500 ms)       Y = shape (0 = pure sin² window, up = flatter)
-//   PITCH    X = speed / pitch (±2 octaves)       Y = spread over intervals (bottom = one pitch only)
+//   PITCH    X = speed / pitch (-2 .. +3 octaves, centre = 1x)       Y = spread over intervals (bottom = one pitch only)
 //   WHERE    X = how far back in the tape         Y = scatter
 //   FILTER   X = low-pass cutoff (right = open)   Y = resonance
 //   REV·HOLD X = share of backwards grains        Y = pitch hold (1 … 64 grains keep one pitch)
