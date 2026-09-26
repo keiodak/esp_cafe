@@ -765,46 +765,38 @@ private struct HudBar: View {
         let p = unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[unit.slot]
         let m = unit.isConnected ? unit.mode : rig.mode[unit.slot]
         let inView = rig.inCtx(unit.slot)
-        return HStack(spacing: 6) {
+        // one line of type: every item sits on the same baseline, in one size (tags and words alike)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
             HudTag(text: top ? "A" : "B", fill: unit.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 9)
             Text((unit.name ?? "NO_LINK").uppercased().replacingOccurrences(of: "-", with: "_"))
                 .font(.hud(9, .semibold))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
-            HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 8)
+            HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 9)
             if p == Preset.ble {
                 Text(Preset.modeNames[min(max(m, 0), 3)])
-                    .font(.hud(10, .semibold))
+                    .font(.hud(9, .semibold))
                     .tracking(1)
                     .foregroundStyle(PastelTheme.hudOrange)
             }
             if p == Preset.multi {
                 Text(Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)])
-                    .font(.hud(10, .semibold))
+                    .font(.hud(9, .semibold))
                     .tracking(1)
                     .foregroundStyle(PastelTheme.hudOrange)
-                if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
+                if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 9) }
             }
             if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
-                // centre the digits themselves (their cap height), not the font's box: it sat high
                 Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
-                    .font(.hudBig(14))
+                    .font(.hud(9, .semibold).monospacedDigit())
                     .foregroundStyle(PastelTheme.hudBlack)
-                    .alignmentGuide(VerticalAlignment.center) { d in d[.firstTextBaseline] - 14 * 0.36 }
-                Text("BPM").font(.hud(7, .medium)).foregroundStyle(PastelTheme.textSecondary)
-                    .alignmentGuide(VerticalAlignment.center) { d in d[.firstTextBaseline] - 7 * 0.36 }
-                if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
+                Text("BPM").font(.hud(9, .semibold)).foregroundStyle(PastelTheme.textSecondary)
+                if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 9) }
             }
             // the preset manager lives behind this box: say so
-            HStack(spacing: 2) {
-                Text("PRESETS").font(.hud(7, .semibold)).tracking(0.8)
-                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
-            }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 4)
-            .frame(height: 13)
-            .background(Rectangle().fill(PastelTheme.hudBlack))
+            HudTag(text: "PRESETS ▾", size: 9)
         }
+        .frame(maxHeight: .infinity)
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(height: 20)
