@@ -207,6 +207,9 @@ static int __attribute__((noinline)) grit_do(int p, int *cnt, int *held) {
   if (++*cnt >= hold) { *cnt = 0; *held = p & ~((1 << bits) - 1); }
   return *held;
 }
+extern volatile bool grit_off;
+extern volatile uint32_t preset_gen;
+volatile uint32_t grit_gen = 0xFFFFFFFF;
 static inline int grit_m(int p) {
   static int c = 0, h = 2048;
   // Bluetooth OFF (BUTTON held at power-on): EARTH comes from the original ADC path, fresh every sample (as the
@@ -214,11 +217,13 @@ static inline int grit_m(int p) {
   // owns ADC2 and EARTH is read 2000x a second instead (earth_tick).
   if (cafe_no_ble) { int r = (REG(I2S_FIFO_RD_REG)[0] & 0x7FF) << 1; earth_raw12 = r; earth_now = r >> 4; }
   if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
+  if (grit_off && grit_gen == preset_gen) return p;   // SIDRAX: pure
   return grit_do(p, &c, &h);
 }
 static inline int grit_a(int p) {
   static int c = 0, h = 2048;
   if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
+  if (grit_off && grit_gen == preset_gen) return p;
   return grit_do(p, &c, &h);
 }
 

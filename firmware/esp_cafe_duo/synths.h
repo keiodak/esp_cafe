@@ -1739,7 +1739,12 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   if (bb > 32767) bb = 32767;
   if (bb < -32768) bb = -32768;
   int32_t ol = (la * nz_gain) >> 8, orr = (lb * nz_gain) >> 8;
-  if (nz_dist) { ol = (nz_tanh(ol * 5) * 3) >> 3; orr = (nz_tanh(orr * 5) * 3) >> 3; }   // DIST: driven into a round clip, level kept down
+  if (nz_dist) {                                           // DIST = FUZZ: a lot of gain into a hard, lopsided clip
+    int32_t fl = ol * 14, fr = orr * 14;
+    if (fl > 1500) fl = 1500; if (fl < -1050) fl = -1050;
+    if (fr > 1500) fr = 1500; if (fr < -1050) fr = -1050;
+    ol = (fl + 225) >> 1; orr = (fr + 225) >> 1;               // (centred again, at about the clean level)
+  }
   *rout = orr;
   return ol;
 }
@@ -1767,6 +1772,7 @@ static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}
 static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
+volatile bool grit_off = false;   // SIDRAX: CHAR's grit is bypassed (pure) while this preset load lasts
 volatile int32_t sx_relk[4] = {5, 5, 5, 5};  // each plate's release: its Y (up = longer), set with the plate
 volatile int32_t sx_pan = 2048;            // Q12: how far press / release swing to the sides
 volatile bool sx_aligned = true;
@@ -1838,30 +1844,30 @@ static int32_t sx_tick(int32_t *rout) {
       if ((int32_t)(rnd >> 20) < sx_glitch) ph[k] = 0u - ph[k];
     }
     lastLeft[k] = left;
-    // level: the touched area, a quick rise, RELEASE after lifting
-    // level: two smoothing stages (a soft S-shaped rise of ~40 ms, no steps from the plate's updates), RELEASE after
-    int32_t tg = (a * 4096) / 1000;
-    int32_t tq = tg << 12;                                   // (12 extra bits: a long release must not stall)
-    if (tq > env1[k]) env1[k] += ((tq - env1[k]) >> 9) + 1;
-    else env1[k] += (int32_t)(((int64_t)(tq - env1[k]) * sx_relk[k]) >> 16);   // RELEASE: the plate's Y
-    env[k] += ((env1[k] >> 12) - env[k]) >> 8;
-    int32_t v = (tri * env[k]) >> 12;
-    out[k] = tri;                                            // (the circle hears the oscillator itself)
-    // PAN: pressed -> one side, released -> the other (alternating per plate)
+    // SEESAW (the Sidrax's press / release): pressing sounds on one side — as loud as the touched area, a soft
+    // ~40 ms rise — and lifting sounds on the OTHER side: the note swings over and rings out there (the plate's Y =
+    // how long). Plates alternate: 1 and 3 press left / release right, 2 and 4 press right / release left.
+    static int32_t eR1[4] = {0, 0, 0, 0}, eR[4] = {0, 0, 0, 0};
     bool h = a > 0;
-    if (h != held[k]) held[k] = h;
-    int32_t side = ((k & 1) ? -1 : 1) * (h ? 1 : -1);        // +1 = left
-    int32_t pt = side * sx_pan;                              // ±4096 · pan
-    pan[k] += (pt - pan[k]) >> 10;
-    int32_t gl = 2048 + (pan[k] >> 1), gr = 4096 - gl;       // 0..4096
-    l += (v * gl) >> 12;
-    r += (v * gr) >> 12;
+    if (!h && held[k]) { int32_t lv = env[k] << 12; if (lv > eR1[k]) eR1[k] = lv; }   // lifted: the other side takes it
+    held[k] = h;
+    if (h) {
+      int32_t tq = ((a * 4096) / 1000) << 12;                // (12 extra bits: long releases must not stall)
+      env1[k] += ((tq - env1[k]) >> 9) + (tq > env1[k] ? 1 : 0);
+      eR1[k] -= eR1[k] >> 9;                                 // pressed again: the release side fades out
+    } else {
+      env1[k] -= (env1[k] >> 9) + (env1[k] > 0 ? 1 : 0);     // the press side lets go quickly (~40 ms)
+      eR1[k] += (int32_t)(((int64_t)(0 - eR1[k]) * sx_relk[k]) >> 16);   // RELEASE: the plate's Y
+    }
+    if (env1[k] < 0) env1[k] = 0;
+    env[k] += ((env1[k] >> 12) - env[k]) >> 8;
+    eR[k] += ((eR1[k] >> 12) - eR[k]) >> 8;
+    out[k] = tri;                                            // (the circle hears the oscillator itself)
+    int32_t vp = (tri * env[k]) >> 12, vr = (tri * eR[k]) >> 12;
+    if (k & 1) { r += vp; l += vr; } else { l += vp; r += vr; }
   }
   sx_gate = touched;
-  // TONE: a gentle low-pass (open = the triangles as they are)
-  tl += ((l - tl) * sx_tone) >> 12;
-  tr += ((r - tr) * sx_tone) >> 12;
-  int32_t ol = tl, orr = tr;                                 // a soft ceiling only near the top
+  int32_t ol = l, orr = r;                                   // (no filter: the triangles as they are; a soft ceiling only near the top)
   if (ol > 1600) ol = 1600 + ((ol - 1600) >> 2); if (ol < -1600) ol = -1600 + ((ol + 1600) >> 2);
   if (orr > 1600) orr = 1600 + ((orr - 1600) >> 2); if (orr < -1600) orr = -1600 + ((orr + 1600) >> 2);
   if (ol > 2047) ol = 2047; if (ol < -2047) ol = -2047;
@@ -2062,6 +2068,8 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
+  grit_off = smode;                                          // SIDRAX: pure, CHAR's grit stays out
+  grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
   bool rec = (gmode || bmode) && pc_rec && !audio_frozen_state && !frz;
@@ -2090,6 +2098,7 @@ void IRAM_ATTR coco_pc() {
     l = dl_tick(gyo - 2048, &r, hold);
   } else if (smode) {
     l = sx_tick(&r);
+    r >>= 1;                                                 // (ASH doubles its input and clips: keep it clean)
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
