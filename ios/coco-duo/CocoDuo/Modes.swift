@@ -105,7 +105,7 @@ enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, knob }
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
     static let titles = ["ROOT · CHORD", "PATTERN · OCTAVES", "RATE · SWING", "GATE · DECAY",
-                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "TAP"]
+                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "—", "TAP"]      // (a clean digital delay: no tone / wow)
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
                                              (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
     static func root(_ x: Double) -> Int { 36 + min(24, Int(x * 25)) }

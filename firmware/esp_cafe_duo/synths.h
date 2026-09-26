@@ -2256,11 +2256,13 @@ static inline int32_t IRAM_ATTR h_readq(uint32_t posq) {
 }
 
 // ---- 1 ECHO: a clear stereo delay, L line + R line, the repeats ping-pong between them ----
+// td_clean (ARP_DELAY): a light digital stereo delay — no wow / EARTH on the time, no tone filters, gentler feedback
+volatile bool td_clean = false;
 static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lpl = 0, lpr = 0, hpl = 0, hpr = 0;
   if (rs) { w = 0; fill = 0; ct = td_T; lpl = lpr = 0; hpl = hpr = 0; }
   ct += (td_T - ct) >> 11;
-  int32_t tl = ct + ((fx_emq * td_wow) >> 8);                        // EARTH, smoothed: bends, never crackles
+  int32_t tl = td_clean ? ct : ct + ((fx_emq * td_wow) >> 8);         // EARTH, smoothed: bends, never crackles
   if (tl < (64 << 8)) tl = 64 << 8; if (tl > (32000 << 8)) tl = 32000 << 8;
   int32_t tr = (int32_t)(((int64_t)tl * td_ratio) >> 12);
   if (tr < (64 << 8)) tr = 64 << 8; if (tr > (32000 << 8)) tr = 32000 << 8;
@@ -2276,8 +2278,8 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   if (fill <= (uint32_t)(((tl > tr ? tl : tr) >> 8) + 2)) { vl = 0; vr = 0; }   // the lines still hold old tape
   fx_lp(&lpl, vl, td_tone); fx_lp(&lpr, vr, td_tone);
   hpl += (lpl - hpl) >> 8; hpr += (lpr - hpr) >> 8;                  // the repeats lose a little low end each time: clean, not muddy
-  int32_t pp = td_pp, fb = hold ? 256 : td_fb;
-  int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
+  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 3) >> 2 : td_fb);
+  int32_t xl = hold || td_clean ? vl : lpl - hpl, xr = hold || td_clean ? vr : lpr - hpr;
   int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
   int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
@@ -2574,7 +2576,7 @@ static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) 
   switch (e) {
     case 0: { int32_t g = cl_g + ((cl_g * fx_em) >> 7); if (g < 0) g = 0;     // EARTH = level (VCA)
               *l = *r = (in * g) >> 8; } break;
-    case 1: *l = td_tick(in, r, hold, rs); break;
+    case 1: td_clean = false; *l = td_tick(in, r, hold, rs); break;
     case 2: *l = sm_tick(in, rs); *r = *l; break;
     case 3: *l = rv_tick(in, rs); *r = *l; break;
     case 4: *l = gl_tick(in, hold, rs); *r = *l; break;
@@ -2699,6 +2701,7 @@ void IRAM_ATTR arpdelay() {
   bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;
   int32_t in = gyo - 2048, l, r;
   bool rs = fx_rs[1]; fx_rs[1] = false;
+  td_clean = true;                                  // ARP_DELAY: the light, clean digital delay
   l = td_tick(in, &r, hold, rs);
   int32_t v = l + 2048; if (v > 4095) v = 4095; if (v < 0) v = 0;
   pout = v;

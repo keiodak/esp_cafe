@@ -47,6 +47,9 @@ final class Director: ObservableObject {
             if let u = self.units.first(where: { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }) {
                 self.arp.earth = Double(u.earth) / 255
             }
+            // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
+            let onArp = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.arp }
+            if !onArp && self.arp.playing { self.arp.stop(); self.rig.arpPlaying = false }
         }
         for u in units {
             u.onReady = { [weak self, weak u] in
@@ -121,6 +124,7 @@ final class Director: ObservableObject {
         for s in rig.slots { p[s] = n }
         rig.preset = p
         if n == Preset.arp { arp.startAudio() }
+        arpFollowPresets()
         for s in rig.slots where units[s].isConnected { sendAll(to: units[s]) }
         refresh()
         syncIfPair()
@@ -133,6 +137,7 @@ final class Director: ObservableObject {
         p[s] = n
         rig.preset = p
         if n == Preset.arp { arp.startAudio() }
+        arpFollowPresets()
         if units[s].isConnected { sendAll(to: units[s]) }
         refresh()
     }
@@ -387,7 +392,19 @@ final class Director: ObservableObject {
         for s in who where rig.preset[s] == p && units[s].isConnected { units[s].send(msg) }
     }
 
-    func tapTempo() { if let b = rig.tap() { setBpm(b) } }
+    func tapTempo() {
+        guard let b = rig.tap() else { return }
+        setBpm(b)
+        if rig.padSet == .arp {                     // ARP_DELAY: the tap is the downbeat, for the phone and the Cafe
+            if arp.playing { arp.restart() }
+            ctxUnits().forEach { $0.send("Z") }
+        }
+    }
+
+    /// the arpeggio only sounds while a Cafe is on ARP_DELAY
+    private func arpFollowPresets() {
+        if !rig.preset.contains(Preset.arp) && arp.playing { arp.stop(); rig.arpPlaying = false }
+    }
 
     func setBpm(_ b: Double) {
         rig.bpm = min(max(b, 30), 300)

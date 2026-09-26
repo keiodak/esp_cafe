@@ -130,9 +130,9 @@ final class ArpEngine {
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
         let twoPi = 2.0 * Double.pi
         let kd = exp(-1.0 / (sr * (0.03 + decay * decay * 1.5)))   // decay while the note is held
-        let kr = exp(-1.0 / (sr * 0.012))                           // release after the gate
+        let kr = exp(-1.0 / (sr * 0.030))                           // release after the gate (soft: no click)
         let gl = glide <= 0.001 ? 1.0 : 1.0 - exp(-1.0 / (sr * glide * 0.25))
-        let atk = Int(sr * 0.003)
+        let atk = Int(sr * 0.006)                                   // (6 ms: a clean start, no click)
         for f in 0..<frames {
             if restartFlag { restartFlag = false; step = 0; toNext = 0 }
             if playing {
@@ -156,7 +156,8 @@ final class ArpEngine {
             if gateLeft > 0 { gateLeft -= 1 }
             phase += twoPi * freq / sr; if phase > twoPi { phase -= twoPi }
             phase5 += twoPi * freq * 1.5 / sr; if phase5 > twoPi { phase5 -= twoPi }
-            let v = Float((sin(phase) + fifth * 0.5 * sin(phase5)) * env * level * 0.8)
+            // a pure sine (no fifth), at a level that leaves the Cafe's input headroom
+            let v = Float(sin(phase) * env * level * 0.6)
             for b in abl {
                 if let p = b.mData?.assumingMemoryBound(to: Float.self) { p[f] = v }
             }
