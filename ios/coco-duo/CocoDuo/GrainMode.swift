@@ -48,7 +48,7 @@ final class GrainMode: ObservableObject {
     @Published var useMarks = false
     @Published var freeze = false                  // hold the moment (both Cafes)
     @Published var perc = false                    // struck grains instead of smooth ones
-    @Published var move = false                    // MOVE: Ikue Mori-like — a new pitch every grain, gliding
+    @Published var move = false                    // MOVE: a new pitch every grain, gliding
     @Published var marks = 0                       // how many of the 8 slots hold something
     private var nextMark = 0
 

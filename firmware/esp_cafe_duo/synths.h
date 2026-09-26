@@ -162,7 +162,7 @@ int tapsz=sizeof(myPlacers)>>2;
 // YELLOW = a steady organ: 5 octaves of square waves (A2 110Hz .. 1760Hz at 44.1k), 2 pins each,
 //          like a divide-down combo organ. one phase counter -> the pitch never wanders.
 // EARTH  = the organ's pitch follows EARTH like a pitch CV: 1 oct per ~1/4 of its range (unplugged = a steady A2)
-// FLIP   = trigger: EARTH FM ±1 oct (default) -> ±2 oct -> OFF -> ±1 oct
+// FLIP   = trigger: PITCH (smooth, for LFOs; default) -> AUDIO (fast, deep: audio-rate FM) -> OFF -> PITCH
 // SKIP   = trigger: WOBBLE on/off. the 4 echo taps drift like worn tape (slow wow + a little flutter),
 //          each tap on its own phase -> the echoes smear and detune against each other.
 //          it fades in/out over ~0.2s
@@ -266,17 +266,19 @@ void IRAM_ATTR echo_og() {
   // --- EARTH (12 bit) -> the organ's pitch, like a pitch CV (fixed, no self-calibration: steady) ---
   // three slews (~6 ms each) smooth the 1 kHz readings; the level at power-up is "zero" (unplugged = A2);
   // a small dead band keeps the idle noise out; 1 octave per 1024 counts (FLIP: 2), clamped at ±2 (±3) octaves.
-  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> 8;
-  s_earth2 += (s_earth - s_earth2) >> 8;
-  s_earth3 += (s_earth2 - s_earth3) >> 8;
+  // PITCH (FLIP 1st): three slews, smooth — for LFOs / slow CVs
+  // AUDIO (FLIP 2nd): one light slew only, so an audio-rate signal on EARTH really frequency-modulates the organ
+  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> (fm_mode == 2 ? 4 : 8);
+  s_earth2 += (s_earth - s_earth2) >> (fm_mode == 2 ? 2 : 8);
+  s_earth3 += (s_earth2 - s_earth3) >> (fm_mode == 2 ? 1 : 8);
   int e = s_earth3 >> 8;                             // 0..4095
   if (boot_timer < 8000) { boot_timer++; if (boot_timer > 4000) initial_earth = e; }   // the resting level
   int32_t rate = 256;                               // Q8, 1.0 = A2
   if (boot_timer >= 8000 && fm_mode > 0) {
     int32_t dd = e - initial_earth;
     dd = dd > 40 ? dd - 40 : (dd < -40 ? dd + 40 : 0);
-    int32_t o = fm_mode == 2 ? (dd >> 1) : (dd >> 2);                    // 1/256 octave
-    int32_t lim = fm_mode == 2 ? 768 : 512;
+    int32_t o = fm_mode == 2 ? dd : (dd >> 2);                           // 1/256 octave (AUDIO: 4x deeper)
+    int32_t lim = fm_mode == 2 ? 1024 : 512;
     if (o > lim) o = lim; if (o < -lim) o = -lim;
     int32_t ip = o >> 8, fr = o & 255;
     int32_t m = 256 + ((fr * (168 + ((fr * 88) >> 8))) >> 8);           // 2^(fr/256), Q8 (±0.3 %)
@@ -285,7 +287,7 @@ void IRAM_ATTR echo_og() {
   (void)knob_moved; (void)cal_min; (void)cal_max; (void)patched; (void)unpatch_timer;
 
   // --- ORGAN ---
-  rate_s += ((rate << 8) - rate_s) >> 8;            // ~6 ms slew: no jumps on plug/unplug
+  rate_s += ((rate << 8) - rate_s) >> (fm_mode == 2 ? 1 : 8);   // PITCH: ~6 ms slew · AUDIO: follows at once
   oph += (uint32_t)(((uint64_t)10713070u * rate_s) >> 16);   // 10713070 = 110 Hz at 44.1k
   int pins = 2 * __builtin_popcount(oph >> 27);     // 5 octave squares x 2 pins = 0..10
   {
@@ -877,7 +879,7 @@ static inline int32_t IRAM_ATTR pc_read(int32_t pq) {        // pq = position Q1
 // and SEPARATION pulls each one toward its own score, OFFSET shifts one of them in time.
 // Only the grains are heard (no dry sound).
 // FREEZE (M 23): hold the moment · PERCUSSION (M 24): struck grains instead of smooth ones
-// MOVE (M 26): Ikue Mori-like — every grain its own pitch (all intervals) and it glides up or down
+// MOVE (M 26): every grain its own pitch (all intervals) and it glides up or down
 // SKIP = restart the score (patch the same gate into both Cafes to re-align them) · FLIP = grains backwards
 // BUTTON = hold the tape · YELLOW = a pulse at every grain.  Parameters: "M <id> <0..1000>", sync: "Z"
 
@@ -901,7 +903,7 @@ volatile uint32_t mo_salt = 0;               // 0 = Cafe A, 1 = Cafe B (whose "o
 volatile bool     mo_sync = false;           // "Z": restart the score now
 volatile bool     mo_freeze = false;         // FREEZE: stop recording and keep taking grains from the same moment
 volatile bool     mo_perc = false;           // PERCUSSION: grains are struck (instant attack, curved decay)
-volatile bool     mo_move = false;           // MOVE (Ikue Mori-like): every grain its own pitch from all intervals, and it glides
+volatile bool     mo_move = false;           // MOVE: every grain its own pitch from all intervals, and it glides
 volatile bool     mo_usemarks = false;       // take grains only from the marked places
 volatile int32_t  mo_mark[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 volatile int32_t  mo_last = 0;               // where the last grain started (MARK stores this)

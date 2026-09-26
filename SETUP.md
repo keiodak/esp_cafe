@@ -65,7 +65,7 @@ What's in the repository:
 3. Click **Upload** (→). If it can't connect, hold the ESP32's **BOOT** button while the upload starts.
 4. Open **Tools → Serial Monitor** at **115200** baud and reset the Cafe. You should see:
    ```
-   --- BOOT START --- (esp_cafe_duo 3.25, last reset reason 1)
+   --- BOOT START --- (esp_cafe_duo 3.26, last reset reason 1)
    [1b] BLE advertising, name Cafe-XXXX ...
    -> initDEL: Allocating delay buffers...
    ```
@@ -87,7 +87,7 @@ What's in the repository:
   *Experimental Web Platform features*, and restart Chrome.
 
 **Use it:**
-- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.25 Cafe-XXXX ota`.
+- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.26 Cafe-XXXX ota`.
 - **check** → memory, Bluetooth state, packet size (`mtu`).
 - **log** → everything the Cafe answered.
 - **update** → write a new firmware over Bluetooth (next section).
@@ -147,7 +147,7 @@ The lamp blinks the number.
 |---|---|---|
 | 1 | COCO_MOD | coco looper (start-up preset) |
 | 2 | ECHO | four-tap echo, organ on YELLOW |
-| 3 | **BLE** | played from the app. Modes: **GRAIN** (granular, shared score for two Cafes; MOVE = Ikue Mori-like pitch) · **COCO** (loop with EARTH FM, wobble, filter, crush) · **DELAY** (stereo / ping-pong, main = L, ASH = R, YELLOW = click; **LINK** turns two Cafes into one delay) · **NOISE** (feedback-ring noise machine) |
+| 3 | **BLE** | played from the app. Modes: **GRAIN** (granular, shared score for two Cafes; MOVE = a new, gliding pitch every grain) · **COCO** (loop with EARTH FM, wobble, filter, crush) · **DELAY** (stereo / ping-pong, main = L, ASH = R, YELLOW = click; **LINK** turns two Cafes into one delay) · **NOISE** (feedback-ring noise machine) |
 | 4 | RESONATOR | resonator bank |
 | 5 | FORMANT | vowel filter, EARTH moves the vowel |
 | 6 | SATURATOR | 8 kinds of distortion, BUTTON = next |

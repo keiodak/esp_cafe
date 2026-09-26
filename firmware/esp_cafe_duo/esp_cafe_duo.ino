@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.25"
+#define FW_VERSION "3.26"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -285,7 +285,7 @@ void pc_overview() {
 //  6 where (recent .. deep in the tape)  7 scatter  8 filter  9 resonance  10 reverse  11 pitch hold (grains per pitch)
 //  12 layers  13 level  14 offset (this Cafe later, share of a gap)  15 separation  16 which Cafe (0 = A, 1 = B)
 //  20 <n> = mark the last grain's place in slot n  21 = clear the marks  22 <0|1> = grains only from the marks
-//  23 <0|1> = freeze  24 <0|1> = percussion (struck grains)  26 <0|1> = MOVE (Ikue Mori-like pitch)  25 <0|1|2> = duo mode: LOOP / GRAIN / BENJOLIN
+//  23 <0|1> = freeze  24 <0|1> = percussion (struck grains)  26 <0|1> = MOVE (a new, gliding pitch every grain)  25 <0|1|2> = duo mode: LOOP / GRAIN / BENJOLIN
 volatile float mo_hz = 32000;
 static const int16_t mo_default[17] = {550, 150, 550, 200, 500, 0, 200, 250, 1000, 200, 0, 700, 600, 500, 0, 0, 0};
 void mo_update() {
@@ -516,7 +516,8 @@ void fx_update(int e) {
       td_T = (int32_t)(tt * 256.0f);
       td_fb = (int32_t)(powf(p[1], 0.8f) * 0.93f * 256.0f);          // a curve: more room where the repeats sing
       td_pp = (int32_t)(p[2] * 256.0f);
-      td_ratio = (int32_t)(4096.0f * powf(2.0f, (p[3] - 0.5f) * 2.0f));
+      { static const float rr[7] = {0.5f, 2.0f / 3.0f, 0.75f, 1.0f, 4.0f / 3.0f, 1.5f, 2.0f};   // R's time: rhythmic steps only
+        td_ratio = (int32_t)(4096.0f * rr[(int)(p[3] * 6.0f + 0.5f)]); }                       // (in-between = a smeared, reverb-ish cloud)
       td_tone = fx_lpk(p[4]);
       td_wow = (int32_t)(p[5] * 600.0f);
       td_wet = (int32_t)(p[6] * 1.6f * 256.0f);
@@ -808,8 +809,8 @@ void (*playlist_main[])() = {
 // Read from an esp_timer callback: the esp_timer task already runs on core 0, so no task (and no stack) of our own
 // (v3.21–3.24 had one: 1.6 KB the Bluetooth heap missed).
 static void earth_tick(void *) {
-  int sum = 0, n = 0;                            // 2 conversions averaged
-  for (int k = 0; k < 2; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
+  int sum = 0, n = 0;                            // one conversion, 2000x a second (fast enough for audio-rate FM in ECHO)
+  for (int k = 0; k < 1; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
   if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
 }
 
@@ -841,7 +842,7 @@ void setup() {
   // EARTH on ADC2 channel 0 (GPIO 4), 12 bits, 2.5 dB like the original pattern table (ADC2_PATT = 0x0D)
   adc2_config_channel_atten(ADC2_CHANNEL_0, ADC_ATTEN_DB_2_5);
   { esp_timer_create_args_t ta = {}; ta.callback = earth_tick; ta.name = "earth";
-    esp_timer_handle_t th; if (esp_timer_create(&ta, &th) == ESP_OK) esp_timer_start_periodic(th, 1000); }
+    esp_timer_handle_t th; if (esp_timer_create(&ta, &th) == ESP_OK) esp_timer_start_periodic(th, 500); }
   { int r = 0; esp_err_t e = adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r);
     if (e == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
     Serial.printf("[1] EARTH (GPIO 4, ADC2) now %d / 4095 (%s)\n", r, e == ESP_OK ? "ok" : esp_err_to_name(e)); }

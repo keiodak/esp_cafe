@@ -164,7 +164,7 @@ struct UpdateCard: View {
     }
 }
 
-/// GRAIN's switches: MOVE (Ikue Mori-like pitch), and the marks (places to take grains from)
+/// GRAIN's switches: MOVE (a moving pitch), and the marks (places to take grains from)
 private struct GrainOptions: View {
     let d: Director
     @ObservedObject var grain: GrainMode
@@ -181,7 +181,7 @@ private struct GrainOptions: View {
             ChipButton(title: "ONLY MARKS", filled: grain.useMarks) { grain.setUseMarks(!grain.useMarks, d.ctxUnits()) }
             ChipButton(title: "CLEAR \(grain.marks)", filled: false) { grain.clearMarks(d.ctxUnits()) }
         }
-        Text("MOVE PITCH: every grain its own pitch from all intervals, gliding up or down (Ikue Mori-like). Off: pitch held for phrases (PITCH / REV·HOLD pads).")
+        Text("MOVE PITCH: every grain its own pitch from all intervals, gliding up or down. Off: pitch held for phrases (PITCH / REV·HOLD pads).")
             .font(.hud(8))
             .foregroundStyle(PastelTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
