@@ -138,7 +138,8 @@ final class CafeUnit: ObservableObject {
             if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
             return Substring(s)
         }
-        if let f = s.first, "XMBYNVC".contains(f) {     // "M 12", "Y 3", …: the id is part of the key
+        if let f = s.first, "XMBYNVCS".contains(f) {    // "M 12", "Y 3", "S 10" …: the id is part of the key
+                                                         // (SIDRAX: each plate its own — a lift must never be dropped)
             let parts = s.split(separator: " ", maxSplits: 2)
             if parts.count >= 2 { return s.prefix(parts[0].count + 1 + parts[1].count) }
         }
