@@ -16,6 +16,7 @@
 
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 final class PadAxis: ObservableObject {
     @Published var x: Double
@@ -85,6 +86,7 @@ final class Director: ObservableObject {
         case .delay: return rig.dlAxes
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
+        case .wave: return rig.wvAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -113,6 +115,7 @@ final class Director: ObservableObject {
             case 1: rig.coAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
+            case 5: rig.wvAll().forEach(u.send); sxRoles()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -206,6 +209,8 @@ final class Director: ObservableObject {
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:
             for u in ctxUnits() { rig.sxCommands(pad: i).forEach(u.send) }
+        case .wave:
+            for u in ctxUnits() { rig.wvCommands(pad: i).forEach(u.send) }
         case .delay, .harmony:
             let delay = rig.padSet == .delay
             let axes = delay ? rig.dlAxes : rig.hdAxes
@@ -535,7 +540,7 @@ final class Director: ObservableObject {
     // MARK: SIDRAX
     /// the seesaw needs to know which Cafe is which: two on SIDRAX = A (0) and B (1); one alone plays both halves (2)
     func sxRoles() {
-        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 4 }
+        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && (rig.mode[$0.slot] == 4 || rig.mode[$0.slot] == 5) }
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
@@ -543,6 +548,26 @@ final class Director: ObservableObject {
     func setSxHold(_ on: Bool) {
         rig.sxHold = on
         if !on { rig.sxArea = [0, 0, 0, 0]; for k in 0..<4 { padMoved(4 + k) } }
+    }
+    /// WAVE: the four switches' rows
+    func sendWvRows() { for u in ctxUnits() { rig.wvRows().forEach(u.send) } }
+    /// WAVE: an audio file -> a 64-frame wavetable -> the start of the tape of every Cafe on WAVE
+    func loadWaveTable(_ url: URL) {
+        let targets = ctxUnits()
+        rig.wvNote = "making the table…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = url.startAccessingSecurityScopedResource()
+            defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            let outcome = Result { try WaveTable.make(url: url) }
+            DispatchQueue.main.async {
+                switch outcome {
+                case .success(let t):
+                    self.rig.wvNote = url.deletingPathExtension().lastPathComponent
+                    targets.forEach { $0.load(t) }
+                case .failure(let e): self.rig.wvNote = e.localizedDescription
+                }
+            }
+        }
     }
     func sxDice() {
         for i in 0..<4 { rig.sxAxes[i].x = Double.random(in: 0.05...0.95); rig.sxAxes[i].y = Double.random(in: 0.0...0.8) }
@@ -595,6 +620,9 @@ private struct MainScreen: View {
             HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(height: barHeight)
+        }
+        .fileImporter(isPresented: $rig.wvPicking, allowedContentTypes: [.audio]) { result in   // WAVE: FILE
+            if case .success(let url) = result { d.loadWaveTable(url) }
         }
         .padding(8)
         .padding(.leading, max(0, safeTrailing - safeLeading))
@@ -653,6 +681,7 @@ private struct MainScreen: View {
         case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
+        case .wave: return (rig.wvAxes[i], WvPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -677,13 +706,18 @@ private struct MainScreen: View {
             if i >= 4 { return nil }
             let r = rig
             return { x, y in SxPad.caption(i, x, y, rig: r) }
+        case .wave:
+            if i >= 4 { return nil }
+            let r = rig
+            if i == 1 || i == 2 { return { x, y in WvPad.caption(i, x, y) } }
+            return { x, y in SxPad.caption(i, x, y, rig: r) }
         default:
             return nil
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if rig.padSet == .sidrax && i >= 4 {                  // SIDRAX: the bottom row = four touch plates
+        if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
             let director = d
             PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
                 .frame(height: padHeight)
@@ -1011,6 +1045,13 @@ private struct HudBar: View {
                 if rig.padSet == .delay { key("squareshape.split.3x3", on: rig.grid) { d.toggleGrid() } }
                 else { key("arrow.triangle.2.circlepath") { d.sync() } }       // HARMONY: cycles start together
             default: key("hand.tap") { d.tapTempo() }
+            }
+        case .wave:
+            switch n {
+            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }
+            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+            case 2: key("dice") { d.sxDice() }
+            default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
         case .sidrax:
             switch n {

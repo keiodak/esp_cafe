@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX ("M 25 <0..4>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1772,6 +1772,28 @@ static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}
 static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
+// WAVE (mode 5): the same plates, but each voice reads a WAVETABLE from the tape — 64 frames of 256 samples at
+// the start of the tape, made from an audio file on the phone ("W" lines) — and an audio-rate BENJOLIN built from
+// the same table: two table oscillators (CLOCK and DATA), an 8-step shift register (the rungler) clocked by the one
+// and fed by the other; the rungler moves the voices' frame (timbre), optionally their pitch, and bends the two
+// oscillators themselves (CHAOS). BENJO = the Benjolin's own voice (the two compared). "S 20..27" (see sx_update).
+volatile bool sx_wave = false;
+volatile int32_t wv_frame = 0, wv_rdepth = 0;           // frame base (Q8 frames, 0..63·256) · rungler -> frame (Q8 per step)
+volatile uint32_t wv_r1 = 0, wv_r2 = 0;                 // CLOCK / DATA oscillators (Q32 per sample)
+volatile int32_t wv_lock = 0, wv_chaos = 0;             // LOCK: the register keeps its pattern (Q12 chance) · rungler -> rates (1/256 oct per step)
+volatile int32_t wv_pstep = 0;                          // rungler -> pitch: semitones per step (0 = off)
+volatile int32_t wv_benjo = 0;                          // the Benjolin's own voice, Q12
+volatile uint32_t wv_semi[25];                          // 2^(n/12), Q16 (sx_update)
+volatile int wv_rv = 0;                                 // the rungler now (0..7), for the status line
+static inline int32_t IRAM_ATTR wv_read(int32_t fq8, uint32_t ph) {   // the table at frame (Q8) and phase (Q32)
+  if (fq8 < 0) fq8 = 0; if (fq8 > 63 * 256) fq8 = 63 * 256;
+  int f0 = fq8 >> 8, f1 = f0 < 63 ? f0 + 1 : 63; int32_t ff = fq8 & 255;
+  int i0 = ph >> 24, i1 = (i0 + 1) & 255; int32_t fi = (ph >> 16) & 255;
+  int32_t a = dread(f0 * 256 + i0), b = dread(f0 * 256 + i1);
+  int32_t c = dread(f1 * 256 + i0), d = dread(f1 * 256 + i1);
+  int32_t x0 = a + (((b - a) * fi) >> 8), x1 = c + (((d - c) * fi) >> 8);
+  return x0 + (((x1 - x0) * ff) >> 8) - 2048;
+}
 volatile uint32_t sx_inc[4] = {0, 0, 0, 0};   // each plate's exact phase step (sx_update)
 volatile int sx_role = 2;   // SIDRAX across two Cafes: 0 = A, 1 = B, 2 = alone (both halves) — "S 9 <n>"
 volatile bool grit_off = false;   // SIDRAX: CHAR's grit is bypassed (pure) while this preset load lasts
@@ -1809,12 +1831,33 @@ static int32_t sx_tick(int32_t *rout) {
   if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } tl = tr = 0; }
   static int32_t env1[4] = {0, 0, 0, 0};                  // (no EARTH here: it wobbled the pitch — a chorus)
   int32_t touched = 0, l = 0, r = 0;
+  // WAVE: the Benjolin — CLOCK and DATA oscillators read the table; CLOCK's wrap shifts the register
+  static uint32_t bp1 = 0, bp2 = 0; static uint8_t reg = 0x5A; static int32_t rvs = 0, bj = 0;
+  static uint32_t brnd = 0x2545F491u;
+  int rv = 0, benjo = 0;
+  if (sx_wave) {
+    rv = (reg >> 5) & 7;                                     // the rungler: the top three bits
+    rvs += ((rv << 8) - rvs) >> 5;                           // (a little smoothing: no clicks in the frame)
+    int32_t bend = (rv * wv_chaos);                          // CHAOS: the rungler bends both oscillators
+    uint32_t i1 = (uint32_t)(((uint64_t)wv_r1 * bj_exp2(bend)) >> 16), i2 = (uint32_t)(((uint64_t)wv_r2 * bj_exp2(bend >> 1)) >> 16);
+    uint32_t o1 = bp1; bp1 += i1; bp2 += i2;
+    int32_t s1 = wv_read(wv_frame, bp1), s2 = wv_read(wv_frame, bp2);
+    if (bp1 < o1) {                                          // CLOCK: shift; the new bit = DATA, or (LOCK) the old one again
+      brnd = brnd * 1664525u + 1013904223u;
+      int nb = ((int32_t)(brnd >> 20) < wv_lock) ? (reg >> 7) & 1 : (s2 > 0 ? 1 : 0) ^ ((reg >> 7) & 1);
+      reg = (uint8_t)((reg << 1) | nb);
+    }
+    wv_rv = rv;
+    bj += (((s1 > s2 ? 1400 : -1400)) - bj) >> 3;            // the comparator of the two, softened a little
+    benjo = (bj * wv_benjo) >> 12;
+  }
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
     if (a > 0) touched = 1;
     // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
     // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
     uint32_t inc = sx_inc[k];
+    if (sx_wave && wv_pstep > 0) inc = (uint32_t)(((uint64_t)inc * wv_semi[(rv * wv_pstep) % 25]) >> 16);   // the rungler steps the pitch
     // CHAOS: the one on the left modulates this one · SELF: this one modulates itself (triangle -> saw)
     int32_t left = out[(k + 3) & 3];                         // (its last sample, ±2048 · level)
     int32_t sf = sx_self;                                    // Q12 (the plates only tune and play: no modulation from them)
@@ -1825,6 +1868,7 @@ static int32_t sx_tick(int32_t *rout) {
     ph[k] += inc;
     int32_t t = (int32_t)(ph[k] >> 20);
     int32_t tri = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;    // ±2048, a plain triangle
+    if (sx_wave) tri = wv_read(wv_frame + ((rvs * wv_rdepth) >> 8) + k * 96, ph[k]);   // WAVE: the table, its frame moved by the rungler
     // GLITCH: when the left one crosses zero, this one may turn round (same value, the other direction)
     static int32_t lastLeft[4] = {0, 0, 0, 0};
     if (sx_glitch > 0 && ((left ^ lastLeft[k]) < 0)) {
@@ -1860,6 +1904,7 @@ static int32_t sx_tick(int32_t *rout) {
     if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
     if (relHere) l += (tri * eR[k]) >> 13;
   }
+  l += benjo;                                                // WAVE: the Benjolin's own voice (both Cafes)
   r = l;                                                     // (one Cafe = one side: main and ASH the same)
   sx_gate = touched;
   int32_t ol = l, orr = r;                                   // (no filter: the triangles as they are; a soft ceiling only near the top)
@@ -2033,7 +2078,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 1) co_reset = true;
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
-    else if (cur == 4) sx_reset = true;
+    else if (cur == 4 || cur == 5) sx_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2044,10 +2089,11 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 1) co_reset = true;
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
-      else if (cur == 4) sx_reset = true;
+      else if (cur == 4 || cur == 5) sx_reset = true;
     }
   } else if (mg < 4096) mg += 16;
-  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4;
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
+  sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables + an audio Benjolin
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
   // --- SKIP: GRAIN = restart the score · COCO = back to the loop start · DELAY = tap tempo · NOISE = burst (held) ---

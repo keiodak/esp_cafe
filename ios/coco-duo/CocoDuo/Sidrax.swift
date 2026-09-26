@@ -52,6 +52,21 @@ enum SxPad {
     }
 }
 
+/// WAVE: the two pads of its own (the rest are SIDRAX's)
+enum WvPad {
+    static let titles = ["SCALE · KEY", "FRAME · RUNGLER", "CLOCK · DATA", "CHORD · OCTAVE",
+                         "PLATE 1", "PLATE 2", "PLATE 3", "PLATE 4"]
+    static func rate(_ v: Double) -> Double { 0.1 * pow(20000, v) }
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 1: return "FRAME \(Int(x * 63) + 1)/64 · RUNG \(Int(y * 100))%"
+        case 2: return String(format: "%@ · %@", hz(rate(x)), hz(rate(y)))
+        default: return ""
+        }
+    }
+    private static func hz(_ f: Double) -> String { f < 10 ? String(format: "%.2f Hz", f) : String(format: "%.0f Hz", f) }
+}
+
 /// one plate: the finger's place and its touched area (0 = lifted). UIKit, because SwiftUI does not give the area.
 struct PlatePad: View {
     @ObservedObject var axis: PadAxis

@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.52"
+#define FW_VERSION "3.53"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -226,7 +226,7 @@ static void pl_report() {
 //   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
 //   G <n>        switch to preset n (0-based, see the playlist)
-//   M <id> <v>   grain parameter (see mo_update); M 25 <0..4> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX · S = SIDRAX (see sx_update)
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..5> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX / WAVE · S = SIDRAX / WAVE (see sx_update)
 //   C <id> <v>   coco parameter (see co_update)
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
@@ -427,6 +427,8 @@ void nz_update() {
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
 //  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
+// WAVE: "S 20..27": 20 frame  21 rungler -> frame  22 CLOCK rate  23 DATA rate  24 lock  25 rungler -> pitch  26 benjo  27 chaos
+volatile int16_t wv_p[8] = {300, 400, 350, 550, 0, 0, 0, 200};
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
@@ -443,6 +445,17 @@ void sx_update() {
   sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.45f * hz)))) + 1;          // a little release (~0.45 s)
   sx_pan = 2048;
   sx_aligned = sx_p[8] >= 500;
+  { float w[8]; for (int i = 0; i < 8; i++) w[i] = wv_p[i] / 1000.0f;
+    wv_frame = (int32_t)(w[0] * 63.0f * 256.0f);
+    wv_rdepth = (int32_t)(w[1] * 9.0f * 256.0f);                     // up to 9 frames per rungler step
+    float c1 = 0.1f * powf(20000.0f, w[2]), c2 = 0.1f * powf(20000.0f, w[3]);   // 0.1 Hz .. 2 kHz (one table cycle)
+    wv_r1 = (uint32_t)(c1 / hz * 4294967295.0f); wv_r2 = (uint32_t)(c2 / hz * 4294967295.0f);
+    wv_lock = (int32_t)(w[4] * 4096.0f);
+    static const uint8_t steps[7] = {0, 1, 2, 3, 5, 7, 12};
+    wv_pstep = steps[(int)(w[5] * 6.99f)];
+    wv_benjo = (int32_t)(w[6] * 4096.0f);
+    wv_chaos = (int32_t)(w[7] * 48.0f);                                // up to 7·48 = 1.3 oct
+    for (int n = 0; n < 25; n++) wv_semi[n] = (uint32_t)(65536.0f * powf(2.0f, n / 12.0f)); }
   // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
   static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
                                     {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
@@ -694,7 +707,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 4 ? 4 : (int)val); }
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 5 ? 5 : (int)val); }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -724,6 +737,7 @@ void pc_line(char *s) {
                 long id = -1, a1 = 0, a2 = 0, a3 = 0; int k = sscanf(s + 1, "%ld %ld %ld %ld", &id, &a1, &a2, &a3);
                 if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
+                else if (id >= 20 && id < 28 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;

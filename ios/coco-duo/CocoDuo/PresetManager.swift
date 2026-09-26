@@ -38,6 +38,23 @@ struct PresetManagerView: View {
                     if rig.padSet == .grain {
                         GrainOptions(d: d, grain: d.grain)
                     }
+                    if rig.padSet == .wave {
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
+                            ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
+                            ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+                            ChipButton(title: "FILE", filled: false) { wvPick = true }
+                            Text(rig.wvNote)
+                                .font(.hud(8, .semibold))
+                                .foregroundStyle(PastelTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                        PanelRow(label: "LOCK", value: Binding(get: { rig.wvLock }, set: { rig.wvLock = $0; d.sendWvRows() }))
+                        PanelRow(label: "CHAOS", value: Binding(get: { rig.wvChaos }, set: { rig.wvChaos = $0; d.sendWvRows() }))
+                        PanelRow(label: "PITCH", value: Binding(get: { rig.wvPitch }, set: { rig.wvPitch = $0; d.sendWvRows() }),
+                                 format: { ["OFF", "1 st", "2 st", "3 st", "4TH", "5TH", "8VE"][min(6, Int($0 * 6.99))] })
+                        PanelRow(label: "BENJO", value: Binding(get: { rig.wvBenjo }, set: { rig.wvBenjo = $0; d.sendWvRows() }))
+                    }
                     if rig.padSet == .sidrax {
                         HStack(spacing: PanelMetrics.chipSpacing) {
                             ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
@@ -62,6 +79,7 @@ struct PresetManagerView: View {
                 }
     }
     @State private var presetsH: CGFloat = 0
+    @State private var wvPick = false            // WAVE: FILE (a picker of its own: this is a sheet)
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
@@ -106,6 +124,9 @@ struct PresetManagerView: View {
                 if design {
                     DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
                         .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
+                    .fileImporter(isPresented: $wvPick, allowedContentTypes: [.audio]) { result in
+                        if case .success(let url) = result { d.loadWaveTable(url) }
+                    }
                 } else {
                     // the same height as PRESETS: the cards, and NOW filling what is left (a scroll if they don't fit)
                     ViewThatFits(in: .vertical) {
