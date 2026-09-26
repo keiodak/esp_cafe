@@ -161,7 +161,7 @@ int tapsz=sizeof(myPlacers)>>2;
 // ASH + main out = wet echo only
 // YELLOW = a steady organ: 5 octaves of square waves (A2 110Hz .. 1760Hz at 44.1k), 2 pins each,
 //          like a divide-down combo organ. one phase counter -> the pitch never wanders.
-// EARTH  = FM: the organ's pitch follows EARTH in octaves, ±1 octave around A2 (unplugged = a steady A2)
+// EARTH  = the organ's pitch follows EARTH like a pitch CV: 1 oct per ~1/4 of its range (unplugged = a steady A2)
 // FLIP   = trigger: EARTH FM ±1 oct (default) -> ±2 oct -> OFF -> ±1 oct
 // SKIP   = trigger: WOBBLE on/off. the 4 echo taps drift like worn tape (slow wow + a little flutter),
 //          each tap on its own phase -> the echoes smear and detune against each other.
@@ -172,7 +172,7 @@ int tapsz=sizeof(myPlacers)>>2;
 
 void IRAM_ATTR echo_og() {
   static uint32_t oph = 0;                          // organ phase (32 bit)
-  static int32_t s_earth = 0, s_earth2 = 0;         // EARTH, 12 bit, two slews (Q8)
+  static int32_t s_earth = 0, s_earth2 = 0, s_earth3 = 0;   // EARTH, 12 bit, three slews (Q8)
   static int initial_earth = 0, boot_timer = 0;
   static bool knob_moved = false;
   static int cal_min = 4095, cal_max = 0;
@@ -200,7 +200,7 @@ void IRAM_ATTR echo_og() {
     rg = audio_frozen_state ? 0 : 1024;
     flip_int = FLIPPERAT ? 2000 : 0;  flip_latch = FLIPPERAT ? true : false;
     skip_int = SKIPPERAT ? 2000 : 0;  skip_latch = SKIPPERAT ? true : false;
-    s_earth = s_earth2 = earth_raw12 << 8;
+    s_earth = s_earth2 = s_earth3 = earth_raw12 << 8;
     boot_timer = 0; knob_moved = false; cal_min = 4095; cal_max = 0;
   }
 
@@ -263,45 +263,29 @@ void IRAM_ATTR echo_og() {
     if (!flip_latch) { flip_latch = true; fm_mode = fm_mode == 1 ? 2 : (fm_mode == 2 ? 0 : 1); }
   } else if (flip_int < 100) flip_latch = false;
 
-  // --- EARTH (12 bit) ---
-  // EARTH is read 1000x a second (BLE shares ADC2) -> two slews (~3ms each) round off the 1ms steps
-  // and the reading noise, so the organ's pitch glides instead of stepping (a clean tone).
-  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> 7;
-  s_earth2 += (s_earth - s_earth2) >> 7;
-  int e = s_earth2 >> 8;                             // 0..4095
-  if (boot_timer < 4000) { boot_timer++; initial_earth = e; }
-  else if (!knob_moved) {
-    int d = e - initial_earth; if (d < 0) d = -d;
-    if (d > 640) knob_moved = true;                  // a real swing, not the idle offset / noise
+  // --- EARTH (12 bit) -> the organ's pitch, like a pitch CV (fixed, no self-calibration: steady) ---
+  // three slews (~6 ms each) smooth the 1 kHz readings; the level at power-up is "zero" (unplugged = A2);
+  // a small dead band keeps the idle noise out; 1 octave per 1024 counts (FLIP: 2), clamped at ±2 (±3) octaves.
+  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> 8;
+  s_earth2 += (s_earth - s_earth2) >> 8;
+  s_earth3 += (s_earth2 - s_earth3) >> 8;
+  int e = s_earth3 >> 8;                             // 0..4095
+  if (boot_timer < 8000) { boot_timer++; if (boot_timer > 4000) initial_earth = e; }   // the resting level
+  int32_t rate = 256;                               // Q8, 1.0 = A2
+  if (boot_timer >= 8000 && fm_mode > 0) {
+    int32_t dd = e - initial_earth;
+    dd = dd > 40 ? dd - 40 : (dd < -40 ? dd + 40 : 0);
+    int32_t o = fm_mode == 2 ? (dd >> 1) : (dd >> 2);                    // 1/256 octave
+    int32_t lim = fm_mode == 2 ? 768 : 512;
+    if (o > lim) o = lim; if (o < -lim) o = -lim;
+    int32_t ip = o >> 8, fr = o & 255;
+    int32_t m = 256 + ((fr * (168 + ((fr * 88) >> 8))) >> 8);           // 2^(fr/256), Q8 (±0.3 %)
+    rate = ip >= 0 ? (m << ip) : (m >> -ip);
   }
-  int32_t rate = 256;                               // Q8, 1.0 = original organ pitch (-1 = unplugged)
-  if (knob_moved) {
-    static int leak = 0;
-    if (e < cal_min) cal_min = e;
-    if (e > cal_max) cal_max = e;
-    if (++leak >= 1024) {                            // slowly forget old extremes -> range fits the CV you patch now
-      leak = 0;
-      if (cal_min < e) cal_min++;
-      if (cal_max > e) cal_max--;
-    }
-    int spread = cal_max - cal_min;
-    // hysteresis: become "patched" at a clear swing, drop back only after ~2s of small swing
-    if (!patched) { if (spread >= 960) { patched = true; unpatch_timer = 0; } }
-    else if (spread < 400) { if (++unpatch_timer > 88200) patched = false; }
-    else unpatch_timer = 0;
-    if (patched && spread > 0 && fm_mode > 0) {
-      int32_t k = ((int32_t)(e - cal_min) << 12) / spread;   // 0..4096, fine steps
-      if (k > 4096) k = 4096; if (k < 0) k = 0;
-      // FM in octaves around A2, exponential like a pitch CV: ±1 octave (FLIP: ±2)
-      int32_t o = fm_mode == 2 ? ((k - 2048) >> 2) : ((k - 2048) >> 3);   // 1/256 octave
-      int32_t ip = o >> 8, fr = o & 255;
-      int32_t m = 256 + ((fr * (168 + ((fr * 88) >> 8))) >> 8);           // 2^(fr/256), Q8 (±0.3 %)
-      rate = ip >= 0 ? (m << ip) : (m >> -ip);
-    }                                                // else: jitter / nothing patched -> plain organ
-  }
+  (void)knob_moved; (void)cal_min; (void)cal_max; (void)patched; (void)unpatch_timer;
 
   // --- ORGAN ---
-  rate_s += ((rate << 8) - rate_s) >> 6;            // ~1.5ms slew: no jumps on plug/unplug
+  rate_s += ((rate << 8) - rate_s) >> 8;            // ~6 ms slew: no jumps on plug/unplug
   oph += (uint32_t)(((uint64_t)10713070u * rate_s) >> 16);   // 10713070 = 110 Hz at 44.1k
   int pins = 2 * __builtin_popcount(oph >> 27);     // 5 octave squares x 2 pins = 0..10
   {

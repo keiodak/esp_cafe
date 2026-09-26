@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.23"
+#define FW_VERSION "3.24"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -809,9 +809,9 @@ static StaticTask_t ea_tcb;
 static StackType_t ea_stack[1280];                 // (a task stack must be in internal DRAM: FreeRTOS refuses RTC memory — v3.21 crashed at boot)
 static void earth_task(void *) {
   for (;;) {
-    int r = 0;
-    if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
-    else earth_fail++;
+    int sum = 0, n = 0;                        // 4 conversions averaged: less noise on EARTH
+    for (int k = 0; k < 4; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
+    if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
     vTaskDelay(1);
   }
 }
