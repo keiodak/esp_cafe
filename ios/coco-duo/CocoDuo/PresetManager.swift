@@ -349,6 +349,7 @@ private struct ArpCard: View {
                 ChipButton(title: "TAP", filled: false) { d.tapTempo() }
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
                 ChipButton(title: "EARTH → NOTES", filled: rig.arpEarth) { rig.arpEarth.toggle(); d.applyArp() }
+                ChipButton(title: rig.arpStereo ? "STEREO" : "MONO", filled: rig.arpStereo) { rig.arpStereo.toggle(); d.applyArp(); d.refresh() }
             }
             PanelRow(label: "GLIDE", value: Binding(get: { rig.arpGlide }, set: { rig.arpGlide = $0; d.applyArp() }))
             PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))

@@ -37,8 +37,13 @@ final class ArpEngine {
     /// LOW (0…1): an EQ-like low shelf — notes below middle C get louder, up to about +9 dB two octaves down
     /// (the Cafe's input and small speakers lose the low end of a pure sine); higher notes are left as they are
     var low = 0.5
-    private var noteGain = 1.0
     var earth = 0.0
+    /// STEREO: a second voice on the right channel (→ Cafe B), with its own EARTH (Cafe B's), RATE and SWING;
+    /// root, chord, octaves, pattern, gate and decay are shared, the tempo is the same. MONO: both channels = voice 1.
+    var stereo = false
+    var rateIndex2 = 3
+    var swing2 = 0.0
+    var earth2 = 0.0
     private(set) var playing = false
     private(set) var running = false
 
@@ -51,15 +56,14 @@ final class ArpEngine {
     private var node: AVAudioSourceNode?
     private var sr: Double = 44100
 
-    // audio-thread state
-    private var toNext = 0.0
-    private var step = 0
-    private var phase = 0.0, phase5 = 0.0
-    private var freq = 220.0, target = 220.0
-    private var env = 0.0
-    private var attackLeft = 0
-    private var gateLeft = 0
-    private var seed: UInt32 = 0x2545F491
+    // audio-thread state, one per voice
+    private struct Voice {
+        var toNext = 0.0, step = 0, phase = 0.0, freq = 220.0, target = 220.0, env = 0.0
+        var attackLeft = 0, gateLeft = 0, noteGain = 1.0
+        var seed: UInt32
+    }
+    private var v0 = Voice(seed: 0x2545F491)
+    private var v1 = Voice(seed: 0x1B873593)
     private var restartFlag = false
 
     init() { rebuild() }
@@ -102,15 +106,15 @@ final class ArpEngine {
     /// back to the first note, now (SYNC, or a tap on the Cafe)
     func restart() { restartFlag = true }
 
-    private func stepSamples() -> Double {
+    private func stepSamples(_ rate: Int) -> Double {
         let beat = 60.0 / max(20, bpm) * sr
-        return beat * Self.rateBeats[min(max(rateIndex, 0), Self.rateBeats.count - 1)]
+        return beat * Self.rateBeats[min(max(rate, 0), Self.rateBeats.count - 1)]
     }
 
-    private func nextNote() -> Int {
-        let n = noteCount, s = step
+    private func nextNote(_ v: inout Voice, _ e: Double) -> Int {
+        let n = noteCount, s = v.step
         if earthNotes {
-            let i = Int(min(max(earth, 0), 0.9999) * Double(n))
+            let i = Int(min(max(e, 0), 0.9999) * Double(n))
             return Int(notes[min(max(i, 0), n - 1)])
         }
         var i = 0
@@ -119,8 +123,8 @@ final class ArpEngine {
         case 1: i = n - 1 - s % n
         case 2: if n > 1 { let k = s % (2 * n - 2); i = k < n ? k : 2 * n - 2 - k }
         case 3:
-            seed = seed &* 1664525 &+ 1013904223
-            i = Int(seed >> 16) % n
+            v.seed = v.seed &* 1664525 &+ 1013904223
+            i = Int(v.seed >> 16) % n
         case 4: let k = s % n; i = k % 2 == 0 ? k / 2 : n - 1 - k / 2
         case 5: if n > 1 { let k = s % (2 * (n - 1)); i = k % 2 == 0 ? 0 : 1 + (k / 2) % (n - 1) }
         default:                                   // SPIRAL: each octave starts one chord tone later
@@ -131,41 +135,47 @@ final class ArpEngine {
         return Int(notes[min(max(i, 0), n - 1)])
     }
 
+    /// one sample of one voice
+    private func tick(_ v: inout Voice, rate: Int, swing: Double, earth e: Double,
+                      kd: Double, kr: Double, gl: Double, atk: Int) -> Float {
+        if playing {
+            v.toNext -= 1
+            if v.toNext <= 0 {
+                let len = stepSamples(rate)
+                let sw = v.step % 2 == 0 ? 1 + swing * 0.5 : 1 - swing * 0.5
+                v.toNext += len * sw
+                let m = nextNote(&v, e)
+                v.target = 440.0 * pow(2.0, Double(m - 69) / 12.0)
+                let below = min(max(log2(261.6 / v.target), 0), 2.5)          // octaves under middle C
+                v.noteGain = 1.0 + low * below * 0.6
+                if gl >= 1.0 { v.freq = v.target }
+                v.gateLeft = Int(len * gate)
+                v.attackLeft = atk
+                v.step += 1
+            }
+        }
+        v.freq += (v.target - v.freq) * gl
+        if v.attackLeft > 0 { v.env += (1.0 - v.env) / Double(v.attackLeft); v.attackLeft -= 1 }
+        else if v.gateLeft > 0 { v.env *= kd }
+        else { v.env *= kr }
+        if v.gateLeft > 0 { v.gateLeft -= 1 }
+        v.phase += 2.0 * Double.pi * v.freq / sr; if v.phase > 2.0 * Double.pi { v.phase -= 2.0 * Double.pi }
+        // a pure sine, at a level that leaves the Cafe's input headroom
+        return Float(sin(v.phase) * v.env * level * 0.45 * v.noteGain)
+    }
+
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
-        let twoPi = 2.0 * Double.pi
         let kd = exp(-1.0 / (sr * (0.03 + decay * decay * 1.5)))   // decay while the note is held
         let kr = exp(-1.0 / (sr * 0.030))                           // release after the gate (soft: no click)
         let gl = glide <= 0.001 ? 1.0 : 1.0 - exp(-1.0 / (sr * glide * 0.25))
         let atk = Int(sr * 0.006)                                   // (6 ms: a clean start, no click)
+        let st = stereo
         for f in 0..<frames {
-            if restartFlag { restartFlag = false; step = 0; toNext = 0 }
-            if playing {
-                toNext -= 1
-                if toNext <= 0 {
-                    let len = stepSamples()
-                    let sw = step % 2 == 0 ? 1 + swing * 0.5 : 1 - swing * 0.5
-                    toNext += len * sw
-                    let m = nextNote()
-                    target = 440.0 * pow(2.0, Double(m - 69) / 12.0)
-                    let below = min(max(log2(261.6 / target), 0), 2.5)            // octaves under middle C
-                    noteGain = 1.0 + low * below * 0.6
-                    if gl >= 1.0 { freq = target }
-                    gateLeft = Int(len * gate)
-                    attackLeft = atk
-                    step += 1
-                }
-            }
-            freq += (target - freq) * gl
-            if attackLeft > 0 { env += (1.0 - env) / Double(attackLeft); attackLeft -= 1 }
-            else if gateLeft > 0 { env *= kd }
-            else { env *= kr }
-            if gateLeft > 0 { gateLeft -= 1 }
-            phase += twoPi * freq / sr; if phase > twoPi { phase -= twoPi }
-            phase5 += twoPi * freq * 1.5 / sr; if phase5 > twoPi { phase5 -= twoPi }
-            // a pure sine (no fifth), at a level that leaves the Cafe's input headroom
-            let v = Float(sin(phase) * env * level * 0.45 * noteGain)
-            for b in abl {
-                if let p = b.mData?.assumingMemoryBound(to: Float.self) { p[f] = v }
+            if restartFlag { restartFlag = false; v0.step = 0; v0.toNext = 0; v1.step = 0; v1.toNext = 0 }
+            let a = tick(&v0, rate: rateIndex, swing: swing, earth: earth, kd: kd, kr: kr, gl: gl, atk: atk)
+            let b = st ? tick(&v1, rate: rateIndex2, swing: swing2, earth: earth2, kd: kd, kr: kr, gl: gl, atk: atk) : a
+            for (k, buf) in abl.enumerated() {
+                if let p = buf.mData?.assumingMemoryBound(to: Float.self) { p[f] = k == 0 ? a : b }
             }
         }
     }

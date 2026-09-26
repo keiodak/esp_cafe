@@ -291,7 +291,8 @@ final class Rig: ObservableObject {
     @Published var arpFifth = 0.0
     @Published var arpLevel = 0.7
     @Published var arpEarth = true            // EARTH → NOTES (ARP_DELAY)
-    @Published var arpLow = 0.5               // LOW: bass lift (an EQ low shelf on the sine)
+    @Published var arpLow = 0.5
+    @Published var arpStereo = false           // STEREO: a second voice on the right (Cafe B's EARTH, its own RATE · SWING)               // LOW: bass lift (an EQ low shelf on the sine)
     /// the Cafe's tap delay from the bottom row (pad 4..7 -> F 1 ids 0..7)
     func arpDelayCommands(pad i: Int) -> [String] {
         let a = arpAxes[i], k = i - 4

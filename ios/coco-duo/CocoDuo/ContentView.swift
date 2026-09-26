@@ -44,9 +44,11 @@ final class Director: ObservableObject {
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
-            if let u = self.units.first(where: { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }) {
-                self.arp.earth = Double(u.earth) / 255
-            }
+            // STEREO: A's EARTH -> voice 1 (left), B's -> voice 2 (right); MONO: the first Cafe on ARP_DELAY
+            let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
+            if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
+            if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
+            if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
             let onArp = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.arp }
             if !onArp && self.arp.playing { self.arp.stop(); self.rig.arpPlaying = false }
@@ -220,7 +222,7 @@ final class Director: ObservableObject {
                 rig.fxCommands(slot: r, e: e, k: k).forEach(units[r].send)
             }
         case .arp:
-            if i < 4 { applyArp() }
+            if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .knob:
             break
@@ -239,6 +241,8 @@ final class Director: ObservableObject {
         arp.gate = 0.05 + a[3].x * 0.9; arp.decay = a[3].y
         arp.glide = rig.arpGlide; arp.fifth = rig.arpFifth; arp.level = rig.arpLevel
         arp.earthNotes = rig.arpEarth; arp.low = rig.arpLow
+        arp.stereo = rig.arpStereo
+        arp.rateIndex2 = ArpPad.rate(a[6].x); arp.swing2 = a[6].y * 0.6
     }
     func arpToggle() {
         applyArp()
@@ -537,7 +541,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
-        case .arp: return (rig.arpAxes[i], ArpPad.titles[i])
+        case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -546,6 +550,7 @@ private struct MainScreen: View {
     private func captionFor(_ i: Int) -> ((Double, Double) -> String)? {
         switch rig.padSet {
         case .arp:
+            if i == 6 && rig.arpStereo { return { x, y in ArpPad.caption(2, x, y) } }
             if i >= 4 { return nil }
             return { x, y in ArpPad.caption(i, x, y) }
         case .harmony:
