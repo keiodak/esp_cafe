@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.21"
+#define FW_VERSION "3.22"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -806,7 +806,7 @@ void (*playlist_main[])() = {
 //////ORIGINAL FIRMWARE
 // EARTH on core 0 (the audio interrupt lives on core 1): ADC2 channel 0 = GPIO 4, 1000x a second
 static StaticTask_t ea_tcb;
-RTC_DATA_ATTR static StackType_t ea_stack[1536];    // in RTC slow memory (DRAM is kept for the Bluetooth heap)
+static StackType_t ea_stack[1280];                 // (a task stack must be in internal DRAM: FreeRTOS refuses RTC memory — v3.21 crashed at boot)
 static void earth_task(void *) {
   for (;;) {
     int r = 0;

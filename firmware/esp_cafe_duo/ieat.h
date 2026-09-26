@@ -15,7 +15,7 @@ static int offset = 0;
 struct B16 { int16_t &operator[](int i) const { return ((int16_t *)dchunk[(i / 768) & (DCHUNKS - 1)])[i % 768]; } };
 static const B16 buffer_16bit = {};
 // the sampler's 1000-sample pre-roll (its "volatile pool")
-RTC_DATA_ATTR static int16_t pre_roll_mem[1000];     // in RTC slow memory: DRAM is kept for the Bluetooth heap
+RTC_DATA_ATTR static int16_t pre_roll_mem[600];     // in RTC slow memory: DRAM is kept for the Bluetooth heap
 static uint8_t *preset_volatile_pool = (uint8_t *)pre_roll_mem;
 // drums: played straight from flash (no RAM copy)
 uint8_t *current_kick[3] = {(uint8_t *)KICK1_RAW, (uint8_t *)KICK2_RAW, (uint8_t *)KICK3_RAW};
@@ -3132,7 +3132,7 @@ void  scrambler() {
 // flip reverses the playback direction
 // yellow is a pulse at the end of buffer, can be used for patching a loop with skip
 
-#define PRE_ROLL_LEN 1000 
+#define PRE_ROLL_LEN 600    // (k.odk: 1000 in Apple π; shorter here, it lives in RTC memory)
 #define FADE_LEN 1000     
 
 void  sampler() { 
@@ -3731,7 +3731,7 @@ struct Grain {
     int total_life;  
 };
 
-static struct Grain grains[MAX_GRAINS];  
+RTC_DATA_ATTR static struct Grain grains[MAX_GRAINS];  
 
 void  granular() { 
 
@@ -5766,7 +5766,7 @@ struct DroneVoice {
     bool updated_this_frame;
 };
 
-static struct DroneVoice d_voices[DR_VOICES];
+RTC_DATA_ATTR static struct DroneVoice d_voices[DR_VOICES];
 static int32_t prime_ratios[DR_PRIME_CNT]; 
 static bool dr_initialized = false;
 
