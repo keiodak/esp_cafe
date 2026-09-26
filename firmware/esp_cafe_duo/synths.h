@@ -231,6 +231,7 @@ void IRAM_ATTR echo_og() {
       // offset in samples, Q8: wow up to ~120 samples, flutter ~10
       int32_t off = ((tri * 120) >> 7) + ((ftr * 10) >> 7);   // Q8 (0 .. ~32000)
       off = (off * wob) >> 13;
+      off = (off * ((ch_v[1] * 1024) / 1000)) >> 10;   // CHAR = WEAR
       int oi = off >> 8, fr = off & 0xFF;
       // address (placer - off) holds the sound from (N - off) samples ago -> delay shortened by off
       int q0 = myPlacers[i] - oi;       if (q0 < 0) q0 += myNumbers[i];
@@ -1534,6 +1535,42 @@ static inline int32_t hd_voice(int b, int32_t q, int32_t S) {           // one b
   return (v * e) >> 6;
 }
 
+// CLEAN (CHAR toward 0): a straight harmonizer instead of rpls' chopped cycles. The three buffers are read as one
+// continuous history; each voice has two read heads half a window apart that slide at the voice's INTERVAL and
+// crossfade (triangle windows, always summing to 1) -> no restarts, no dips, a smooth transposed copy.
+// TIMING = how far behind the input the voice sits (1/16 of a cycle per step).
+static int32_t hd_hist(int rb, int32_t t, int32_t S, int32_t d, int32_t lim) {    // the input d samples ago
+  if (d < 1) d = 1;
+  if (d > lim) return 0;
+  if (d <= t) return dread(rb * HD_STRIDE + t - d) - 2048;
+  d -= t;
+  if (d <= S) return dread(((rb + 2) % 3) * HD_STRIDE + S - d) - 2048;
+  d -= S; if (d > S) d = S;
+  return dread(((rb + 1) % 3) * HD_STRIDE + S - d) - 2048;
+}
+static int32_t __attribute__((noinline)) hd_clean(int k, int rb, int32_t t, int32_t S, int32_t r, uint32_t cycles) {
+  static int32_t ph[2] = {0, 0};                                          // window phase, Q12 samples
+  int32_t W = S >> 1; if (W > 4096) W = 4096; if (W < 64) W = 64;
+  int32_t Wq = W << 12;
+  ph[k] += 4096 - r;                                                      // the delay grows by (1 - rate) a sample
+  while (ph[k] >= Wq) ph[k] -= Wq;
+  while (ph[k] < 0) ph[k] += Wq;
+  int32_t D = (int32_t)(((int64_t)S * hd_off[k]) >> 4) + 32;
+  int32_t lim = cycles <= 1 ? t : (cycles == 2 ? t + S : t + 2 * S);      // only what has been recorded
+  int32_t out = 0;
+  for (int h = 0; h < 2; h++) {
+    int32_t p = ph[k] + (h ? (Wq >> 1) : 0); if (p >= Wq) p -= Wq;
+    int32_t pi = p >> 12, f = (p >> 4) & 255;
+    int32_t half = W >> 1;
+    int32_t g = pi < half ? pi : W - pi;                                  // 0 .. W/2
+    int32_t d = D + pi;
+    int32_t a = hd_hist(rb, t, S, d, lim), c = hd_hist(rb, t, S, d + 1, lim);
+    int32_t x = a + (((c - a) * f) >> 8);
+    out += (int32_t)(((int64_t)x * g) / half);
+  }
+  return out;
+}
+
 void IRAM_ATTR harmony() {
   static int rb = 0;                         // the buffer being recorded
   static int32_t t = 0, S = 22050;           // time in the cycle, this cycle's length
@@ -1575,14 +1612,18 @@ void IRAM_ATTR harmony() {
   // the voices: VOICE 1 plays the last cycle, VOICE 2 the one before
   int32_t v[2];
   int32_t gc = t < 64 ? t : (S - 1 - t < 64 ? S - 1 - t : 64);            // fade at the cycle's edges
+  static int32_t chs = 1000 << 8;                                        // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
+  chs += (((int32_t)ch_v[6] << 8) - chs) >> 10;
+  int32_t mixc = ((chs >> 8) * 256) / 1000; if (mixc < 0) mixc = 0; if (mixc > 256) mixc = 256;
   for (int k = 0; k < 2; k++) {
     int b = (rb + 2 - k) % 3;                                            // k 0 -> rb-1, k 1 -> rb-2
     bool ready = cycles > (uint32_t)(k + 1);                             // those buffers hold this input yet
-    int32_t x = ready ? hd_voice(b, q[k], S) : 0;
-    x = (x * gc) >> 6;
+    int32_t r = hd_rate[k] + (int32_t)(((int64_t)hd_rate[k] * pc_emod * hd_wob) >> 15);   // EARTH = wobble
+    int32_t x = 0;
+    if (mixc > 0) x = ready ? (((hd_voice(b, q[k], S) * gc) >> 6) * mixc) >> 8 : 0;          // GRAIN (rpls)
+    if (mixc < 256) x += (hd_clean(k, rb, t, S, r, cycles) * (256 - mixc)) >> 8;           // CLEAN
     if (hd_tone < 4096) { lp[k] += ((x - lp[k]) * hd_tone) >> 12; x = lp[k]; }
     v[k] = x;
-    int32_t r = hd_rate[k] + (int32_t)(((int64_t)hd_rate[k] * pc_emod * hd_wob) >> 15);   // EARTH = wobble
     q[k] += r;
     int32_t Sq = S << 12;
     while (q[k] >= Sq) q[k] -= Sq;
@@ -1686,7 +1727,7 @@ void IRAM_ATTR formant() {
  int f3_freq = 800 + cv;
 
  // Q Factor (Resonance): Fixed at 0.1 (approx 400 in 12-bit scale)
- int q = 400;
+ int q = 900 - (ch_v[4] * 7) / 10;                 // CHAR = vowel Q (714 = the original 400)
 
  // Apply the 3 Filters in Parallel
 int out1 = svf_bandpass_int(signal, f1_freq, q, &f1_band, &f1_low);
@@ -1805,6 +1846,8 @@ void IRAM_ATTR saturator() {
     if (spread > 10) {
         cv = ((earth_raw - cal_min) * 255) / spread;
     }
+    cv += (ch_v[5] * 255) / 1000;                   // CHAR = drive (EARTH adds on top)
+    if (cv > 255) cv = 255;
 
     // DC SERVO
     if (!servo_ready || dc_slow == 0) {
@@ -2165,6 +2208,7 @@ volatile bool     fx_rs[FX_N] = {true, true, true, true, true, true, true, true}
 // SHORT DELAY
 volatile int32_t  sd_T = 1000 << 8, sd_fb = 140, sd_tone = 3000, sd_mod = 0, sd_spread = 0, sd_wet = 256, sd_dry = 256;
 volatile uint32_t sd_lfo = 20000;
+volatile int32_t  sd_pluck = 180;             // noise burst on each attack, Q8
 
 static inline int32_t IRAM_ATTR fx_lp(int32_t *st, int32_t x, int32_t k) { *st += ((x - *st) * k) >> 12; return *st; }
 /// the input's history, interpolated: posq = absolute position, Q12
@@ -2352,8 +2396,9 @@ static int32_t gl_tick(int32_t in, bool hold, bool rs) {
       if (gl_crush) { if (++hn >= 1 + (gl_crush >> 2)) { hn = 0; held = v; } v = held; }
     } break;
   }
+  v = (v * 480) >> 8;                                                // the moves ~1.9x louder (they sat under the dry sound)
   int32_t fe = left < 128 ? left * 2 : 256;                          // a soft return at the end of a move
-  return in + (((v - in) * ((gl_wet * fe) >> 8)) >> 8);
+  return soft_clip(in + (((v - in) * ((gl_wet * fe) >> 8)) >> 8));
 }
 
 // ---- 5 FOLD + OCTAVER: an octave down (flip-flop), an octave up (rectifier), into a wave folder ----
@@ -2441,20 +2486,23 @@ static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   return dry + ((ol * g) >> 9);
 }
 
-// ---- 7 SHORT DELAY: 1 .. 90 ms, two lines (L / R), feedback through a soft clip and a damping filter,
-//      a slow wobble (chorus / flanger), R a little longer (SPREAD) and wobbling the other way. EARTH = time.
+// ---- 7 SHORT = KARPLUS: a plucked string. Two very short lines (L / R) tuned to a note (PITCH, in semitones),
+//      fed back through a damping low-pass (DECAY / DAMP) -> the input rings them like a string, and every attack in
+//      the input also plucks them with a short noise burst (PLUCK). R is detuned a little (SPREAD), a slow WOBBLE
+//      bends both. EARTH = pitch bend (up to ±50 % of the period).
 static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
-  static uint32_t w = 0, ph = 0, fill = 0; static int32_t lpl = 0, lpr = 0, ct = 1000 << 8, dcl = 0, dcr = 0;
-  if (rs) { w = 0; ph = 0; lpl = lpr = 0; ct = sd_T; fill = 0; dcl = dcr = 0; }
-  ct += (sd_T - ct) >> 10;
+  static uint32_t w = 0, ph = 0, fill = 0, ns = 0x1234567u; static int32_t lpl = 0, lpr = 0, ct = 1000 << 8, dcl = 0, dcr = 0;
+  static int32_t ef = 0, es = 0, burst = 0, cool = 0;
+  if (rs) { w = 0; ph = 0; lpl = lpr = 0; ct = sd_T; fill = 0; dcl = dcr = 0; ef = es = 0; burst = 0; cool = 0; }
+  ct += (sd_T - ct) >> 8;                                                             // a quick glide between notes
   ph += sd_lfo;
-  int32_t tri = (int32_t)(ph >> 16); tri = tri < 32768 ? tri : 65535 - tri;          // 0..32767
-  int32_t m = (int32_t)(((int64_t)tri * sd_mod) >> 15);
-  int32_t e = (int32_t)(((int64_t)ct * fx_em) >> 8);                                  // EARTH = time (up to ±50 %)
-  int32_t tl = ct + m + e;
-  int32_t tr = (int32_t)(((int64_t)ct * (4096 + sd_spread)) >> 12) + (sd_mod - m) + e;
-  if (tl < (16 << 8)) tl = 16 << 8; if (tl > (4090 << 8)) tl = 4090 << 8;
-  if (tr < (16 << 8)) tr = 16 << 8; if (tr > (4090 << 8)) tr = 4090 << 8;
+  int32_t tri = (int32_t)(ph >> 16); tri = tri < 32768 ? tri - 16384 : 49151 - tri;  // -16384..16383
+  int32_t m = (int32_t)(((int64_t)tri * sd_mod) >> 14);
+  int32_t e = (int32_t)(((int64_t)ct * fx_em) >> 8);                                  // EARTH = pitch bend
+  int32_t tl = ct + (int32_t)(((int64_t)ct * m) >> 16) + e;
+  int32_t tr = (int32_t)(((int64_t)tl * (4096 + sd_spread)) >> 12);
+  if (tl < (8 << 8)) tl = 8 << 8; if (tl > (4090 << 8)) tl = 4090 << 8;
+  if (tr < (8 << 8)) tr = 8 << 8; if (tr > (4090 << 8)) tr = 4090 << 8;
   int32_t rq = (int32_t)(w << 8) - tl, i = (rq >> 8) & 0xFFF, f = rq & 255;
   int32_t a = dread(SD_L + i), b = dread(SD_L + ((i + 1) & 0xFFF));
   int32_t vl = a + (((b - a) * f) >> 8) - 2048;
@@ -2462,12 +2510,20 @@ static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   a = dread(SD_R + i); b = dread(SD_R + ((i + 1) & 0xFFF));
   int32_t vr = a + (((b - a) * f) >> 8) - 2048;
   if (fill < 5000) fill++;
-  if (fill <= 4100) { vl = 0; vr = 0; }
+  if ((int32_t)fill <= (tr >> 8) + 2) { vl = 0; vr = 0; }                           // the lines hold old sound at first
+  // attacks in the input pluck the string: a noise burst one period long
+  int32_t ai = in < 0 ? -in : in;
+  ef += (ai - ef) >> 4; es += (ai - es) >> 11;
+  if (cool > 0) cool--;
+  if (sd_pluck > 0 && cool == 0 && ef > es * 2 + 120) { burst = tl >> 8; cool = 2205; }
+  int32_t nz = 0;
+  if (burst > 0) { burst--; ns = ns * 1664525u + 1013904223u; nz = (((int32_t)(ns >> 20)) - 2048) * sd_pluck >> 8; }
+  // the string: damping low-pass in the loop (the Karplus average, made adjustable)
   fx_lp(&lpl, vl, sd_tone); fx_lp(&lpr, vr, sd_tone);
-  dcl += (lpl - dcl) >> 9; dcr += (lpr - dcr) >> 9;
+  dcl += (lpl - dcl) >> 10; dcr += (lpr - dcr) >> 10;
   int32_t fb = hold ? 256 : sd_fb;
   int32_t xl = hold ? vl : lpl - dcl, xr = hold ? vr : lpr - dcr;
-  int32_t il = hold ? 0 : in;
+  int32_t il = hold ? 0 : ((in >> 1) + nz);
   dwrite(SD_L + w, soft_clip(il + ((xl * fb) >> 8)) + 2048);
   dwrite(SD_R + w, soft_clip(il + ((xr * fb) >> 8)) + 2048);
   w = (w + 1) & 0xFFF;

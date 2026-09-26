@@ -83,6 +83,8 @@ final class Director: ObservableObject {
         let s = u.slot
         u.send("G \(rig.preset[s])")
         u.send("K \(Int((rig.bpm * 10).rounded()))")
+        let pr = rig.preset[s]
+        if pr >= 0 && pr < Preset.count { u.send("X \(Int((rig.charV[s][pr] * 1000).rounded())) \(pr)") }
         switch rig.preset[s] {
         case Preset.ble:
             u.send("M 25 \(rig.mode[s])")
@@ -299,6 +301,20 @@ final class Director: ObservableObject {
             }
         }
         sync()
+    }
+
+    /// CHAR (the slider next to the tempo) for one Cafe's current preset
+    func setChar(_ v: Double, slot: Int) {
+        let p = rig.preset[slot]
+        guard p >= 0 && p < Preset.count else { return }
+        let c = min(max(v, 0), 1)
+        var cv = rig.charV
+        cv[slot][p] = c
+        if rig.fxLink && p == Preset.multi || rig.link { cv[1 - slot][p] = c }
+        rig.charV = cv
+        let msg = "X \(Int((c * 1000).rounded())) \(p)"
+        let who = (rig.fxLink && p == Preset.multi) || rig.link ? [0, 1] : [slot]
+        for s in who where rig.preset[s] == p && units[s].isConnected { units[s].send(msg) }
     }
 
     func tapTempo() { if let b = rig.tap() { setBpm(b) } }
@@ -652,8 +668,14 @@ private struct HudBar: View {
                 }
                 contextKey(top ? 0 : 1)
             }
-            Button { showPresets = true } label: { status }
-                .buttonStyle(.plain)
+            HStack(spacing: 6) {
+                Button { showPresets = true } label: { status }
+                    .buttonStyle(.plain)
+                    .layoutPriority(1)
+                CharControl(d: d, rig: rig, slot: unit.slot, preset: shownPreset)
+                Button { showPresets = true } label: { statusEnd }
+                    .buttonStyle(.plain)
+            }
             HStack(spacing: 8) {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
@@ -662,7 +684,9 @@ private struct HudBar: View {
         }
     }
 
-    /// A · name · preset · mode · tempo · clock ··· (tap = the preset manager)
+    private var shownPreset: Int { unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[unit.slot] }
+
+    /// A · name · preset · mode · tempo (tap = the preset manager)
     private var status: some View {
         let p = unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[unit.slot]
         let m = unit.isConnected ? unit.mode : rig.mode[unit.slot]
@@ -694,6 +718,13 @@ private struct HudBar: View {
                 Text("BPM").font(.hud(7, .medium)).foregroundStyle(PastelTheme.textSecondary)
                 if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// ··· update · clock · link lamp
+    private var statusEnd: some View {
+        HStack(spacing: 6) {
             Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
             if let o = unit.ota {
                 HudTag(text: String(format: "UPD_%02ld%%", Int(o * 100)), fill: PastelTheme.hudOrange, size: 8)
@@ -880,5 +911,38 @@ private struct CameraCard: View {
             .font(.hud(PanelMetrics.labelFont, .medium))
             .foregroundStyle(PastelTheme.textPrimary)
             .frame(width: PanelMetrics.labelWidth, alignment: .leading)
+    }
+}
+
+/// CHAR: the slider next to the tempo, for this Cafe's preset (HARMONY: CLEAN <-> GRAIN; GRIT; WEAR; VOWEL Q; DRIVE)
+private struct CharControl: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+    let slot: Int
+    let preset: Int
+
+    var body: some View {
+        let p = min(max(preset, 0), Preset.count - 1)
+        let v = rig.charV[slot][p]
+        let isHarmony = p == Preset.harmony
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Text(isHarmony ? (v < 0.5 ? "CLEAN" : "GRAIN") : Preset.charNames[p])
+                    .font(.hud(7, .semibold))
+                    .tracking(1)
+                    .foregroundStyle(PastelTheme.hudOrange)
+                Spacer(minLength: 0)
+                Text(String(format: "%03ld", Int((v * 100).rounded())))
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundStyle(PastelTheme.textSecondary)
+            }
+            CompactSlider(value: Binding(get: { rig.charV[slot][p] },
+                                         set: { d.setChar($0, slot: slot) }),
+                          touchHeight: 18,
+                          fillColor: PastelTheme.sliderFill,
+                          knobColor: PastelTheme.hudOrange, thinLine: true)
+                .frame(height: 10)
+        }
+        .frame(width: 96)
     }
 }

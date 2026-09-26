@@ -192,6 +192,32 @@ inline void write_ash_cleaner(int raw_val) {
 // ---------------------------------------------------------
 // COMPRESSED ASH AUDIO OUTPUT (8-Bit, Driven into Limiter, Symmetrical Clipping)
 // ---------------------------------------------------------
+// ---- CHAR: one slider per preset, set from the phone ("X <0..1000>", for the current preset) ----
+// 1 coco_mod GRIT · 2 echo WEAR (wobble depth) · 3 BLE GRIT · 4 resonator GRIT · 5 formant VOWEL Q · 6 saturator DRIVE
+// 7 harmony CLEAN <-> GRAIN · 8 rungler GRIT · 9 selfread GRIT · 10 MULTI GRIT · 11 ARP_DELAY GRIT
+// GRIT = sample-and-hold + fewer bits on main out and ASH (0 = untouched)
+extern int preset;
+volatile int16_t ch_v[11] = {0, 1000, 0, 0, 714, 0, 1000, 0, 0, 0, 0};
+static const uint8_t ch_grit[11] = {1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1};
+static inline int ch_now() { return (preset >= 0 && preset < 11) ? ch_v[preset] : 0; }
+static int __attribute__((noinline)) grit_do(int p, int *cnt, int *held) {
+  int g = ch_v[preset];
+  int hold = 1 + (g * g) / 66667;                   // 1 .. 16 samples
+  int bits = (g * 7) / 1000;                        // 0 .. 7 bits dropped
+  if (++*cnt >= hold) { *cnt = 0; *held = p & ~((1 << bits) - 1); }
+  return *held;
+}
+static inline int grit_m(int p) {
+  static int c = 0, h = 2048;
+  if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
+  return grit_do(p, &c, &h);
+}
+static inline int grit_a(int p) {
+  static int c = 0, h = 2048;
+  if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
+  return grit_do(p, &c, &h);
+}
+
 inline void write_ash_compressed(int raw_val) {
     // DC Blocker  and extracting AC signal
     static int32_t dc_tracker = 2048 << 12;
@@ -215,7 +241,7 @@ inline void write_ash_compressed(int raw_val) {
     // Write to the hardware DAC
     REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((out_8bit & 0xFF) << 19);
 }
-#define COMPRESSED_ASHWRITER(a) write_ash_compressed(a)
+#define COMPRESSED_ASHWRITER(a) write_ash_compressed(grit_a(a))
 
 //ORIGINAL FIRMWARE // REPLACED ABOVE
 // #define ASHWRITER(a) \
@@ -244,7 +270,7 @@ inline void write_ash_compressed(int raw_val) {
   [0] = (d) << 16; \
   REG(SPI3_CMD_REG) \
   [0] = BIT(18);
-#define DACWRITER(p) SPIWRITER(0x9000 | p)
+#define DACWRITER(p) SPIWRITER(0x9000 | grit_m(p))
 #define ADCREADER ((REG(SPI3_W0_REG)[0]) >> 16) & 0xFFF;
 #define I2S_START
 #define I2SFINISH

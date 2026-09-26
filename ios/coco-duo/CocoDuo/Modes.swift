@@ -41,6 +41,10 @@ enum Preset {
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
         "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
     ]
+    /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
+    static let charNames = ["GRIT", "WEAR", "GRIT", "GRIT", "VOWEL Q", "DRIVE", "CLEAN·GRAIN", "GRIT", "GRIT", "GRIT", "GRIT"]
+    /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
+    static let charDefaults: [Double] = [0, 1, 0, 0, 0.714, 0, 1, 0, 0, 0, 0]
     /// presets that exist in the firmware
     static let count = 11
     static let ble = 2
@@ -82,8 +86,8 @@ enum ArpPad {
 /// MULTI's effects (firmware ids "F <effect> <0..7> <v>"; pad k = ids 2k, 2k+1; "—" = not used)
 enum Fx {
     static let count = 8
-    static let names = ["CLEAN", "ECHO", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB", "SHORT DLY"]
-    static let short = ["CLEAN", "ECHO", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB", "SHORT"]
+    static let names = ["CLEAN", "ECHO", "SAMPLER", "REVERSE", "GLITCH", "FOLD+OCT", "REVERB", "KARPLUS"]
+    static let short = ["CLEAN", "ECHO", "SAMPLE", "REVRS", "GLITCH", "FOLD", "VERB", "KARP"]
     static let titles: [[String]] = [
         ["—", "—", "—", "—"],
         ["TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "—"],
@@ -92,7 +96,7 @@ enum Fx {
         ["GRID · CHANCE", "SLICE · LENGTH", "VARIETY · PITCH", "—"],
         ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "—"],
         ["SIZE · DAMP", "WIDTH · DIFFUSE", "HOWL · MOD", "—"],
-        ["TIME · FEEDBACK", "TONE · WOBBLE", "RATE · SPREAD", "—"],
+        ["PITCH · DECAY", "DAMP · PLUCK", "WOBBLE · SPREAD", "—"],
     ]
     /// the firmware's defaults (fx_default)
     static let defaults: [[Int]] = [
@@ -185,6 +189,11 @@ final class Rig: ObservableObject {
     @Published var updTarget: Int = 2
     @Published var bpm: Double = (Rig.d.object(forKey: "rig.bpm") as? Double) ?? 120 {
         didSet { Self.d.set(bpm, forKey: "rig.bpm") }
+    }
+    /// CHAR per Cafe, per preset (0...1)
+    @Published var charV: [[Double]] = (Rig.d.array(forKey: "rig.char") as? [[Double]]).flatMap { $0.count == 2 && $0.allSatisfy { $0.count == Preset.count } ? $0 : nil }
+        ?? [Preset.charDefaults, Preset.charDefaults] {
+        didSet { Self.d.set(charV, forKey: "rig.char") }
     }
     @Published var link = false
     @Published var dlHold = false

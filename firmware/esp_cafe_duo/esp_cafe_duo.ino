@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.17"
+#define FW_VERSION "3.18"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -194,6 +194,7 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
 //   V <id> <v>   harmony parameter (see hd_update)
+//   X <v> [p]    CHAR (0..1000) for preset p (0-based; default the current one): see ch_v in stuff.h
 //   K <bpm x10>  the shared tempo (DELAY, HARMONY)
 //   Z            sync: grain score / coco loop start / the click (send to both Cafes at once = in step)
 //   U ...        firmware update (see ota_cmd)
@@ -202,12 +203,12 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // FLIP / SKIP / BUTTON seen high since the last status line (short triggers are not missed by the 30 ms poll)
 volatile bool seen_flip = false, seen_skip = false, seen_btn = false;
 void pc_status() {
-  char tb[128];
-  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d",
+  char tb[176];
+  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
     (int)EARTHREAD, (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
-    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now);
+    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now, ch_now());
   pc_out(tb);
   seen_flip = seen_skip = seen_btn = false;
 }
@@ -505,14 +506,17 @@ void fx_update(int e) {
       fo_wet = (int32_t)(p[6] * 256.0f);
       fo_dry = (int32_t)(p[7] * 256.0f);
     } break;
-    case 7: {
-      float tt = hz * 0.001f * powf(90.0f, p[0]); if (tt > 4000) tt = 4000; if (tt < 16) tt = 16;
+    case 7: {                                                            // KARPLUS
+      float semi = floorf(p[0] * 48.0f + 0.5f);                          // 4 octaves in semitones, from A1 (55 Hz)
+      float f = 55.0f * powf(2.0f, semi / 12.0f);
+      float tt = hz / f; if (tt > 4000) tt = 4000; if (tt < 8) tt = 8;
       sd_T = (int32_t)(tt * 256.0f);
-      sd_fb = (int32_t)(powf(p[1], 0.7f) * 0.95f * 256.0f);
-      sd_tone = fx_lpk(p[2]);
-      sd_mod = (int32_t)(p[3] * hz * 0.003f * 256.0f);                   // up to 3 ms of wobble
-      sd_lfo = (uint32_t)((0.05f + p[4] * p[4] * 6.0f) / hz * 4294967295.0f);
-      sd_spread = (int32_t)(p[5] * 0.5f * 4096.0f);
+      sd_fb = (int32_t)((0.80f + powf(p[1], 0.5f) * 0.195f) * 256.0f);   // DECAY: short pluck .. long ring
+      sd_tone = fx_lpk(0.25f + p[2] * 0.75f);                            // DAMP: dark .. bright
+      sd_pluck = (int32_t)(p[3] * 320.0f);                               // PLUCK: noise burst on attacks
+      sd_mod = (int32_t)(p[4] * p[4] * 0.02f * 65536.0f);                // WOBBLE: up to ±2 % of the period
+      sd_lfo = (uint32_t)(0.3f / hz * 4294967295.0f);
+      sd_spread = (int32_t)(p[5] * 0.03f * 4096.0f);                     // SPREAD: R up to 3 % longer
       sd_wet = (int32_t)(p[6] * 1.4f * 256.0f);
       sd_dry = (int32_t)(p[7] * 256.0f);
     } break;
@@ -575,6 +579,10 @@ void pc_line(char *s) {
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
               } break;
+    case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
+                if (v < 0) v = 0; if (v > 1000) v = 1000;
+                if (k < 2) pr = preset;                                              // no preset given: the current one
+                if (pr >= 0 && pr < 11) ch_v[pr] = (int16_t)v; } break;
     case 'Z': mo_sync = true; co_restart = true; dl_align = true; hd_align = true; fx_sync = true; break;
     case 'F': { long e = -1, id = -1, val = 0; int k = sscanf(s + 1, "%ld %ld %ld", &e, &id, &val);   // MULTI
                 if (k >= 3 && e >= 0 && e < FX_N && id >= 0 && id < 8) {
