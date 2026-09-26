@@ -31,6 +31,10 @@ final class ArpEngine {
     var glide = 0.0
     var fifth = 0.0
     var level = 0.7
+    /// EARTH → NOTES: the Cafe's EARTH (0…1, from its status lines) picks the note, quantized to the chord's notes
+    /// over the octaves (ROOT · CHORD and OCTAVES pads); the rhythm stays the arpeggiator's (RATE on the BPM, swing, gate)
+    var earthNotes = true
+    var earth = 0.0
     private(set) var playing = false
     private(set) var running = false
 
@@ -101,6 +105,10 @@ final class ArpEngine {
 
     private func nextNote() -> Int {
         let n = noteCount, s = step
+        if earthNotes {
+            let i = Int(min(max(earth, 0), 0.9999) * Double(n))
+            return Int(notes[min(max(i, 0), n - 1)])
+        }
         var i = 0
         switch pattern {
         case 0: i = s % n

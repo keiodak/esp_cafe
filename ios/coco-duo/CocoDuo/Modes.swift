@@ -290,6 +290,7 @@ final class Rig: ObservableObject {
     @Published var arpGlide = 0.0
     @Published var arpFifth = 0.0
     @Published var arpLevel = 0.7
+    @Published var arpEarth = true            // EARTH → NOTES (ARP_DELAY)
     /// the Cafe's tap delay from the bottom row (pad 4..7 -> F 1 ids 0..7)
     func arpDelayCommands(pad i: Int) -> [String] {
         let a = arpAxes[i], k = i - 4

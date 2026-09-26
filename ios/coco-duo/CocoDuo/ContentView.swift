@@ -36,9 +36,18 @@ final class Director: ObservableObject {
     /// connected Cafes that are on what the screen shows
     func ctxUnits() -> [CafeUnit] { units.filter { $0.isConnected && rig.inCtx($0.slot) } }
 
+    private var earthTimer: Timer?
+
     func start() {
         guard !started else { return }
         started = true
+        // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
+        earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if let u = self.units.first(where: { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }) {
+                self.arp.earth = Double(u.earth) / 255
+            }
+        }
         for u in units {
             u.onReady = { [weak self, weak u] in
                 guard let self, let u else { return }
@@ -224,6 +233,7 @@ final class Director: ObservableObject {
         arp.rateIndex = ArpPad.rate(a[2].x); arp.swing = a[2].y * 0.6
         arp.gate = 0.05 + a[3].x * 0.9; arp.decay = a[3].y
         arp.glide = rig.arpGlide; arp.fifth = rig.arpFifth; arp.level = rig.arpLevel
+        arp.earthNotes = rig.arpEarth
     }
     func arpToggle() {
         applyArp()
