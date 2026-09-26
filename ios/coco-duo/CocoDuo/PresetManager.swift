@@ -102,11 +102,9 @@ private struct SlotRow: View {
                 .font(.hudBig(13))
                 .foregroundStyle(n >= 0 ? PastelTheme.hudBlack : PastelTheme.textSecondary)
             Spacer(minLength: 0)
-            if picked {
-                Text("PICKED").font(.hud(7, .semibold)).tracking(1).foregroundStyle(PastelTheme.hudOrange)
-            }
         }
-        .padding(.vertical, 3)
+        .frame(minHeight: 17)
+        .padding(.vertical, 2)
         .padding(.horizontal, 3)
         .background(Rectangle().fill(picked ? PastelTheme.hudOrange.opacity(0.15) : (Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : Color.clear)))
         .overlay(Rectangle().strokeBorder(picked ? PastelTheme.hudOrange : Color.clear, lineWidth: 1))
@@ -124,12 +122,13 @@ private struct DesignCard: View {
     @Binding var bin: Bool
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 4) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), alignment: .leading, spacing: 2) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), alignment: .leading, spacing: 4) {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
+                .padding(.bottom, 4)
             }
             // bin · INIT · memories 1–5 (tap = recall, hold = save, with the bin on: tap = erase)
             HStack(spacing: 3) {
@@ -156,10 +155,10 @@ private struct DesignCard: View {
     /// a small square key: on = orange, filled = a thin ink bar under the text (a memory with something in it)
     private func small(_ t: String, on: Bool, filled: Bool = false, enabled: Bool = true, hold: (() -> Void)? = nil, _ act: @escaping () -> Void) -> some View {
         Text(t)
-            .font(.hud(8, .semibold))
+            .font(.hud(9, .semibold))
             .foregroundStyle(on ? Color.white : (enabled ? PastelTheme.hudBlack : PastelTheme.hudLine))
-            .padding(.horizontal, 4)
-            .frame(minWidth: 20, minHeight: 18)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 24, minHeight: 22)
             .background(Rectangle().fill(on ? PastelTheme.hudOrange : PastelTheme.padScreen))
             .overlay(Rectangle().strokeBorder(enabled ? PastelTheme.hudBlack : PastelTheme.hudLine, lineWidth: 1))
             .overlay(alignment: .bottom) { if filled { Rectangle().fill(PastelTheme.hudBlack).frame(height: 3).padding(.horizontal, 3).padding(.bottom, 2) } }
@@ -190,7 +189,7 @@ private struct DesignCard: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 3)
-        .frame(height: 17)
+        .frame(height: 22)
         .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
         .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
         .contentShape(Rectangle())
