@@ -108,7 +108,7 @@ enum ArpPad {
                          "TIME · FEEDBACK", "PING-PONG · SPREAD", "—", "TAP"]      // (a clean digital delay: no tone / wow)
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
                                              (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
-    static func root(_ x: Double) -> Int { 24 + min(48, Int(x * 49)) }        // C1 … C5 (with OCTAVES up to C9)
+    static func root(_ x: Double) -> Int { 36 + min(36, Int(x * 37)) }        // C2 … C5 (with OCTAVES up to C9)
     static func chord(_ y: Double) -> Int { min(6, Int(y * 7)) }
     static func pattern(_ x: Double) -> Int { min(6, Int(x * 7)) }
     static func octaves(_ y: Double) -> Int { 1 + min(3, Int(y * 4)) }
@@ -291,6 +291,7 @@ final class Rig: ObservableObject {
     @Published var arpFifth = 0.0
     @Published var arpLevel = 0.7
     @Published var arpEarth = true            // EARTH → NOTES (ARP_DELAY)
+    @Published var arpLow = 0.5               // LOW: bass lift (an EQ low shelf on the sine)
     /// the Cafe's tap delay from the bottom row (pad 4..7 -> F 1 ids 0..7)
     func arpDelayCommands(pad i: Int) -> [String] {
         let a = arpAxes[i], k = i - 4

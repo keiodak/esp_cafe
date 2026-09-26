@@ -352,6 +352,7 @@ private struct ArpCard: View {
             }
             PanelRow(label: "GLIDE", value: Binding(get: { rig.arpGlide }, set: { rig.arpGlide = $0; d.applyArp() }))
             PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))
+            PanelRow(label: "LOW", value: Binding(get: { rig.arpLow }, set: { rig.arpLow = $0; d.applyArp() }))
             Text("Plug the iPhone's audio out into the Cafe's input. Top pads = the arpeggio (7 patterns, 7 chords), bottom pads = the Cafe's stereo tap delay (main = L, ASH = R). Tempo both ways: BPM here -> Cafes; SKIP on a Cafe = tap -> the arpeggio follows and restarts on the beat.")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)

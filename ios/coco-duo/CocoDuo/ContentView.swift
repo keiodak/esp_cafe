@@ -238,7 +238,7 @@ final class Director: ObservableObject {
         arp.rateIndex = ArpPad.rate(a[2].x); arp.swing = a[2].y * 0.6
         arp.gate = 0.05 + a[3].x * 0.9; arp.decay = a[3].y
         arp.glide = rig.arpGlide; arp.fifth = rig.arpFifth; arp.level = rig.arpLevel
-        arp.earthNotes = rig.arpEarth
+        arp.earthNotes = rig.arpEarth; arp.low = rig.arpLow
     }
     func arpToggle() {
         applyArp()

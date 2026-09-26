@@ -34,6 +34,10 @@ final class ArpEngine {
     /// EARTH → NOTES: the Cafe's EARTH (0…1, from its status lines) picks the note, quantized to the chord's notes
     /// over the octaves (ROOT · CHORD and OCTAVES pads); the rhythm stays the arpeggiator's (RATE on the BPM, swing, gate)
     var earthNotes = true
+    /// LOW (0…1): an EQ-like low shelf — notes below middle C get louder, up to about +9 dB two octaves down
+    /// (the Cafe's input and small speakers lose the low end of a pure sine); higher notes are left as they are
+    var low = 0.5
+    private var noteGain = 1.0
     var earth = 0.0
     private(set) var playing = false
     private(set) var running = false
@@ -143,6 +147,8 @@ final class ArpEngine {
                     toNext += len * sw
                     let m = nextNote()
                     target = 440.0 * pow(2.0, Double(m - 69) / 12.0)
+                    let below = min(max(log2(261.6 / target), 0), 2.5)            // octaves under middle C
+                    noteGain = 1.0 + low * below * 0.6
                     if gl >= 1.0 { freq = target }
                     gateLeft = Int(len * gate)
                     attackLeft = atk
@@ -157,7 +163,7 @@ final class ArpEngine {
             phase += twoPi * freq / sr; if phase > twoPi { phase -= twoPi }
             phase5 += twoPi * freq * 1.5 / sr; if phase5 > twoPi { phase5 -= twoPi }
             // a pure sine (no fifth), at a level that leaves the Cafe's input headroom
-            let v = Float(sin(phase) * env * level * 0.6)
+            let v = Float(sin(phase) * env * level * 0.45 * noteGain)
             for b in abl {
                 if let p = b.mData?.assumingMemoryBound(to: Float.self) { p[f] = v }
             }
