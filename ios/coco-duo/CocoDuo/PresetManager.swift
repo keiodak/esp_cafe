@@ -120,28 +120,15 @@ private struct DesignCard: View {
 
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { "slot \(String(format: "%02ld", $0 + 1)) → pick a preset" } ?? "pick a slot on the left", spacing: 4) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
-                ForEach(0..<Preset.poolCount, id: \.self) { n in
-                    let at = rig.design.firstIndex(of: n)
-                    HStack(spacing: 3) {
-                        Text(at.map { String(format: "%02ld", $0 + 1) } ?? "")
-                            .font(.hud(7, .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(width: at == nil ? 0 : 14, height: 14)
-                            .background(Rectangle().fill(at == nil ? Color.clear : PastelTheme.hudBlack))
-                        Text(Preset.names[n])
-                            .font(.hud(8, .semibold))
-                            .foregroundStyle(PastelTheme.hudBlack)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.65)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 3)
-                    .frame(height: 19)
-                    .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
-                    .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
-                    .contentShape(Rectangle())
-                    .onTapGesture { put(n) }
+            // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
+            ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
+                Text(g.0)
+                    .font(.hud(7, .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(PastelTheme.textSecondary)
+                    .padding(.top, 2)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
+                    ForEach(g.1, id: \.self) { n in cell(n) }
                 }
             }
             HStack(spacing: PanelMetrics.chipSpacing) {
@@ -154,9 +141,37 @@ private struct DesignCard: View {
                 ChipButton(title: "DEFAULT 11", filled: false) { d.setDesign(Preset.defaultPlaylist); sel = nil }
                     .frame(width: 84)
                 Spacer(minLength: 0)
-                Text("orange = Apple π").font(.hud(7)).foregroundStyle(PastelTheme.textSecondary)
             }
         }
+    }
+
+    static let groups: [(String, [Int])] = [
+        ("PLAYED FROM THE PHONE", [2, 9, 10]),
+        ("ON THE CAFE", [6, 0, 1, 3, 4, 5, 7, 8]),
+        ("APPLE π", Array(11..<Preset.poolCount)),
+    ]
+
+    private func cell(_ n: Int) -> some View {
+        let at = rig.design.firstIndex(of: n)
+        return HStack(spacing: 3) {
+            Text(at.map { String(format: "%02ld", $0 + 1) } ?? "")
+                .font(.hud(7, .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: at == nil ? 0 : 14, height: 14)
+                .background(Rectangle().fill(at == nil ? Color.clear : PastelTheme.hudBlack))
+            Text(Preset.names[n])
+                .font(.hud(8, .semibold))
+                .foregroundStyle(PastelTheme.hudBlack)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 3)
+        .frame(height: 19)
+        .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
+        .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { put(n) }
     }
 
     /// a preset into the picked slot (none picked: the first empty one)
