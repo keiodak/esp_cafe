@@ -1748,7 +1748,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
 // SIDRAX --- mode 4 of the BLE preset (k.odk): after Ciat-Lonbarde's Sidrax Organ
 // ==========================================
 // Plain triangle oscillators, one per touch plate (the phone's bottom row). The touched AREA = the volume, nothing
-// else; X = the plate's tuning (Y does nothing). The top pads: SCALE · KEY (the plates snap to it; FREE = anywhere),
+// else; each plate is one note; its Y = how long it rings after lifting (up = longer). The top pads: SCALE · KEY (the plates snap to it; FREE = anywhere),
 // FM · SELF (every oscillator is FM'd by the other three — mutual FM — and by itself: triangle -> saw),
 // CHAOS · GLITCH (the Sidrax's circle: each one FMs the one on its right · a triangle turns round when the one on its
 // left crosses zero), PITCH · SPREAD. Press and release pan to opposite sides. EARTH (AC) = bends every pitch.
@@ -1767,6 +1767,7 @@ static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}
 static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
+volatile int32_t sx_relk[4] = {5, 5, 5, 5};  // each plate's release: its Y (up = longer), set with the plate
 volatile int32_t sx_pan = 2048;            // Q12: how far press / release swing to the sides
 volatile bool sx_aligned = true;
 volatile uint32_t sx_base = 4389000;       // C1 (32.7 Hz), Q32 per sample (set in sx_update)
@@ -1844,7 +1845,7 @@ static int32_t sx_tick(int32_t *rout) {
     int32_t tg = (a * 4096) / 1000;
     int32_t tq = tg << 12;                                   // (12 extra bits: a long release must not stall)
     if (tq > env1[k]) env1[k] += ((tq - env1[k]) >> 9) + 1;
-    else env1[k] += (int32_t)(((int64_t)(tq - env1[k]) * sx_rel) >> 16);
+    else env1[k] += (int32_t)(((int64_t)(tq - env1[k]) * sx_relk[k]) >> 16);   // RELEASE: the plate's Y
     env[k] += ((env1[k] >> 12) - env[k]) >> 8;
     int32_t v = (tri * env[k]) >> 12;
     out[k] = tri;                                            // (the circle hears the oscillator itself)

@@ -1,6 +1,7 @@
 // Sidrax.swift — coco duo (k.odk)
 // SIDRAX: mode 5 of the BLE preset, after Ciat-Lonbarde's Sidrax Organ (firmware: sx_tick, "S" lines).
-// Plain triangle oscillators, one per touch PLATE (bottom row): each plate is one note, the touched AREA = the volume.
+// Plain triangle oscillators, one per touch PLATE (bottom row): each plate is one note, the touched AREA = the volume,
+// where the finger is up the plate = how long it rings after lifting (bottom 0.05 s … top 6 s).
 // Top row: SCALE · KEY (left) and CHORD · OCTAVE (right) decide the four notes; in between FM · SELF (mutual FM, and
 // each on itself) and CHAOS · GLITCH (each one FMs the one on its right, in a circle · a triangle turns round when the
 // one on its left crosses zero). ALIGN off = FREE (the chords in semitones). HOLD keeps the plates sounding.
@@ -95,7 +96,7 @@ struct PlatePad: View {
             .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomLeading) {
-            Text(SxPad.note(k, rig: rig) + (a > 0 ? " · \(Int(a * 100))%" : ""))
+            Text(SxPad.note(k, rig: rig) + String(format: " · %.1f s", 0.05 * pow(120, axis.y)) + (a > 0 ? " · \(Int(a * 100))%" : ""))
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(PastelTheme.hudBlack.opacity(0.7))
                 .padding(.leading, 8).padding(.bottom, 6)
