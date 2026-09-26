@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.14"
+#define FW_VERSION "3.15"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -73,7 +73,7 @@
 #include <esp_ota_ops.h>
 #include <driver/adc.h>
 #include <driver/rtc_io.h>
-volatile uint32_t earth_fail = 0;               // EARTH reads the radio refused ("H")
+volatile uint32_t earth_fail = 0, pin_fix = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
 static volatile bool ble_conn = false;
 static volatile uint16_t ble_mtu = 23;
@@ -552,9 +552,9 @@ void pc_line(char *s) {
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
-    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
+    case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), ble_ok, ble_conn ? 1 : 0, (int)ble_mtu, (int)(ble_itvl * 5 / 4), (int)pc_earth,
-                (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)earth_fail, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
+                (unsigned long)(esp_timer_get_time() / 1000), (unsigned long)pc_fifo, (unsigned long)earth_fail, (unsigned long)(REG(GPIO_IN1_REG)[0] & 0xFF), (unsigned long)REG(RTC_IO_ADC_PAD_REG)[0], (unsigned long)pin_fix, (unsigned long)REG(APB_SARADC_CTRL_REG)[0],
                 (unsigned long)REG(SENS_SAR_READ_CTRL2_REG)[0], (unsigned long)REG(SENS_SAR_MEAS_START2_REG)[0], (unsigned long)e2_fix);
                 pc_out(hb); } break;
     case 'Q': pc_status(); pc_overview(); break;
@@ -857,6 +857,16 @@ void loop() {
 
   pc_service();   // lines from the phone (BLE)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
+
+  // SKIP / FLIP stay digital inputs (in case an ADC call touched their pads)
+  static uint32_t pin_t = 0;
+  if (millis() - pin_t >= 200) {
+    pin_t = millis();
+    if (REG(RTC_IO_ADC_PAD_REG)[0] & (BIT(29) | BIT(28))) {        // GPIO 34 / 35 muxed to the RTC (analog) side (ADC1 / ADC2 mux_sel)
+      rtc_gpio_deinit(GPIO_NUM_34); rtc_gpio_deinit(GPIO_NUM_35); pin_fix++;
+    }
+    REG(IO_MUX_GPIO34_REG)[0] |= FUN_IE; REG(IO_MUX_GPIO35_REG)[0] |= FUN_IE;   // input enabled
+  }
 
   // EARTH: ADC2 channel 0 (GPIO 4), read here 1000 times a second, one conversion at a time
   // (GPIO 34 is SKIP, not EARTH — v3.12 broke SKIP by making it an analog pin)
