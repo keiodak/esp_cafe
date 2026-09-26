@@ -23,8 +23,8 @@ enum PastelTheme {
     static let cafePurple = Color(hex: 0x7B4FA6)
     static let cafeBrown = Color(hex: 0x8B5A36)
     static let cafeYellow = Color(hex: 0xE3AE12)
-    /// EARTH = brown · ASH = gray · YELLOW = yellow · FLIP = blue · SKIP = green · BUTTON = purple
-    static let earth = cafeBrown, ash = cafeGray, yellow = cafeYellow, flip = cafeBlue, skip = cafeGreen, button = cafePurple
+    /// EARTH = brown · ASH = gray · YELLOW = yellowJack · FLIP = blue · SKIP = green · BUTTON = purple
+    static let earth = cafeBrown, ash = cafeGray, yellowJack = cafeYellow, flip = cafeBlue, skip = cafeGreen, button = cafePurple
     /// BLE modes: GRAIN blue · COCO green · DELAY purple · NOISE brown
     static func mode(_ m: Int) -> Color { [cafeBlue, cafeGreen, cafePurple, cafeBrown][min(max(m, 0), 3)] }
     /// MULTI effects, in turn

@@ -208,10 +208,10 @@ private struct OutWindow: View {
                     p.move(to: CGPoint(x: x, y: lo))
                     p.addLine(to: CGPoint(x: x, y: min(hi, lo - 0.8)))
                 }
-                ctx.stroke(p, with: .color(yellow ? PastelTheme.yellow : PastelTheme.ash), lineWidth: max(1, w * 0.9))
+                ctx.stroke(p, with: .color(yellow ? PastelTheme.yellowJack : PastelTheme.ash), lineWidth: max(1, w * 0.9))
             }
-            Rectangle().strokeBorder(yellow ? PastelTheme.yellow : PastelTheme.ash, lineWidth: 1)
-            HudTag(text: title, fill: yellow ? PastelTheme.yellow : PastelTheme.ash, size: 7)
+            Rectangle().strokeBorder(yellow ? PastelTheme.yellowJack : PastelTheme.ash, lineWidth: 1)
+            HudTag(text: title, fill: yellow ? PastelTheme.yellowJack : PastelTheme.ash, size: 7)
                 .padding(3)
         }
     }
