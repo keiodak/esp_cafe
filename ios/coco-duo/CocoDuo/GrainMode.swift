@@ -120,6 +120,12 @@ final class GrainMode: ObservableObject {
         move = v
         units.forEach { $0.send("M 26 \(v ? 1 : 0)") }
     }
+    /// the PITCH key's steps: off -> PITCH (MOVE) -> FOLD -> off
+    func cyclePitchFold(_ units: [CafeUnit]) {
+        if move { setMove(false, units); setFold(true, units) }
+        else if fold { setFold(false, units) }
+        else { setMove(true, units) }
+    }
     func setFold(_ v: Bool, _ units: [CafeUnit]) {
         fold = v
         units.forEach { $0.send("M 27 \(v ? 1 : 0)") }

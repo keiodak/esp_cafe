@@ -868,11 +868,9 @@ private struct HudBar: View {
             switch n {
             case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
             case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
-            case 2:
-                HStack(spacing: 8) {
-                    key("waveform.path", on: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
-                    key("wave.3.forward", on: grain.fold) { grain.setFold(!grain.fold, d.ctxUnits()) }   // FOLD
-                }
+            case 2: key(grain.fold ? "wave.3.forward" : "waveform.path", on: grain.move || grain.fold) {   // off -> PITCH -> FOLD
+                        grain.cyclePitchFold(d.ctxUnits())
+                    }
             default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .coco:

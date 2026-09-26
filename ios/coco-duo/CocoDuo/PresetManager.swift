@@ -275,8 +275,7 @@ private struct GrainOptions: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
         HStack(spacing: PanelMetrics.chipSpacing) {
-            ChipButton(title: "MOVE PITCH", filled: grain.move) { grain.setMove(!grain.move, d.ctxUnits()) }
-            ChipButton(title: "FOLD", filled: grain.fold) { grain.setFold(!grain.fold, d.ctxUnits()) }
+            ChipButton(title: grain.fold ? "FOLD" : "MOVE PITCH", filled: grain.move || grain.fold) { grain.cyclePitchFold(d.ctxUnits()) }
             ChipButton(title: "FREEZE", filled: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
             ChipButton(title: "PERC", filled: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
         }
