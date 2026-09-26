@@ -244,6 +244,15 @@ final class Rig: ObservableObject {
     }() {
         didSet { Preset.order = playlist; Self.d.set(playlist, forKey: "rig.playlist") }
     }
+    /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
+    @Published var design: [Int] = {
+        let v = (Rig.d.array(forKey: "rig.design") as? [Int]) ?? []
+        if v.count == Preset.maxPlaylist { return v }
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist
+        return Array((p + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
+    }() {
+        didSet { Self.d.set(design, forKey: "rig.design") }
+    }
     @Published var link = false
     @Published var dlHold = false
     @Published var hdHold = false

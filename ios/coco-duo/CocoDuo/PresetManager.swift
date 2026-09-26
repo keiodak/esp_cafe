@@ -1,7 +1,8 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
 //   PRESETS  the playlist, numbered in its order. A · B on each row: where each Cafe is, and a tap puts it there
-//            (that is also who the pads go to); the row itself = both. 12 = PRESET DESIGN (edit the playlist).
+//            (that is also who the pads go to); the row itself = both. 12 = PRESET DESIGN: 11 slots, pick one then a
+//            preset from the right (3 across), the bin empties a slot; empty slots are skipped on the Cafe.
 //   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on
 //   (TEMPO and UPDATE live in the CAFES panel.)
 
@@ -15,44 +16,29 @@ struct PresetManagerView: View {
     @ObservedObject var b: CafeUnit
     @State private var design = false
 
-    /// PRESET DESIGN drops: "N<id>" = from the right (a new one), "P<id>" = a row of the list.
-    /// before = the row it lands on (nil = the end, -1 = back to the right: take it out of the list)
-    private func drop(_ item: String?, before target: Int?) -> Bool {
-        guard let item, let kind = item.first, let id = Int(item.dropFirst()), id >= 0, id < Preset.poolCount else { return false }
-        var l = rig.playlist
-        if target == -1 {
-            guard kind == "P", l.count > 1 else { return false }
-            l.removeAll { $0 == id }
-        } else {
-            if kind == "P" { l.removeAll { $0 == id } }
-            else if l.contains(id) || l.count >= Preset.maxPlaylist { return false }
-            if let t = target, let i = l.firstIndex(of: t) { l.insert(id, at: i) } else { l.append(id) }
-        }
-        d.setPlaylist(l)
-        return true
-    }
+    @State private var sel: Int? = nil          // PRESET DESIGN: the slot picked on the left
 
+    /// PRESET DESIGN, on the left: tap a slot to pick it; tap another slot = the two swap places
+    private func tapSlot(_ i: Int) {
+        if let s = sel, s != i {
+            var l = rig.design; l.swapAt(s, i); d.setDesign(l); sel = nil
+        } else {
+            sel = sel == i ? nil : i
+        }
+    }
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
                 PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
-                    ForEach(rig.playlist, id: \.self) { n in
-                        if design {
-                            PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
-                                .draggable("P\(n)")
-                                .dropDestination(for: String.self) { items, _ in drop(items.first, before: n) }
-                        } else {
+                    if design {
+                        ForEach(0..<Preset.maxPlaylist, id: \.self) { i in
+                            SlotRow(i: i, n: rig.design[i], picked: sel == i)
+                                .onTapGesture { tapSlot(i) }
+                        }
+                    } else {
+                        ForEach(rig.playlist, id: \.self) { n in
                             PresetRow(n: n, rig: rig, a: a, b: b) { t in d.setTarget(t); d.setPreset(n) }
                         }
-                    }
-                    if design {
-                        // drop here = to the end of the list
-                        Text(rig.playlist.count < Preset.maxPlaylist ? "＋ drop here (\(rig.playlist.count) / \(Preset.maxPlaylist))" : "the list is full (11)")
-                            .font(.hud(8, .semibold))
-                            .foregroundStyle(PastelTheme.textSecondary)
-                            .frame(maxWidth: .infinity, minHeight: 22)
-                            .overlay(Rectangle().stroke(PastelTheme.hudLine, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
-                            .dropDestination(for: String.self) { items, _ in drop(items.first, before: nil) }
                     }
                     // 12: PRESET DESIGN — which presets are in the list (and the Cafe's BUTTON menu)
                     HStack(spacing: 6) {
@@ -60,7 +46,7 @@ struct PresetManagerView: View {
                         Text("PRESET_DESIGN")
                             .font(.hudBig(13))
                             .foregroundStyle(PastelTheme.hudBlack)
-                        Text("add / remove presets (up to 11) · Apple π's are here too")
+                        Text("choose the 11 slots · Apple π's are here too")
                             .font(.hud(7.5))
                             .foregroundStyle(PastelTheme.textSecondary)
                             .lineLimit(1)
@@ -73,11 +59,11 @@ struct PresetManagerView: View {
                     .padding(.horizontal, 3)
                     .background(Rectangle().fill(design ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
                     .contentShape(Rectangle())
-                    .onTapGesture { design.toggle() }
+                    .onTapGesture { design.toggle(); sel = nil }
                 }
             } right: {
                 if design {
-                    DesignCard(d: d, rig: rig) { item in drop(item, before: -1) }
+                    DesignCard(d: d, rig: rig, sel: $sel)
                 } else {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
@@ -105,38 +91,87 @@ struct PresetManagerView: View {
     }
 }
 
-/// PRESET DESIGN (right): everything the firmware has that is not in the list. Drag one onto the list (on a row = in
-/// front of it, on the dashed box = at the end); drag a list row back here to take it out; drag rows to reorder.
+/// PRESET DESIGN, left: one slot of the 11 (empty = nothing there; empty slots are skipped on the Cafe)
+private struct SlotRow: View {
+    let i: Int
+    let n: Int
+    let picked: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HudTag(text: String(format: "%02ld", i + 1), fill: picked ? PastelTheme.hudOrange : (n >= 0 ? PastelTheme.hudBlack : PastelTheme.hudLine), size: 9)
+            Text(n >= 0 ? Preset.names[n] : "— EMPTY —")
+                .font(.hudBig(13))
+                .foregroundStyle(n >= 0 ? PastelTheme.hudBlack : PastelTheme.textSecondary)
+            Spacer(minLength: 0)
+            if picked {
+                Text("PICKED").font(.hud(7, .semibold)).tracking(1).foregroundStyle(PastelTheme.hudOrange)
+            }
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 3)
+        .background(Rectangle().fill(picked ? PastelTheme.hudOrange.opacity(0.15) : Color.clear))
+        .overlay(Rectangle().strokeBorder(picked ? PastelTheme.hudOrange : Color.clear, lineWidth: 1))
+        .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5) }
+        .contentShape(Rectangle())
+    }
+}
+
+/// PRESET DESIGN, right: every preset the firmware has, 3 across. Pick a slot on the left, then a preset here to put it
+/// in (one that is already in the list moves there: the two swap). The bin empties the picked slot.
 private struct DesignCard: View {
     let d: Director
     @ObservedObject var rig: Rig
-    let dropBack: (String?) -> Bool
+    @Binding var sel: Int?
 
     var body: some View {
-        let rest = (0..<Preset.poolCount).filter { !rig.playlist.contains($0) }
-        PanelCard(title: "PRESET DESIGN", note: "drag ← in · drag → out", spacing: 4, fill: true) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)], alignment: .leading, spacing: 4) {
-                ForEach(rest, id: \.self) { n in
-                    Text(Preset.names[n])
-                        .font(.hud(8.5, .semibold))
-                        .foregroundStyle(PastelTheme.hudBlack)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .padding(.horizontal, 5)
-                        .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
-                        .background(Rectangle().fill(n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08)))
-                        .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
-                        .draggable("N\(n)")
+        PanelCard(title: "PRESET DESIGN", note: sel.map { "slot \(String(format: "%02ld", $0 + 1)) → pick a preset" } ?? "pick a slot on the left", spacing: 4, fill: true) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
+                ForEach(0..<Preset.poolCount, id: \.self) { n in
+                    let at = rig.design.firstIndex(of: n)
+                    HStack(spacing: 3) {
+                        Text(at.map { String(format: "%02ld", $0 + 1) } ?? "")
+                            .font(.hud(7, .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(width: at == nil ? 0 : 14, height: 14)
+                            .background(Rectangle().fill(at == nil ? Color.clear : PastelTheme.hudBlack))
+                        Text(Preset.names[n])
+                            .font(.hud(8, .semibold))
+                            .foregroundStyle(PastelTheme.hudBlack)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 3)
+                    .frame(height: 19)
+                    .background(Rectangle().fill(n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08)))
+                    .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { put(n) }
                 }
             }
             HStack(spacing: PanelMetrics.chipSpacing) {
-                Text("orange = Apple π").font(.hud(7)).foregroundStyle(PastelTheme.textSecondary)
-                Spacer(minLength: 0)
-                ChipButton(title: "DEFAULT 11", filled: false) { d.setPlaylist(Preset.defaultPlaylist) }
+                ChipButton(title: "🗑 EMPTY SLOT", filled: false) {
+                    if let s = sel { var l = rig.design; l[s] = -1; d.setDesign(l) }
+                }
+                .frame(width: 104)
+                .disabled(sel == nil)
+                .unlit(sel == nil)
+                ChipButton(title: "DEFAULT 11", filled: false) { d.setDesign(Preset.defaultPlaylist); sel = nil }
                     .frame(width: 84)
+                Spacer(minLength: 0)
+                Text("orange = Apple π").font(.hud(7)).foregroundStyle(PastelTheme.textSecondary)
             }
         }
-        .dropDestination(for: String.self) { items, _ in dropBack(items.first) }
+    }
+
+    /// a preset into the picked slot (none picked: the first empty one)
+    private func put(_ n: Int) {
+        var l = rig.design
+        guard let s = sel ?? l.firstIndex(of: -1) else { return }
+        if let j = l.firstIndex(of: n) { l.swapAt(s, j) } else { l[s] = n }
+        d.setDesign(l)
+        if sel != nil { sel = min(s + 1, Preset.maxPlaylist - 1) }      // next slot, for filling in a row
     }
 }
 

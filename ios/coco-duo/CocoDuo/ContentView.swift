@@ -141,11 +141,19 @@ final class Director: ObservableObject {
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
 
+    /// PRESET DESIGN: the 11 slots (-1 = empty) -> the playlist (without the empties) -> both Cafes
+    func setDesign(_ slots: [Int]) {
+        var v = Array((slots + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
+        for i in v.indices where v[i] >= Preset.poolCount { v[i] = -1 }
+        rig.design = v
+        setPlaylist(v.filter { $0 >= 0 })
+    }
+
     /// PRESET DESIGN: a new playlist (up to 11 pool ids) -> both Cafes (their BUTTON menu follows)
     func setPlaylist(_ p: [Int]) {
         let v = Array(p.filter { $0 >= 0 && $0 < Preset.poolCount }.prefix(Preset.maxPlaylist))
-        guard !v.isEmpty else { return }
         rig.playlist = v
+        guard !v.isEmpty else { return }                      // all slots empty: the Cafes keep their last list
         let line = "L " + v.map(String.init).joined(separator: " ")
         units.filter { $0.isConnected }.forEach { $0.send(line) }
     }
