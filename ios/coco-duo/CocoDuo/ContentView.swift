@@ -1015,6 +1015,7 @@ private struct HudBar: View {
             switch n {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
+            case 2: textKey(rig.nzSpeed == 1 ? "LFO" : "FAST", on: rig.nzSpeed == 1) { d.setNzSpeed(1 - rig.nzSpeed) }   // FAST <-> LFO
             default: blank
             }
         case .arp:
@@ -1061,6 +1062,21 @@ private struct HudBar: View {
         "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]
+
+    /// a key with a word only (no icon)
+    private func textKey(_ label: String, on: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.hud(8, .semibold))
+                .tracking(0.5)
+                .lineLimit(1)
+                .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
+                .padding(.horizontal, 5)
+                .frame(minWidth: 21)
+                .frame(height: 21)
+                .background(IconSquare(filled: on))
+        }
+    }
 
     private func key(_ name: String, on: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
