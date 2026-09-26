@@ -108,7 +108,7 @@ enum ArpPad {
                          "TIME · FEEDBACK", "PING-PONG · SPREAD", "—", "TAP"]      // (a clean digital delay: no tone / wow)
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
                                              (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
-    static func root(_ x: Double) -> Int { 36 + min(24, Int(x * 25)) }
+    static func root(_ x: Double) -> Int { 36 + min(36, Int(x * 37)) }        // C2 … C5 (with OCTAVES up to C9)
     static func chord(_ y: Double) -> Int { min(6, Int(y * 7)) }
     static func pattern(_ x: Double) -> Int { min(6, Int(x * 7)) }
     static func octaves(_ y: Double) -> Int { 1 + min(3, Int(y * 4)) }
