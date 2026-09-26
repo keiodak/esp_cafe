@@ -128,16 +128,16 @@ private struct DesignCard: View {
 
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
-            // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
-            ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
-                if !g.0.isEmpty {
-                    Text(g.0).font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).frame(height: 9)
+            // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
+            grid([2, 9, 10])
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    grid((0..<Preset.count).filter { ![2, 9, 10].contains($0) })
+                    Text("APPLE π").font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary)
+                    grid(Array(Preset.count..<Preset.poolCount))
                 }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 4), alignment: .leading, spacing: 3) {
-                    ForEach(g.1, id: \.self) { n in cell(n) }
-                }
-                .padding(.bottom, 2)
             }
+            .frame(maxHeight: .infinity)
             // bin · INIT · memories 1–5 (tap = recall, hold = save, with the bin on: tap = erase)
             HStack(spacing: 3) {
                 small("🗑", on: bin) { bin.toggle() }
@@ -175,11 +175,12 @@ private struct DesignCard: View {
             .onLongPressGesture(minimumDuration: 0.6) { if enabled, let hold { hold() } }
     }
 
-    static let groups: [(String, [Int])] = [
-        ("", [2, 9, 10]),                                                   // played from the phone: the top row
-        ("", (0..<Preset.count).filter { ![2, 9, 10].contains($0) }),      // ours, in their own order
-        ("APPLE π", Array(Preset.count..<Preset.poolCount)),              // Apple π, as they come
-    ]
+
+    private func grid(_ ids: [Int]) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
+            ForEach(ids, id: \.self) { n in cell(n) }
+        }
+    }
 
     private func cell(_ n: Int) -> some View {
         let at = rig.design.firstIndex(of: n)
