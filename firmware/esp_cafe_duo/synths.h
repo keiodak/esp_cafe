@@ -172,10 +172,10 @@ int tapsz=sizeof(myPlacers)>>2;
 
 void IRAM_ATTR echo_og() {
   static uint32_t oph = 0;                          // organ phase (32 bit)
-  static int32_t s_earth = 0;
+  static int32_t s_earth = 0, s_earth2 = 0;         // EARTH, 12 bit, two slews (Q8)
   static int initial_earth = 0, boot_timer = 0;
   static bool knob_moved = false;
-  static int cal_min = 255, cal_max = 0;
+  static int cal_min = 4095, cal_max = 0;
   static bool last_frozen = false;
   static bool patched = false;                      // latched "a CV is really moving" state
   static int unpatch_timer = 0;
@@ -200,8 +200,8 @@ void IRAM_ATTR echo_og() {
     rg = audio_frozen_state ? 0 : 1024;
     flip_int = FLIPPERAT ? 2000 : 0;  flip_latch = FLIPPERAT ? true : false;
     skip_int = SKIPPERAT ? 2000 : 0;  skip_latch = SKIPPERAT ? true : false;
-    s_earth = EARTHREAD << 8;
-    boot_timer = 0; knob_moved = false; cal_min = 255; cal_max = 0;
+    s_earth = s_earth2 = earth_raw12 << 8;
+    boot_timer = 0; knob_moved = false; cal_min = 4095; cal_max = 0;
   }
 
   // --- BUTTON: freeze. the recording gain ramps (~23ms) so the loop point is smooth ---
@@ -262,41 +262,42 @@ void IRAM_ATTR echo_og() {
     if (!flip_latch) { flip_latch = true; deep = !deep; }
   } else if (flip_int < 100) flip_latch = false;
 
-  // --- EARTH ---
-  s_earth += ((int32_t)(EARTHREAD << 8) - s_earth) >> 4;
-  int e = s_earth >> 8;
-  if (boot_timer < 2000) { boot_timer++; initial_earth = e; }
+  // --- EARTH (12 bit) ---
+  // EARTH is read 1000x a second (BLE shares ADC2) -> two slews (~3ms each) round off the 1ms steps
+  // and the reading noise, so the organ's pitch glides instead of stepping (a clean tone).
+  s_earth  += ((int32_t)(earth_raw12 << 8) - s_earth)  >> 7;
+  s_earth2 += (s_earth - s_earth2) >> 7;
+  int e = s_earth2 >> 8;                             // 0..4095
+  if (boot_timer < 4000) { boot_timer++; initial_earth = e; }
   else if (!knob_moved) {
     int d = e - initial_earth; if (d < 0) d = -d;
-    if (d > 40) knob_moved = true;
+    if (d > 640) knob_moved = true;                  // a real swing, not the idle offset / noise
   }
-  int k = -1;                                       // -1 = unplugged
+  int32_t rate = 256;                               // Q8, 1.0 = original organ pitch (-1 = unplugged)
   if (knob_moved) {
     static int leak = 0;
     if (e < cal_min) cal_min = e;
     if (e > cal_max) cal_max = e;
-    if (++leak >= 16384) {                           // slowly forget old extremes (~0.4s per step) -> range fits the CV you patch now
+    if (++leak >= 1024) {                            // slowly forget old extremes -> range fits the CV you patch now
       leak = 0;
       if (cal_min < e) cal_min++;
       if (cal_max > e) cal_max--;
     }
     int spread = cal_max - cal_min;
     // hysteresis: become "patched" at a clear swing, drop back only after ~2s of small swing
-    if (!patched) { if (spread >= 60) { patched = true; unpatch_timer = 0; } }
-    else if (spread < 25) { if (++unpatch_timer > 88200) patched = false; }
+    if (!patched) { if (spread >= 960) { patched = true; unpatch_timer = 0; } }
+    else if (spread < 400) { if (++unpatch_timer > 88200) patched = false; }
     else unpatch_timer = 0;
     if (patched && spread > 0) {
-      k = ((e - cal_min) * 255) / spread;
-      if (k > 255) k = 255; if (k < 0) k = 0;
+      int32_t k = ((int32_t)(e - cal_min) << 12) / spread;   // 0..4096, fine steps
+      if (k > 4096) k = 4096; if (k < 0) k = 0;
+      rate = deep ? (k >> 1) : (k >> 2);             // FM: 0 .. 4x  (x2: 0 .. 8x)
     }                                                // else: jitter / nothing patched -> plain organ
   }
 
   // --- ORGAN ---
-  int32_t rate = 256;                               // Q8, 1.0 = original organ pitch
-  if (k >= 0) rate = deep ? k * 8 : k * 4;          // FM: 0 .. ~4x  (x2: 0 .. ~8x)
   rate_s += ((rate << 8) - rate_s) >> 6;            // ~1.5ms slew: no jumps on plug/unplug
-  rate = rate_s >> 8;
-  oph += (uint32_t)(((uint64_t)10713070u * rate) >> 8);   // 10713070 = 110 Hz at 44.1k
+  oph += (uint32_t)(((uint64_t)10713070u * rate_s) >> 16);   // 10713070 = 110 Hz at 44.1k
   int pins = 2 * __builtin_popcount(oph >> 27);     // 5 octave squares x 2 pins = 0..10
   {
     uint32_t mask = 0;
