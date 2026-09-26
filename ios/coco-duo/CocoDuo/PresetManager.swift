@@ -22,6 +22,38 @@ struct PresetManagerView: View {
     private func tapSlot(_ i: Int) {
         if bin { var l = rig.design; l[i] = -1; d.setDesign(l) } else { sel = i }
     }
+    /// the right column's cards: BLE MODE / MULTI / ARP, each only while a Cafe is on that preset
+    @ViewBuilder private var rightCards: some View {
+                if rig.preset.contains(Preset.ble) {
+                PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
+                    HStack(spacing: PanelMetrics.chipSpacing) {
+                        ForEach(0..<4, id: \.self) { m in
+                            ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
+                                d.setMode(m)
+                            }
+                        }
+                    }
+                    .disabled(rig.ctxPreset != Preset.ble)
+                    .unlit(rig.ctxPreset != Preset.ble)
+                    if rig.padSet == .grain {
+                        GrainOptions(d: d, grain: d.grain)
+                    }
+                    if rig.padSet == .noise {
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ForEach(0..<3, id: \.self) { s in
+                                ChipButton(title: ["FAST", "SLOW", "CRAWL"][s], filled: rig.nzSpeed == s) { d.setNzSpeed(s) }
+                            }
+                        }
+                    }
+                }
+                }
+                if rig.preset.contains(Preset.multi) {
+                    MultiCard(d: d, rig: rig)
+                }
+                if rig.preset.contains(Preset.arp) {
+                    ArpCard(d: d, rig: rig)
+                }
+    }
     @State private var presetsH: CGFloat = 0
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
@@ -68,35 +100,15 @@ struct PresetManagerView: View {
                     DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
                         .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                 } else {
-                if rig.preset.contains(Preset.ble) {
-                PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<4, id: \.self) { m in
-                            ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
-                                d.setMode(m)
-                            }
+                    // the same height as PRESETS: the cards, and NOW filling what is left (a scroll if they don't fit)
+                    ViewThatFits(in: .vertical) {
+                        VStack(spacing: 8) {
+                            rightCards
+                            NowCard(rig: rig).frame(minHeight: 64, maxHeight: .infinity)
                         }
+                        ScrollView(showsIndicators: false) { VStack(spacing: 8) { rightCards } }
                     }
-                    .disabled(rig.ctxPreset != Preset.ble)
-                    .unlit(rig.ctxPreset != Preset.ble)
-                    if rig.padSet == .grain {
-                        GrainOptions(d: d, grain: d.grain)
-                    }
-                    if rig.padSet == .noise {
-                        HStack(spacing: PanelMetrics.chipSpacing) {
-                            ForEach(0..<3, id: \.self) { s in
-                                ChipButton(title: ["FAST", "SLOW", "CRAWL"][s], filled: rig.nzSpeed == s) { d.setNzSpeed(s) }
-                            }
-                        }
-                    }
-                }
-                }
-                if rig.preset.contains(Preset.multi) {
-                    MultiCard(d: d, rig: rig)
-                }
-                if rig.preset.contains(Preset.arp) {
-                    ArpCard(d: d, rig: rig)
-                }
+                    .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                 }
             }
         }
@@ -448,4 +460,37 @@ struct UpdateRow: View {
 private struct PresetsHeight: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// NOW: what the two Cafes are on and the tempo, big (fills the right column below the cards)
+private struct NowCard: View {
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        PanelCard(title: "NOW", note: "Cafe BLE") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(0..<2, id: \.self) { s in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        HudTag(text: s == 0 ? "A" : "B", size: 9)
+                        Text(Preset.tag(rig.preset[s]))
+                            .font(.hudBig(22))
+                            .foregroundStyle(PastelTheme.hudBlack)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                }
+                Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Spacer(minLength: 0)
+                    Text("\(Int(rig.bpm.rounded()))")
+                        .font(.hudBig(34))
+                        .foregroundStyle(PastelTheme.hudBlack)
+                    Text("BPM")
+                        .font(.hud(8, .semibold))
+                        .foregroundStyle(PastelTheme.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
 }
