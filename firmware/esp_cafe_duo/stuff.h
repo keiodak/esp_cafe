@@ -445,6 +445,7 @@ uint8_t *delaybuffb;
 #define DCHUNKS (DELAYSIZE >> DCHUNK_BITS)
 #define DCHUNK_BYTES (((1 << DCHUNK_BITS) * 3) >> 1)
 uint8_t *dchunk[DCHUNKS];
+RTC_NOINIT_ATTR static uint8_t dchunk_rtc[DCHUNK_BYTES];   // the last piece lives in RTC memory: 1.5 KB more heap for Bluetooth
 
 uint8_t *delptr;
 static int t;
@@ -523,7 +524,8 @@ void initDEL() {
   Serial.println("    -> initDEL: Allocating delay buffers..."); //For Debugging
   Serial.printf("    -> free %u, largest block %u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   bool dok = true;
-  for (int i = 0; i < DCHUNKS; i++) { dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT); if (!dchunk[i]) dok = false; }
+  for (int i = 0; i < DCHUNKS - 1; i++) { dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT); if (!dchunk[i]) dok = false; }
+  dchunk[DCHUNKS - 1] = dchunk_rtc;
   delaybuffa = dchunk[0]; delaybuffb = dchunk[DCHUNKS - 1];
 
   // NEW FIRMWARE

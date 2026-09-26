@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.24"
+#define FW_VERSION "3.25"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -728,7 +728,7 @@ void ota_cmd(char *s) {
     REG(I2S_CONF_REG)[0] &= ~(BIT(5));
     detachInterrupt(2);
     ota_active = true;
-    for (int i = 0; i < DCHUNKS; i++) { if (dchunk[i]) free(dchunk[i]); dchunk[i] = nullptr; }
+    for (int i = 0; i < DCHUNKS; i++) { if (dchunk[i] && dchunk[i] != dchunk_rtc) free(dchunk[i]); dchunk[i] = nullptr; }
     delaybuffa = delaybuffb = nullptr;
     ota_rb = (uint8_t *)malloc(OTA_RING);
     if (!ota_rb) ota_fail("no memory");
@@ -804,16 +804,13 @@ void (*playlist_main[])() = {
 
 
 //////ORIGINAL FIRMWARE
-// EARTH on core 0 (the audio interrupt lives on core 1): ADC2 channel 0 = GPIO 4, 1000x a second
-static StaticTask_t ea_tcb;
-static StackType_t ea_stack[1280];                 // (a task stack must be in internal DRAM: FreeRTOS refuses RTC memory — v3.21 crashed at boot)
-static void earth_task(void *) {
-  for (;;) {
-    int sum = 0, n = 0;                        // 4 conversions averaged: less noise on EARTH
-    for (int k = 0; k < 4; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
-    if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
-    vTaskDelay(1);
-  }
+// EARTH on core 0 (the audio interrupt lives on core 1): ADC2 channel 0 = GPIO 4, 1000x a second.
+// Read from an esp_timer callback: the esp_timer task already runs on core 0, so no task (and no stack) of our own
+// (v3.21–3.24 had one: 1.6 KB the Bluetooth heap missed).
+static void earth_tick(void *) {
+  int sum = 0, n = 0;                            // 2 conversions averaged
+  for (int k = 0; k < 2; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
+  if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
 }
 
 void setup() {
@@ -843,7 +840,8 @@ void setup() {
   Serial.printf("[1] SETUPPERS Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
   // EARTH on ADC2 channel 0 (GPIO 4), 12 bits, 2.5 dB like the original pattern table (ADC2_PATT = 0x0D)
   adc2_config_channel_atten(ADC2_CHANNEL_0, ADC_ATTEN_DB_2_5);
-  xTaskCreateStaticPinnedToCore(earth_task, "earth", sizeof(ea_stack), NULL, 2, ea_stack, &ea_tcb, 0);
+  { esp_timer_create_args_t ta = {}; ta.callback = earth_tick; ta.name = "earth";
+    esp_timer_handle_t th; if (esp_timer_create(&ta, &th) == ESP_OK) esp_timer_start_periodic(th, 1000); }
   { int r = 0; esp_err_t e = adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r);
     if (e == ESP_OK) { earth_raw12 = r; earth_now = r >> 4; }
     Serial.printf("[1] EARTH (GPIO 4, ADC2) now %d / 4095 (%s)\n", r, e == ESP_OK ? "ok" : esp_err_to_name(e)); }
@@ -966,7 +964,7 @@ void loop() {
     REG(IO_MUX_GPIO34_REG)[0] |= FUN_IE; REG(IO_MUX_GPIO35_REG)[0] |= FUN_IE;   // input enabled
   }
 
-  // EARTH: read by its own task on core 0 (see earth_task) — not here: adc2_get_raw holds a spinlock that
+  // EARTH: read by an esp_timer callback on core 0 (see earth_tick) — not here: adc2_get_raw holds a spinlock that
   // shuts interrupts off on its core for each conversion, and on this core that stalled the audio interrupt
   // 1000x a second (YELLOW's organ crackled).
 
