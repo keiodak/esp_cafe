@@ -377,22 +377,28 @@ private struct ArpCard: View {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "SPEECH", filled: rig.arpMode == 1) { d.setArpMode(1) }
             }
-            if rig.arpMode == 1 { SpeechControls(d: d, rig: rig) } else {
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: rig.arpPlaying ? "STOP" : "PLAY", filled: rig.arpPlaying) { d.arpToggle() }
-                ChipButton(title: "SYNC", filled: false) { d.arpSync() }
-                ChipButton(title: "TAP", filled: false) { d.tapTempo() }
-                ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
-                ChipButton(title: "EARTH → NOTES", filled: rig.arpEarth) { rig.arpEarth.toggle(); d.applyArp() }
-                ChipButton(title: rig.arpStereo ? "STEREO" : "MONO", filled: rig.arpStereo) { rig.arpStereo.toggle(); d.applyArp(); d.refresh() }
-            }
-            PanelRow(label: "GLIDE", value: Binding(get: { rig.arpGlide }, set: { rig.arpGlide = $0; d.applyArp() }))
-            PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))
-            PanelRow(label: "LOW", value: Binding(get: { rig.arpLow }, set: { rig.arpLow = $0; d.applyArp() }))
-            Text("Plug the iPhone's audio out into the Cafe's input. Top pads = the arpeggio (7 patterns, 7 chords), bottom pads = the Cafe's stereo tap delay (main = L, ASH = R). Tempo both ways: BPM here -> Cafes; SKIP on a Cafe = tap -> the arpeggio follows and restarts on the beat.")
-                .font(.hud(8))
-                .foregroundStyle(PastelTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // both layers are laid out on top of each other: the card keeps one size whichever is shown
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: PanelMetrics.chipSpacing) {
+                        ChipButton(title: rig.arpPlaying ? "STOP" : "PLAY", filled: rig.arpPlaying) { d.arpToggle() }
+                        ChipButton(title: "SYNC", filled: false) { d.arpSync() }
+                        ChipButton(title: "TAP", filled: false) { d.tapTempo() }
+                        ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+                    }
+                    HStack(spacing: PanelMetrics.chipSpacing) {
+                        ChipButton(title: "EARTH → NOTES", filled: rig.arpEarth) { rig.arpEarth.toggle(); d.applyArp() }
+                        ChipButton(title: rig.arpStereo ? "STEREO" : "MONO", filled: rig.arpStereo) { rig.arpStereo.toggle(); d.applyArp(); d.refresh() }
+                    }
+                    PanelRow(label: "GLIDE", value: Binding(get: { rig.arpGlide }, set: { rig.arpGlide = $0; d.applyArp() }))
+                    PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))
+                    PanelRow(label: "LOW", value: Binding(get: { rig.arpLow }, set: { rig.arpLow = $0; d.applyArp() }))
+                }
+                .opacity(rig.arpMode == 0 ? 1 : 0)
+                .allowsHitTesting(rig.arpMode == 0)
+                SpeechControls(d: d, rig: rig)
+                    .opacity(rig.arpMode == 1 ? 1 : 0)
+                    .allowsHitTesting(rig.arpMode == 1)
             }
         }
     }
@@ -404,8 +410,9 @@ private struct SpeechControls: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
         TextField("", text: $rig.speechText, axis: .vertical)
-            .lineLimit(2...3)
+            .lineLimit(2, reservesSpace: true)
             .font(.hud(10))
             .foregroundStyle(PastelTheme.hudBlack)
             .padding(5)
@@ -415,16 +422,21 @@ private struct SpeechControls: View {
             ChipButton(title: "DICE", filled: false) { d.speechDice() }
             ChipButton(title: rig.speechPlaying ? "STOP" : "PLAY", filled: rig.speechPlaying) { d.speechToggle() }
             ChipButton(title: "SYNC", filled: false) { d.speechSync() }
+        }
+        // the voice: ◀ name ▶ on a row of its own (the name takes the room between the arrows)
+        HStack(spacing: PanelMetrics.chipSpacing) {
             ChipButton(title: "◀", filled: false) { d.speechVoiceStep(-1) }
             Text(voiceName)
                 .font(.hud(8, .semibold))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity)
             ChipButton(title: "▶", filled: false) { d.speechVoiceStep(1) }
         }
         PanelRow(label: "RATE", value: Binding(get: { rig.speechRate }, set: { rig.speechRate = $0 }))
         PanelRow(label: "LEVEL", value: Binding(get: { rig.speechLevel }, set: { rig.speechLevel = $0; d.applySpeech() }))
+        }
     }
 
     private var voiceName: String {
