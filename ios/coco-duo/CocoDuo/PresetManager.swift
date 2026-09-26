@@ -140,6 +140,49 @@ private struct DesignCard: View {
     }
 }
 
+/// UPDATE (in the CAFES panel): write a new firmware over Bluetooth to A / B / both
+struct UpdateCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+    @ObservedObject var a: CafeUnit
+    @ObservedObject var b: CafeUnit
+    @State private var picking = false
+    @State private var fileNote = ""
+    private let who = ["A", "B", "A + B"]
+
+    var body: some View {
+        PanelCard(title: "UPDATE", note: "firmware over bluetooth", spacing: 5, fill: true) {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ForEach(0..<3, id: \.self) { t in
+                    ChipButton(title: who[t], filled: rig.updTarget == t) { rig.updTarget = t }
+                }
+            }
+            ChipButton(title: "CHOOSE .BIN AND WRITE", filled: a.ota != nil || b.ota != nil) {
+                if a.ota == nil && b.ota == nil { picking = true }
+            }
+            UpdateRow(unit: a)
+            UpdateRow(unit: b)
+            if !fileNote.isEmpty {
+                Text(fileNote)
+                    .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                    .foregroundStyle(PastelTheme.textSecondary)
+            }
+            Text("Arduino IDE: Sketch > Export Compiled Binary → esp_cafe_duo.ino.bin (not .merged / .bootloader). The Cafe restarts with it.")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.data]) { result in
+            guard case .success(let url) = result else { return }
+            let ok = url.startAccessingSecurityScopedResource()
+            defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { fileNote = "could not read the file"; return }
+            fileNote = "\(url.lastPathComponent) · \(data.count / 1024) KB"
+            d.update([UInt8](data))
+        }
+    }
+}
+
 /// GRAIN's switches: MOVE (a moving pitch), and the marks (places to take grains from)
 private struct GrainOptions: View {
     let d: Director
