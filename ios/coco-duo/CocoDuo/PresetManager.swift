@@ -25,8 +25,8 @@ struct PresetManagerView: View {
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
-            PanelColumns {
-                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
+            PanelColumns(equalHeight: design) {
+                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3, fill: design) {
                     if design {
                         ForEach(0..<Preset.maxPlaylist, id: \.self) { i in
                             SlotRow(i: i, n: rig.design[i], picked: sel == i)
@@ -122,13 +122,13 @@ private struct DesignCard: View {
     @Binding var bin: Bool
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 4) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), alignment: .leading, spacing: 4) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 2) {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
-                .padding(.bottom, 4)
+                .padding(.bottom, 2)
             }
             // bin · INIT · memories 1–5 (tap = recall, hold = save, with the bin on: tap = erase)
             HStack(spacing: 3) {
@@ -148,7 +148,7 @@ private struct DesignCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.top, 3)
+            .padding(.top, 1)
         }
     }
 
@@ -158,7 +158,7 @@ private struct DesignCard: View {
             .font(.hud(9, .semibold))
             .foregroundStyle(on ? Color.white : (enabled ? PastelTheme.hudBlack : PastelTheme.hudLine))
             .padding(.horizontal, 5)
-            .frame(minWidth: 24, minHeight: 22)
+            .frame(minWidth: 22, minHeight: 19)
             .background(Rectangle().fill(on ? PastelTheme.hudOrange : PastelTheme.padScreen))
             .overlay(Rectangle().strokeBorder(enabled ? PastelTheme.hudBlack : PastelTheme.hudLine, lineWidth: 1))
             .overlay(alignment: .bottom) { if filled { Rectangle().fill(PastelTheme.hudBlack).frame(height: 3).padding(.horizontal, 3).padding(.bottom, 2) } }
@@ -189,7 +189,7 @@ private struct DesignCard: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 3)
-        .frame(height: 22)
+        .frame(height: 18)
         .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
         .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
         .contentShape(Rectangle())
