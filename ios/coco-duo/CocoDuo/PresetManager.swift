@@ -49,6 +49,7 @@ struct PresetManagerView: View {
                         HStack(spacing: PanelMetrics.chipSpacing) {
                             ChipButton(title: "FAST", filled: rig.nzSpeed == 0) { d.setNzSpeed(0) }
                             ChipButton(title: "LFO", filled: rig.nzSpeed == 1) { d.setNzSpeed(1) }
+                            ChipButton(title: "DIST", filled: rig.nzDist) { d.setNzDist(!rig.nzDist) }
                         }
                     }
                 }

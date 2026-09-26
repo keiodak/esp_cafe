@@ -544,6 +544,8 @@ final class Director: ObservableObject {
         for i in 0..<4 { padMoved(i) }
     }
 
+    func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
+
     func noiseDice() {
         rig.nzDice()
         for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }
@@ -668,7 +670,8 @@ private struct MainScreen: View {
             return { x, y in SpPad.caption(i, x, y) }
         case .sidrax:
             if i >= 4 { return nil }
-            return { x, y in SxPad.caption(i, x, y) }
+            let r = rig
+            return { x, y in SxPad.caption(i, x, y, rig: r) }
         default:
             return nil
         }
@@ -1016,7 +1019,7 @@ private struct HudBar: View {
             case 0: key("dice") { d.noiseDice() }
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }
             case 2: textKey(rig.nzSpeed == 1 ? "LFO" : "FAST", on: rig.nzSpeed == 1) { d.setNzSpeed(1 - rig.nzSpeed) }   // FAST <-> LFO
-            default: blank
+            default: textKey("DIST", on: rig.nzDist) { d.setNzDist(!rig.nzDist) }                              // overdrive on / off
             }
         case .arp:
             switch n {

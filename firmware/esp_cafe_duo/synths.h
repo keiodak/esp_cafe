@@ -1516,6 +1516,7 @@ volatile uint32_t nz_oinc = 0;               // OSC: base pitch (Q32 per sample)
 volatile int32_t nz_olvl = 0, nz_ofold = 0;  // OSC level Q8 (0 = off) · FOLD amount Q12
 volatile int32_t nz_oxfm = 0;                // cross FM between the three oscillators, Q8
 volatile bool nz_reset = true, nz_burst = false;
+volatile bool nz_dist = false;  // DIST (N 16): an overdrive on the way out
 volatile int nz_slow = 0;  // source speed, all gliding: 0 FAST (clock/64) · 1 SLOW (/4096, LFO) · 2 CRAWL (/131072, minutes)
 volatile int nz_gate = 0;
 
@@ -1679,14 +1680,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
     vq += (((tgt << 12) - vq) >> k);
     val = vq >> 12;
   }
-  if (nz_slow) {                                            // LFO: a smooth, round swing instead of the noise source
-    static uint32_t lph = 0;
-    lph += nz_lfoinc;
-    int32_t x = (int32_t)(lph >> 20) - 2048;
-    int32_t sn = (int32_t)(((int64_t)x * (2048 - (x < 0 ? -x : x))) >> 9);   // ±2048
-    val = sn;
-    if (nz_slow == 1) nz_shclk = false;
-  }
+  // (LFO: the source itself, clocked 4096x slower and glided — a slow wander, not a round sine)
   val = (val * 3) >> 2;
   // gate
   gph += nz_slow == 2 ? (nz_ginc >> 8) : nz_slow ? (nz_ginc >> 5) : nz_ginc;   // the gate slows down too
@@ -1744,8 +1738,10 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   if (lb < -32768) lb = -32768;
   if (bb > 32767) bb = 32767;
   if (bb < -32768) bb = -32768;
-  *rout = (lb * nz_gain) >> 8;
-  return (la * nz_gain) >> 8;
+  int32_t ol = (la * nz_gain) >> 8, orr = (lb * nz_gain) >> 8;
+  if (nz_dist) { ol = (nz_tanh(ol * 5) * 7) >> 3; orr = (nz_tanh(orr * 5) * 7) >> 3; }   // DIST: driven into a round clip
+  *rout = orr;
+  return ol;
 }
 
 // ==========================================
@@ -1764,11 +1760,17 @@ volatile int32_t sx_root = 0;              // 1/256 oct above 30 Hz
 volatile int32_t sx_spread = 3072;         // a plate's range, 1/256 oct
 volatile int32_t sx_mfm = 0, sx_chaos = 0, sx_glitch = 0, sx_self = 0;   // Q12
 volatile int32_t sx_scale = 1, sx_key = 0; // scale index (0 = free), key (1/256 oct)
+volatile int32_t sx_chord = 1;             // CHORD: which notes the four plates are (0..6)
+// in a scale (degrees; 100 = the octave): STEPS · THIRDS (a 7th chord) · TRIAD + 8ve · FOURTHS · FIFTHS · OPEN · WIDE
+static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}, {0, 3, 6, 9}, {0, 4, 8, 12}, {0, 4, 9, 13}, {0, 100, 102, 104}};
+// FREE (semitones): CLUSTER · MAJ7 · MIN7 · SUS · QUARTAL · FIFTHS · OCTAVES
+static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
 volatile int32_t sx_pan = 2048;            // Q12: how far press / release swing to the sides
 volatile bool sx_aligned = true;
-volatile uint32_t sx_base = 4026531;       // 30 Hz, Q32 per sample (set in sx_update)
+volatile uint32_t sx_base = 4389000;       // C1 (32.7 Hz), Q32 per sample (set in sx_update)
+volatile int32_t sx_oct = 2;               // SCALE mode: the octave of the key (0..4)
 volatile int16_t sx_x[4] = {200, 450, 650, 850}, sx_y[4] = {0, 0, 0, 0}, sx_a[4] = {0, 0, 0, 0};
 volatile bool sx_reset = true, sx_burst = false;
 volatile int sx_gate = 0;
@@ -1796,16 +1798,25 @@ static int32_t sx_tick(int32_t *rout) {
   static bool held[4] = {false, false, false, false};
   static int32_t tl = 0, tr = 0;
   if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } tl = tr = 0; }
-  int32_t em = pc_emod * 3;                                  // EARTH: about ±1.5 octaves at full swing
+  static int32_t emf = 0, env1[4] = {0, 0, 0, 0};
+  emf += ((pc_emod * 3 * 256) - emf) >> 10;                // EARTH, smoothed hard: its noise must not reach the pitch
+  int32_t em = emf >> 8;
   int32_t touched = 0, l = 0, r = 0;
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
     if (a > 0) touched = 1;
-    // pitch: the plate's place (a fourth apart) + its X over the spread, snapped when ALIGNED, glided a little
-    int32_t o = (k * 5 * 256) / 12 + (int32_t)(((int64_t)sx_x[k] * sx_spread) / 1000);
-    o += sx_root - sx_key;
-    if (sx_aligned) o = sx_snap(o);
-    o += sx_key;
+    // pitch: each plate is ONE note (like a Sidrax bar) — moving on it changes nothing. CHORD picks which notes the
+    // four plates are: degrees of the SCALE on the KEY, or (FREE) semitones above the key. OCTAVE = the register.
+    int32_t o;
+    int ch = sx_chord < 0 ? 0 : (sx_chord > 6 ? 6 : sx_chord);
+    if (sx_aligned && sx_scale >= 1 && sx_scale <= 6) {
+      int n = 0; while (n < 12 && sx_scales[sx_scale][n] >= 0) n++;
+      int deg = sx_chdeg[ch][k];
+      if (deg >= 100) deg = n * (deg - 99);                  // (100 = an octave up, in any scale)
+      o = sx_oct * 256 + sx_key + ((sx_scales[sx_scale][deg % n] + 12 * (deg / n)) * 256) / 12;
+    } else {
+      o = sx_oct * 256 + sx_key + (sx_chsem[ch][k] * 256) / 12;
+    }
     pit[k] += (o - pit[k]) >> 7;
     int32_t oo = pit[k] + em;
     if (oo < 0) oo = 0; if (oo > 7 * 256) oo = 7 * 256;
@@ -1829,9 +1840,12 @@ static int32_t sx_tick(int32_t *rout) {
     }
     lastLeft[k] = left;
     // level: the touched area, a quick rise, RELEASE after lifting
+    // level: two smoothing stages (a soft S-shaped rise of ~40 ms, no steps from the plate's updates), RELEASE after
     int32_t tg = (a * 4096) / 1000;
-    if (tg > env[k]) env[k] += (tg - env[k]) >> 6;
-    else env[k] += (int32_t)(((int64_t)(tg - env[k]) * sx_rel) >> 16);
+    int32_t tq = tg << 12;                                   // (12 extra bits: a long release must not stall)
+    if (tq > env1[k]) env1[k] += ((tq - env1[k]) >> 9) + 1;
+    else env1[k] += (int32_t)(((int64_t)(tq - env1[k]) * sx_rel) >> 16);
+    env[k] += ((env1[k] >> 12) - env[k]) >> 8;
     int32_t v = (tri * env[k]) >> 12;
     out[k] = tri;                                            // (the circle hears the oscillator itself)
     // PAN: pressed -> one side, released -> the other (alternating per plate)

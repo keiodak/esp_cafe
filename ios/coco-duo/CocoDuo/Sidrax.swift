@@ -1,29 +1,51 @@
 // Sidrax.swift — coco duo (k.odk)
 // SIDRAX: mode 5 of the BLE preset, after Ciat-Lonbarde's Sidrax Organ (firmware: sx_tick, "S" lines).
-// Plain triangle oscillators, one per touch PLATE (bottom row): the touched AREA = the volume, X = the plate's tuning.
-// Top row: SCALE · KEY (the plates snap to it; FREE = anywhere) · FM · SELF (mutual FM between the four, and each on
-// itself) · CHAOS · GLITCH (each one FMs the one on its right, in a circle · a triangle turns round when the one on
-// its left crosses zero) · PITCH · SPREAD. ALIGN off = free whatever the scale. HOLD keeps the plates sounding.
+// Plain triangle oscillators, one per touch PLATE (bottom row): each plate is one note, the touched AREA = the volume.
+// Top row: SCALE · KEY (left) and CHORD · OCTAVE (right) decide the four notes; in between FM · SELF (mutual FM, and
+// each on itself) and CHAOS · GLITCH (each one FMs the one on its right, in a circle · a triangle turns round when the
+// one on its left crosses zero). ALIGN off = FREE (the chords in semitones). HOLD keeps the plates sounding.
 
 import SwiftUI
 import UIKit
 
 enum SxPad {
-    static let titles = ["SCALE · KEY", "FM · SELF", "CHAOS · GLITCH", "PITCH · SPREAD",
+    static let titles = ["SCALE · KEY", "FM · SELF", "CHAOS · GLITCH", "CHORD · OCTAVE",
                          "PLATE 1", "PLATE 2", "PLATE 3", "PLATE 4"]
-    static let starts: [(Double, Double)] = [(0.15, 0.0), (0.0, 0.0), (0.0, 0.0), (0.35, 0.45),
+    static let starts: [(Double, Double)] = [(0.15, 0.0), (0.0, 0.0), (0.0, 0.0), (0.2, 0.5),
                                              (0.2, 0.3), (0.45, 0.3), (0.65, 0.3), (0.85, 0.3)]
     static let scales = ["FREE", "PENTA", "MAJOR", "MINOR", "WHOLE", "CHROMA", "FIFTHS"]
+    static let chordsInScale = ["STEPS", "THIRDS", "TRIAD+8", "FOURTHS", "FIFTHS", "OPEN", "WIDE"]
+    static let chordsFree = ["CLUSTER", "MAJ7", "MIN7", "SUS", "QUARTAL", "FIFTHS", "OCTAVES"]
+    /// (the firmware's tables, to name each plate's note)
+    static let scaleSemis: [[Int]] = [[0], [0, 2, 4, 7, 9], [0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10],
+                                      [0, 2, 4, 6, 8, 10], Array(0...11), [0, 7]]
+    static let chordDeg: [[Int]] = [[0, 1, 2, 3], [0, 2, 4, 6], [0, 2, 4, 100], [0, 3, 6, 9], [0, 4, 8, 12], [0, 4, 9, 13], [0, 100, 102, 104]]
+    static let chordSemi: [[Int]] = [[0, 1, 2, 3], [0, 4, 7, 11], [0, 3, 7, 10], [0, 5, 7, 10], [0, 5, 10, 15], [0, 7, 14, 21], [0, 12, 19, 24]]
+    /// plate k's note name, as the Cafe plays it
+    static func note(_ k: Int, rig: Rig) -> String {
+        let a = rig.sxAxes
+        let sc = min(6, Int(a[0].x * 6.99)), key = min(11, Int(a[0].y * 11.99))
+        let ch = min(6, Int(a[3].x * 6.99)), oc = min(4, Int(a[3].y * 4.99))
+        var semi: Int
+        if rig.sxAligned && sc >= 1 {
+            let t = scaleSemis[sc], n = t.count
+            var d = chordDeg[ch][k]
+            if d >= 100 { d = n * (d - 99) }
+            semi = t[d % n] + 12 * (d / n)
+        } else { semi = chordSemi[ch][k] }
+        let m = 24 + 12 * oc + key + semi                 // C1 = midi 24
+        return "\(noteNames[m % 12])\(m / 12 - 1)"
+    }
     static let noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+    static func caption(_ i: Int, _ x: Double, _ y: Double, rig: Rig) -> String {
+        let scaleOn = rig.sxAligned && Int(rig.sxAxes[0].x * 6.99) >= 1
         switch i {
         case 0: return "\(scales[min(6, Int(x * 6.99))]) · \(noteNames[min(11, Int(y * 11.99))])"
         case 1: return "FM \(Int(x * 100))% · SELF \(Int(y * 100))%"
         case 2: return "CHAOS \(Int(x * 100))% · GLITCH \(Int(y * 100))%"
         case 3:
-            let hz = 30 * pow(2, x * 5)
-            let m = Int((12 * log2(hz / 440) + 69).rounded())
-            return "\(noteNames[((m % 12) + 12) % 12])\(m / 12 - 1) · ±\(Int(y * 24)) st"
+            let c = min(6, Int(x * 6.99)), o = min(4, Int(y * 4.99))
+            return "\(scaleOn ? chordsInScale[c] : chordsFree[c]) · C\(o + 1)"
         default: return ""
         }
     }
@@ -73,7 +95,7 @@ struct PlatePad: View {
             .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomLeading) {
-            Text(a > 0 ? "\(Int(a * 100))%" : "—")
+            Text(SxPad.note(k, rig: rig) + (a > 0 ? " · \(Int(a * 100))%" : ""))
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(PastelTheme.hudBlack.opacity(0.7))
                 .padding(.leading, 8).padding(.bottom, 6)

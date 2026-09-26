@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.46"
+#define FW_VERSION "3.47"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -396,7 +396,7 @@ static const int16_t nz_default[16] = {450, 500, 700, 350, 600, 0, 350, 600, 650
 void nz_update() {
   float hz = clock_hz(), p[15];
   for (int i = 0; i < 15; i++) p[i] = nz_p[i] / 1000.0f;
-  nz_slow = nz_p[15] > 0 ? 1 : 0;                                // 15 = FAST 0 · LFO 500 (a round LFO moves pitch, fold and filter; no hiss)
+  nz_slow = nz_p[15] > 0 ? 1 : 0;                                // 15 = FAST 0 · LFO 500 (a slow wander moves pitch, fold and filter; no hiss)
   float base = 16.0f * powf(2.0f, p[0] * 8.9f);                 // 16 .. ~7600 samples
   float l[3] = {base, base * (1.13f + 0.50f * p[1]), base * (1.29f + 1.10f * p[1])};
   for (int i = 0; i < 3; i++) { if (l[i] > 8000) l[i] = 8000; if (l[i] < 8) l[i] = 8; nz_len[i] = (int32_t)l[i]; }
@@ -424,22 +424,22 @@ void nz_update() {
 
 // ---- SIDRAX parameters (k.odk). "S <id> <0..1000>" ----
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
-//  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 pitch (30 Hz .. ~1 kHz)  7 spread (0 .. 2 oct)
+//  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
-  sx_base = (uint32_t)(30.0f / hz * 4294967295.0f);
+  sx_base = (uint32_t)(32.703f / hz * 4294967295.0f);   // C1
   sx_scale = (int32_t)(p[0] * 6.99f);
   sx_key = ((int32_t)(p[1] * 11.99f)) * 256 / 12;
   sx_mfm = (int32_t)(p[2] * p[2] * 4096.0f);
   sx_self = (int32_t)(p[3] * p[3] * 4096.0f);
   sx_chaos = (int32_t)(p[4] * p[4] * 4096.0f);
   sx_glitch = (int32_t)(p[5] * 4096.0f);
-  sx_root = (int32_t)(p[6] * 5.0f * 256.0f);
-  sx_spread = (int32_t)(p[7] * 2.0f * 256.0f);
-  sx_tone = 4096;
-  sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.35f * hz))) * 6.0f) + 1;   // 0.35 s after lifting
+  sx_chord = (int32_t)(p[6] * 6.99f);                        // CHORD (7)
+  sx_oct = (int32_t)(p[7] * 4.99f);                          // OCTAVE: C1 .. C5
+  sx_tone = (int32_t)(4096.0f * (1.0f - expf(-6.2832f * 7000.0f / hz)));   // a gentle 7 kHz roll-off (no edge)
+  sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.45f * hz)))) + 1;          // a little release (~0.45 s)
   sx_pan = 2048;
   sx_aligned = sx_p[8] >= 500;
 }
@@ -714,6 +714,7 @@ void pc_line(char *s) {
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
                 if (s[0] == 'Y' && id >= 0 && id < 13) { dl_p[id] = (int16_t)val; dl_update(); }
                 if (s[0] == 'N' && id >= 0 && id < 16) { nz_p[id] = (int16_t)val; nz_update(); }
+                if (s[0] == 'N' && id == 16) nz_dist = val > 0;   // DIST
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
