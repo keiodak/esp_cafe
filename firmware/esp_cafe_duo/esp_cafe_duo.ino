@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.48"
+#define FW_VERSION "3.49"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -353,6 +353,7 @@ void bj_fill_table() { for (int i = 0; i < 256; i++) bj_exp[i] = (uint32_t)(6553
 static const float beat_div[9] = {0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 0.75f, 1.0f, 1.5f, 2.0f, 4.0f};
 static inline int div_index(int v) { int i = (v * 8 + 500) / 1000; return i < 0 ? 0 : (i > 8 ? 8 : i); }
 static inline float clock_hz() { return mo_hz > 1000 ? mo_hz : 32000; }
+volatile float sx_hz = 0;   // SIDRAX: the clock measured over 4 s (mo_hz may be 3 % off: two Cafes then beat — a chorus)
 
 // ---- DELAY parameters (k.odk). "Y <id> <0..1000>" ----
 //  0 time (free: 10 ms .. 1.5 s; SYNC / LINK: steps through the divisions)  1 R time vs L (0.5x .. 2x, 500 = same)
@@ -429,7 +430,7 @@ void nz_update() {
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
-  sx_base = (uint32_t)(32.703f / hz * 4294967295.0f);   // C1
+  sx_base = (uint32_t)(32.703f / (sx_hz > 1000 ? sx_hz : hz) * 4294967295.0f);   // C1 (on the exactly measured clock)
   sx_scale = (int32_t)(p[0] * 6.99f);
   sx_key = ((int32_t)(p[1] * 11.99f)) * 256 / 12;
   sx_mfm = (int32_t)(p[2] * p[2] * 4096.0f);
@@ -1028,6 +1029,15 @@ void loop() {
     float hz = (n - hz_n) * 1000.0f / (float)(millis() - hz_t);
     hz_t = millis(); hz_n = n;
     if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
+  }
+  // SIDRAX's pitches on the clock as it really is: measured over 4 s (±0.03 %), retuned when it moves 0.05 %
+  static uint32_t sxh_t = 0, sxh_n = 0;
+  if (millis() - sxh_t >= 4000) {
+    uint32_t n = pc_samples;
+    float hz = (n - sxh_n) * 1000.0f / (float)(millis() - sxh_t);
+    bool first = sxh_t == 0;
+    sxh_t = millis(); sxh_n = n;
+    if (!first && hz > 1000 && (sx_hz < 1000 || fabsf(hz - sx_hz) > sx_hz * 0.0005f)) { sx_hz = hz; sx_update(); }
   }
   // (no more fighting the radio for ADC2: EARTH is read on ADC1 alone now, see CTRLJING in setup.h)
   // EARTH test over USB: once a second, the raw word and the ADC registers (Serial Monitor, 115200)

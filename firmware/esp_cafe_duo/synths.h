@@ -1739,7 +1739,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   if (bb > 32767) bb = 32767;
   if (bb < -32768) bb = -32768;
   int32_t ol = (la * nz_gain) >> 8, orr = (lb * nz_gain) >> 8;
-  if (nz_dist) { ol = (nz_tanh(ol * 5) * 7) >> 3; orr = (nz_tanh(orr * 5) * 7) >> 3; }   // DIST: driven into a round clip
+  if (nz_dist) { ol = (nz_tanh(ol * 5) * 3) >> 3; orr = (nz_tanh(orr * 5) * 3) >> 3; }   // DIST: driven into a round clip, level kept down
   *rout = orr;
   return ol;
 }
@@ -1751,7 +1751,7 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
 // else; each plate is one note; its Y = how long it rings after lifting (up = longer). The top pads: SCALE · KEY (the plates snap to it; FREE = anywhere),
 // FM · SELF (every oscillator is FM'd by the other three — mutual FM — and by itself: triangle -> saw),
 // CHAOS · GLITCH (the Sidrax's circle: each one FMs the one on its right · a triangle turns round when the one on its
-// left crosses zero), PITCH · SPREAD. Press and release pan to opposite sides. EARTH (AC) = bends every pitch.
+// left crosses zero), CHORD · OCTAVE. Press and release pan to opposite sides. EARTH is not used (pure pitches).
 // SKIP = all four sound. YELLOW / LAMP = a plate is touched.
 // Parameters: "S <id> <0..1000>" (0 scale, 1 key, 2 mutual FM, 3 self FM, 4 chaos, 5 glitch, 6 pitch, 7 spread,
 // 8 aligned 0|1000) · a plate: "S <10 + k> <x> <y> <area>" (k = 0..3, all 0..1000; area 0 = lifted).
@@ -1799,9 +1799,7 @@ static int32_t sx_tick(int32_t *rout) {
   static bool held[4] = {false, false, false, false};
   static int32_t tl = 0, tr = 0;
   if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } tl = tr = 0; }
-  static int32_t emf = 0, env1[4] = {0, 0, 0, 0};
-  emf += ((pc_emod * 3 * 256) - emf) >> 10;                // EARTH, smoothed hard: its noise must not reach the pitch
-  int32_t em = emf >> 8;
+  static int32_t env1[4] = {0, 0, 0, 0};                  // (no EARTH here: it wobbled the pitch — a chorus)
   int32_t touched = 0, l = 0, r = 0;
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
@@ -1819,7 +1817,7 @@ static int32_t sx_tick(int32_t *rout) {
       o = sx_oct * 256 + sx_key + (sx_chsem[ch][k] * 256) / 12;
     }
     pit[k] += (o - pit[k]) >> 7;
-    int32_t oo = pit[k] + em;
+    int32_t oo = pit[k];
     if (oo < 0) oo = 0; if (oo > 7 * 256) oo = 7 * 256;
     uint32_t inc = (uint32_t)(((uint64_t)sx_base * bj_exp2(oo)) >> 16);
     // CHAOS: the one on the left modulates this one · SELF: this one modulates itself (triangle -> saw)
