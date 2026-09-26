@@ -125,6 +125,9 @@ private struct DesignCard: View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
+                if !g.0.isEmpty {
+                    Text(g.0).font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary)
+                }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 2) {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
@@ -168,9 +171,9 @@ private struct DesignCard: View {
     }
 
     static let groups: [(String, [Int])] = [
-        ("PLAYED FROM THE PHONE", [2, 9, 10]),
-        ("ON THE CAFE", [6, 0, 1, 3, 4, 5, 7, 8]),
-        ("APPLE π", Array(11..<Preset.poolCount)),
+        ("", [2, 9, 10]),                                                   // played from the phone: the top row
+        ("", (0..<Preset.count).filter { ![2, 9, 10].contains($0) }),      // ours, in their own order
+        ("APPLE π", Array(Preset.count..<Preset.poolCount)),              // Apple π, as they come
     ]
 
     private func cell(_ n: Int) -> some View {
@@ -190,8 +193,8 @@ private struct DesignCard: View {
         }
         .padding(.horizontal, 3)
         .frame(height: 18)
-        .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
-        .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+        .background(Rectangle().fill(at != nil ? Color.white : (Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : PastelTheme.padScreen)))
+        .overlay(Rectangle().strokeBorder(at != nil ? PastelTheme.hudBlack.opacity(0.5) : PastelTheme.hudLine, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { put(n) }
     }

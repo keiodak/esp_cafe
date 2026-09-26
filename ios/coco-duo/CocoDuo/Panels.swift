@@ -145,6 +145,9 @@ struct PanelScaffold<Content: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
+                    Text("Cafe BLE")
+                        .font(.hudBig(16))
+                        .foregroundStyle(PastelTheme.hudBlack)
                     HudTag(text: title.replacingOccurrences(of: " ", with: "_"), size: 11)
                     Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
                     Spacer()
