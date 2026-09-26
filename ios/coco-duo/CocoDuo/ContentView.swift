@@ -875,13 +875,31 @@ private struct HudBar: View {
         Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1).frame(width: 21, height: 21)
     }
 
+    /// every key says what it does (the icons alone were guesswork)
+    private static let keyNames: [String: String] = [
+        "dot.radiowaves.left.and.right": "CAFES", "waveform": "WAVE", "camera.aperture": "CAM", "wind": "DRIFT",
+        "snowflake": "FREEZE", "metronome": "PERC", "waveform.path": "PITCH", "arrow.triangle.2.circlepath": "SYNC",
+        "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
+        "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
+        "play.fill": "PLAY", "stop.fill": "STOP",
+        "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
+    ]
+
     private func key(_ name: String, on: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: name)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
-                .frame(width: 21, height: 21)
-                .background(IconSquare(filled: on))
+            HStack(spacing: 3) {
+                Image(systemName: name)
+                    .font(.system(size: 9, weight: .medium))
+                Text(Self.keyNames[name] ?? "")
+                    .font(.hud(8, .semibold))
+                    .tracking(0.5)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 21)
+            .frame(height: 21)
+            .background(IconSquare(filled: on))
         }
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)

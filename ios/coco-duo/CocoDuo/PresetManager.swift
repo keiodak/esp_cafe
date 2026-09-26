@@ -178,9 +178,24 @@ private struct GrainOptions: View {
         }
         HStack(spacing: PanelMetrics.chipSpacing) {
             ChipButton(title: "MARK", filled: false) { grain.mark(d.ctxUnits()) }
+            // the 8 places: filled = kept
+            HStack(spacing: 2) {
+                ForEach(0..<8, id: \.self) { i in
+                    Rectangle()
+                        .fill(i < grain.marks ? PastelTheme.hudOrange : Color.clear)
+                        .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+                        .frame(width: 9, height: 12)
+                }
+            }
             ChipButton(title: "ONLY MARKS", filled: grain.useMarks) { grain.setUseMarks(!grain.useMarks, d.ctxUnits()) }
-            ChipButton(title: "CLEAR \(grain.marks)", filled: false) { grain.clearMarks(d.ctxUnits()) }
+                .disabled(grain.marks == 0)
+                .unlit(grain.marks == 0)
+            ChipButton(title: "CLEAR", filled: false) { grain.clearMarks(d.ctxUnits()) }
         }
+        Text("MARK keeps the place of the grain you just heard (up to 8, shown as the boxes). ONLY MARKS: grains then come only from those places — a phrase you like, again and again. CLEAR forgets them.")
+            .font(.hud(8))
+            .foregroundStyle(PastelTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
         Text("MOVE PITCH: every grain its own pitch from all intervals, gliding up or down. Off: pitch held for phrases (PITCH / REV·HOLD pads).")
             .font(.hud(8))
             .foregroundStyle(PastelTheme.textSecondary)

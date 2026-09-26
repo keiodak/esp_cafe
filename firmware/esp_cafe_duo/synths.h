@@ -970,13 +970,13 @@ static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
     uint32_t pn = mv ? n : n / (uint32_t)(mo_hold > 0 ? mo_hold : 1);        // MOVE: a new pitch every grain
     uint32_t spr = mv ? 9u : (uint32_t)(mo_spread ? mo_spread : 1);            //       from all nine intervals
     int32_t rate = (mo_rate * mo_iv[(mo_rnd(pn, 2) * spr) >> 16]) >> 12;
-    if (rate < 256) rate = 256; if (rate > 131072) rate = 131072;
+    if (rate < 128) rate = 128; if (rate > 131072) rate = 131072;
     // MOVE: the pitch glides during the grain, up to an octave up or down (a chirp), direction from the score
     int32_t rend = rate;
     if (mv) {
       int32_t g = (int32_t)mo_rnd(n, 7) - 32768;                               // -32768 .. 32767
       rend = g >= 0 ? rate + (int32_t)(((int64_t)rate * g) >> 15) : rate + (int32_t)(((int64_t)rate * g) >> 16);
-      if (rend < 256) rend = 256; if (rend > 131072) rend = 131072;
+      if (rend < 128) rend = 128; if (rend > 131072) rend = 131072;
     }
     int32_t span = (int32_t)(((int64_t)len * rate) >> 12);
     int32_t start = -1;
@@ -1581,7 +1581,7 @@ static int32_t __attribute__((noinline)) hd_clean(int k, int rb, int32_t t, int3
   ph[k] += 4096 - r;                                                      // the delay grows by (1 - rate) a sample
   while (ph[k] >= Wq) ph[k] -= Wq;
   while (ph[k] < 0) ph[k] += Wq;
-  int32_t D = (int32_t)(((int64_t)S * hd_off[k]) >> 4) + 32;
+  int32_t D = (int32_t)(((int64_t)S * hd_off[k]) >> 4) + 32;   // (a new TIMING jumps here: harmony() de-clicks it)
   int32_t lim = cycles <= 1 ? t : (cycles == 2 ? t + S : t + 2 * S);      // only what has been recorded
   int32_t out = 0;
   for (int h = 0; h < 2; h++) {
@@ -1651,8 +1651,10 @@ void IRAM_ATTR harmony() {
     if (mixc > 0) x = ready ? (((hd_voice(b, q[k], S) * gc) >> 6) * mixc) >> 8 : 0;          // GRAIN (rpls)
     if (mixc < 256) x += (hd_clean(k, rb, t, S, r, cycles) * (256 - mixc)) >> 8;           // CLEAN
     // de-click: at a jump, carry the difference and let it fade (~6 ms) -> a crossfade instead of a step
-    static int32_t lasty[2] = {0, 0}, dk[2] = {0, 0};
-    if (jump) dk[k] = lasty[k] - x;
+    static int32_t lasty[2] = {0, 0}, dk[2] = {0, 0}, lastoff[2] = {0, 0}, lastrate[2] = {0, 0};
+    bool vj = jump || hd_off[k] != lastoff[k] || hd_rate[k] != lastrate[k];   // TIMING / INTERVAL moved: de-click too
+    lastoff[k] = hd_off[k]; lastrate[k] = hd_rate[k];
+    if (vj) dk[k] = lasty[k] - x;
     else dk[k] -= dk[k] >> 8;
     x += dk[k];
     lasty[k] = x;
