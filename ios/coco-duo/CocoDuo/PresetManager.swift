@@ -131,11 +131,7 @@ private struct DesignCard: View {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
             grid([2, 9, 10])
             ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    grid((0..<Preset.count).filter { ![2, 9, 10].contains($0) })
-                    Text("APPLE π").font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary)
-                    grid(Array(Preset.count..<Preset.poolCount))
-                }
+                grid(Self.appleOrder)
             }
             .frame(maxHeight: .infinity)
             // bin · INIT · memories 1–5 (tap = recall, hold = save, with the bin on: tap = erase)
@@ -175,6 +171,11 @@ private struct DesignCard: View {
             .onLongPressGesture(minimumDuration: 0.6) { if enabled, let hold { hold() } }
     }
 
+
+    /// everything but the BLE row, in Apple π's own order (ours where Apple π has the same preset);
+    /// HARMONY, RUNGLER and SELF_READ (not in Apple π) at the very end
+    static let appleOrder = [0, 11, 1, 12, 4, 13, 14, 3, 15, 16, 17, 18, 5, 19, 20, 21, 22, 24, 25, 26, 27, 23,
+                             28, 29, 30, 31, 32, 33, 34, 35, 6, 7, 8]
 
     private func grid(_ ids: [Int]) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
