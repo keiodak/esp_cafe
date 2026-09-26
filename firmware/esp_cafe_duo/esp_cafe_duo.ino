@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.19"
+#define FW_VERSION "3.20"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -201,16 +201,29 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // T wpos ppos rec ls le speed earth flip skip button samples preset mode bpm_x10 multi_effect
 //   F …          MULTI (see the top of multi() in synths.h)
 // FLIP / SKIP / BUTTON seen high since the last status line (short triggers are not missed by the 30 ms poll)
+// the WAVE panel's YELLOW / ASH windows: loop() samples both outputs (the GPIO ladder, the DAC register) and keeps
+// the lowest / highest value between two status lines (0..255 each) -> a rolling min/max picture on the phone
+volatile uint8_t sc_amin = 255, sc_amax = 0, sc_ymin = 255, sc_ymax = 0;
+static inline void scope_sample() {
+  uint32_t g = REG(GPIO_OUT_REG)[0];
+  uint32_t y = ((g >> 12) & 0x3F) | (((g >> 21) & 0x3) << 6) | (((g >> 26) & 0x3) << 8);   // 10-bit ladder
+  uint8_t yv = (uint8_t)(y >> 2);
+  uint8_t av = (uint8_t)((REG(ESP32_RTCIO_PAD_DAC1)[0] >> 19) & 0xFF);
+  if (yv < sc_ymin) sc_ymin = yv; if (yv > sc_ymax) sc_ymax = yv;
+  if (av < sc_amin) sc_amin = av; if (av > sc_amax) sc_amax = av;
+}
 volatile bool seen_flip = false, seen_skip = false, seen_btn = false;
 void pc_status() {
   char tb[176];
-  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d",
+  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d %d %d %d %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
     (int)EARTHREAD, (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
-    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now, ch_now());
+    pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now, ch_now(),
+    sc_amin > sc_amax ? 128 : sc_amin, sc_amin > sc_amax ? 128 : sc_amax, sc_ymin > sc_ymax ? 0 : sc_ymin, sc_ymin > sc_ymax ? 0 : sc_ymax);
   pc_out(tb);
   seen_flip = seen_skip = seen_btn = false;
+  sc_amin = 255; sc_amax = 0; sc_ymin = 255; sc_ymax = 0;
 }
 void pc_overview() {
   static int obin = 0;
@@ -520,7 +533,7 @@ void fx_update(int e) {
       float f = 55.0f * powf(2.0f, semi / 12.0f);
       float tt = hz / f; if (tt > 4000) tt = 4000; if (tt < 8) tt = 8;
       sd_T = (int32_t)(tt * 256.0f);
-      sd_fb = (int32_t)((0.80f + powf(p[1], 0.5f) * 0.195f) * 256.0f);   // DECAY: short pluck .. long ring
+      sd_fb = (int32_t)((0.80f + powf(p[1], 0.5f) * 0.17f) * 256.0f);    // DECAY: short pluck .. long ring (no endless howl)
       sd_tone = fx_lpk(0.25f + p[2] * 0.75f);                            // DAMP: dark .. bright
       sd_pluck = (int32_t)(p[3] * 320.0f);                               // PLUCK: noise burst on attacks
       sd_mod = (int32_t)(p[4] * p[4] * 0.02f * 65536.0f);                // WOBBLE: up to ±2 % of the period
@@ -531,7 +544,7 @@ void fx_update(int e) {
     } break;
     default: {
       rb_fb = (int32_t)(4096.0f * (0.72f + p[0] * 0.27f));
-      rb_howl = (int32_t)(p[4] * p[4] * 0.14f * 4096.0f);               // up to +0.14 past the size: it howls
+      rb_howl = (int32_t)(p[4] * p[4] * 0.06f * 4096.0f);               // up to +0.06 past the size: it howls (gently)
       rb_mod = (int32_t)(p[5] * 40.0f * 256.0f);                         // up to 40 samples of wobble
       rb_lfo = (uint32_t)((0.15f + p[5] * 1.2f) / hz * 4294967295.0f);
       rb_damp = (int32_t)(p[1] * 0.7f * 4096.0f);
@@ -879,6 +892,7 @@ void loop() {
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
   // latch the switches for the status line
+  scope_sample();
   if (FLIPPERAT) seen_flip = true;
   if (SKIPPERAT) seen_skip = true;
   if (!(BUTTONEST)) seen_btn = true;

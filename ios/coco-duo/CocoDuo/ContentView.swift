@@ -222,6 +222,37 @@ final class Director: ObservableObject {
         refresh()
     }
     func fxNext(_ s: Int) { setFx(s, (rig.fxLocal[s] + 1) % Fx.count) }
+    // DRIFT (MULTI): the XY pads of the effect each Cafe is on wander by themselves — a smooth random walk,
+    // sent like a finger would. Only the pads that do something; the TAP pad stays.
+    private var driftTimer: Timer?
+    private var driftVel = [Double](repeating: 0, count: 16)
+    func setFxDrift(_ on: Bool) {
+        rig.fxDrift = on
+        driftTimer?.invalidate(); driftTimer = nil
+        if on {
+            driftTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in self?.driftStep() }
+        }
+    }
+    private func driftStep() {
+        guard rig.padSet == .multi else { return }
+        for i in 0..<8 {
+            let row = i / 4, k = i % 4
+            if k == 3 || !rig.inCtx(row) { continue }
+            if rig.fxPadLink && row == 1 && rig.fxLocal[0] == rig.fxLocal[1] { continue }   // A's pads take B along
+            let e = rig.fxLocal[row]
+            if Fx.titles[e][k] == "—" { continue }
+            let a = rig.fxAxes[row][e][k]
+            for c in 0..<2 {
+                let j = i * 2 + c
+                driftVel[j] = driftVel[j] * 0.92 + Double.random(in: -1...1) * 0.0022
+                var v = (c == 0 ? a.x : a.y) + driftVel[j]
+                if v < 0.02 { v = 0.02; driftVel[j] = abs(driftVel[j]) }
+                if v > 0.98 { v = 0.98; driftVel[j] = -abs(driftVel[j]) }
+                if c == 0 { a.x = v } else { a.y = v }
+            }
+            padMoved(i)
+        }
+    }
     func fxRandom(_ s: Int) { setFx(s, (rig.fxLocal[s] + 1 + Int.random(in: 0..<(Fx.count - 1))) % Fx.count) }
 
     /// a Cafe changed its effect itself (FLIP / SKIP): show it, and with LINK take the other Cafe along
@@ -410,7 +441,7 @@ private struct MainScreen: View {
         )
         .persistentSystemOverlays(.hidden)
         .defersSystemGestures(on: .all)
-        .sheet(isPresented: $showCafes) { CafesView(hub: hub, camera: camera) }
+        .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
@@ -663,8 +694,12 @@ private struct HudBar: View {
                 if top {
                     key("dot.radiowaves.left.and.right", on: unit.isConnected) { showCafes = true }
                 } else {
-                    key(Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
-                        enabled: rig.ctxPreset == Preset.ble) { d.cycleMode() }
+                    if rig.padSet == .multi {
+                        key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
+                    } else {
+                        key(Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
+                            enabled: rig.ctxPreset == Preset.ble) { d.cycleMode() }
+                    }
                 }
                 contextKey(top ? 0 : 1)
             }
@@ -673,8 +708,7 @@ private struct HudBar: View {
                     .buttonStyle(.plain)
                     .layoutPriority(1)
                 CharControl(d: d, rig: rig, slot: unit.slot, preset: shownPreset)
-                Button { showPresets = true } label: { statusEnd }
-                    .buttonStyle(.plain)
+                statusEnd
             }
             HStack(spacing: 8) {
                 contextKey(top ? 2 : 3)
@@ -718,7 +752,21 @@ private struct HudBar: View {
                 Text("BPM").font(.hud(7, .medium)).foregroundStyle(PastelTheme.textSecondary)
                 if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
+            // the preset manager lives behind this box: say so
+            HStack(spacing: 2) {
+                Text("PRESETS").font(.hud(7, .semibold)).tracking(0.8)
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 4)
+            .frame(height: 13)
+            .background(Rectangle().fill(PastelTheme.hudBlack))
         }
+        .padding(.leading, 4)
+        .padding(.trailing, 2)
+        .frame(height: 20)
+        .background(Rectangle().fill(PastelTheme.padScreen))
+        .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
         .contentShape(Rectangle())
     }
 
@@ -823,16 +871,18 @@ struct IconSquare: View {
 // MARK: - the Cafes panel (connection + camera)
 
 struct CafesView: View {
+    let d: Director
     @ObservedObject var hub: CafeHub
     @ObservedObject var camera: CameraRig
 
     var body: some View {
         PanelScaffold(title: "CAFES") {
             PanelColumns {
-                CafeCard(hub: hub, unit: hub.units[0])
-                CafeCard(hub: hub, unit: hub.units[1])
-            } right: {
-                PanelCard(title: "NEARBY", note: hub.bluetoothReady ? "searching" : "bluetooth off") {
+                // left, tight: both Cafes, who is nearby, the camera
+                PanelCard(title: "CAFES", note: hub.bluetoothReady ? "searching" : "bluetooth off", spacing: 4) {
+                    CafeLine(hub: hub, unit: hub.units[0])
+                    CafeLine(hub: hub, unit: hub.units[1])
+                    Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5)
                     if hub.found.isEmpty {
                         Text("Turn the Cafe on (esp_cafe_duo).")
                             .font(.hud(PanelMetrics.labelFont))
@@ -845,13 +895,15 @@ struct CafesView: View {
                                 .foregroundStyle(PastelTheme.textPrimary)
                             Spacer(minLength: 0)
                             ChipButton(title: "→ A", filled: hub.units[0].savedID == f.id) { hub.assign(f, to: 0) }
-                                .frame(width: 44)
+                                .frame(width: 40)
                             ChipButton(title: "→ B", filled: hub.units[1].savedID == f.id) { hub.assign(f, to: 1) }
-                                .frame(width: 44)
+                                .frame(width: 40)
                         }
                     }
                 }
                 CameraCard(camera: camera)
+            } right: {
+                TempoCard(d: d, rig: d.rig)
             }
         }
         .onAppear { hub.startScan() }
@@ -859,20 +911,61 @@ struct CafesView: View {
     }
 }
 
-private struct CafeCard: View {
+/// one Cafe in one line (+ a small second line): A · name · state · clock · preset · disconnect / forget
+private struct CafeLine: View {
     @ObservedObject var hub: CafeHub
     @ObservedObject var unit: CafeUnit
 
     var body: some View {
-        PanelCard(title: unit.slot == 0 ? "CAFE A · TOP" : "CAFE B · BOTTOM") {
-            DiagRow("NAME", unit.name ?? "—")
-            DiagRow("STATE", unit.state)
-            DiagRow("CLOCK", unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")
-            DiagRow("PRESET", unit.preset < 0 ? "—" : Preset.tag(unit.preset))
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: "DISCONNECT", filled: false) { hub.disconnect(unit.slot) }
-                ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                HudTag(text: unit.slot == 0 ? "A" : "B", fill: unit.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 8)
+                Text(unit.name ?? "—")
+                    .font(.hud(PanelMetrics.labelFont, .semibold))
+                    .foregroundStyle(PastelTheme.textPrimary)
+                    .lineLimit(1)
+                Text(unit.state)
+                    .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                    .foregroundStyle(PastelTheme.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                ChipButton(title: "DISC", filled: false) { hub.disconnect(unit.slot) }.frame(width: 36)
+                ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }.frame(width: 48)
             }
+            Text("\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))")
+                .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .padding(.leading, 19)
+        }
+    }
+}
+
+/// TEMPO (moved here from the preset manager): the shared BPM — DELAY · HARMONY · MULTI · ARP. SKIP on a Cafe = tap.
+private struct TempoCard: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+
+    var body: some View {
+        PanelCard(title: "TEMPO", note: "SKIP on a Cafe = tap") {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(String(format: "%.1f", rig.bpm))
+                    .font(.hudBig(30))
+                    .foregroundStyle(PastelTheme.hudBlack)
+                Text("BPM")
+                    .font(.hud(9, .semibold))
+                    .foregroundStyle(PastelTheme.hudOrange)
+                Spacer(minLength: 0)
+                ChipButton(title: "−", filled: false) { d.setBpm((rig.bpm - 1).rounded()) }.frame(width: 30)
+                ChipButton(title: "+", filled: false) { d.setBpm((rig.bpm + 1).rounded()) }.frame(width: 30)
+                ChipButton(title: "TAP", filled: false) { d.tapTempo() }.frame(width: 44)
+            }
+            CompactSlider(value: Binding(get: { (rig.bpm - 40) / 200 },
+                                         set: { d.setBpm((40 + $0 * 200).rounded()) }),
+                          fillColor: PastelTheme.sliderFill,
+                          knobColor: PastelTheme.hudOrange, thinLine: true)
+            Text("delay · harmony · multi · arp_delay")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
         }
     }
 }
@@ -914,7 +1007,8 @@ private struct CameraCard: View {
     }
 }
 
-/// CHAR: the slider next to the tempo, for this Cafe's preset (HARMONY: CLEAN <-> GRAIN; GRIT; WEAR; VOWEL Q; DRIVE)
+/// CHAR: the slider next to the tempo, for this Cafe's preset — one row: NAME ——o—— 042
+/// (HARMONY: CLEAN <-> GRAIN · BIT = fewer bits + sample-and-hold · WEAR · VOWEL (Q) · DRIVE)
 private struct CharControl: View {
     let d: Director
     @ObservedObject var rig: Rig
@@ -925,24 +1019,27 @@ private struct CharControl: View {
         let p = min(max(preset, 0), Preset.count - 1)
         let v = rig.charV[slot][p]
         let isHarmony = p == Preset.harmony
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Text(isHarmony ? (v < 0.5 ? "CLEAN" : "GRAIN") : Preset.charNames[p])
-                    .font(.hud(7, .semibold))
-                    .tracking(1)
-                    .foregroundStyle(PastelTheme.hudOrange)
-                Spacer(minLength: 0)
-                Text(String(format: "%03ld", Int((v * 100).rounded())))
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundStyle(PastelTheme.textSecondary)
-            }
+        HStack(spacing: 5) {
+            Text(isHarmony ? (v < 0.5 ? "CLEAN" : "GRAIN") : Preset.charNames[p])
+                .font(.hud(7, .semibold))
+                .tracking(0.8)
+                .foregroundStyle(PastelTheme.hudOrange)
+                .lineLimit(1)
+                .frame(width: 34, alignment: .leading)
             CompactSlider(value: Binding(get: { rig.charV[slot][p] },
                                          set: { d.setChar($0, slot: slot) }),
-                          touchHeight: 18,
+                          touchHeight: 20,
                           fillColor: PastelTheme.sliderFill,
                           knobColor: PastelTheme.hudOrange, thinLine: true)
-                .frame(height: 10)
+                .frame(width: 64, height: 12)
+            Text(String(format: "%03ld", Int((v * 100).rounded())))
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(PastelTheme.hudBlack)
+                .frame(width: 18, alignment: .trailing)
         }
-        .frame(width: 96)
+        .padding(.horizontal, 5)
+        .frame(height: 18)
+        .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
+        .fixedSize()
     }
 }

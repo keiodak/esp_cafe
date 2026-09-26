@@ -23,6 +23,19 @@ struct FoundCafe: Identifiable {
     var rssi: Int
 }
 
+/// The outputs as the Cafe reports them with every status line (~30×/s): the lowest and highest ASH (DAC) and
+/// YELLOW (ladder) value since the last line, 0…255 -> a rolling window of about 5 s. Kept apart so only the
+/// WAVE panel redraws.
+final class OutScope: ObservableObject {
+    static let N = 160
+    @Published var ash: [(UInt8, UInt8)] = Array(repeating: (128, 128), count: OutScope.N)
+    @Published var yellow: [(UInt8, UInt8)] = Array(repeating: (0, 0), count: OutScope.N)
+    func push(ash a: (UInt8, UInt8), yellow y: (UInt8, UInt8)) {
+        var aa = ash; aa.removeFirst(); aa.append(a); ash = aa
+        var yy = yellow; yy.removeFirst(); yy.append(y); yellow = yy
+    }
+}
+
 /// Tape overview + heads. Kept apart from the unit so the pads don't redraw 30×/s.
 final class CafeScope: ObservableObject {
     @Published var mins = [UInt8](repeating: 128, count: BINS)
@@ -69,6 +82,7 @@ final class CafeUnit: ObservableObject {
     @Published var loadProgress: Double? = nil
     @Published var loadNote = ""
     let scope = CafeScope()
+    let outs = OutScope()
 
     fileprivate var peri: CBPeripheral?
     fileprivate var rx: CBCharacteristic?
@@ -201,6 +215,9 @@ final class CafeUnit: ObservableObject {
                     bpm = b
                     if !first { onBpm?(b) }
                 }
+            }
+            if a.count >= 21, let a0 = UInt8(a[17]), let a1 = UInt8(a[18]), let y0 = UInt8(a[19]), let y1 = UInt8(a[20]) {
+                outs.push(ash: (a0, a1), yellow: (y0, y1))
             }
             waitingQ = false
             polls += 1

@@ -161,8 +161,8 @@ int tapsz=sizeof(myPlacers)>>2;
 // ASH + main out = wet echo only
 // YELLOW = a steady organ: 5 octaves of square waves (A2 110Hz .. 1760Hz at 44.1k), 2 pins each,
 //          like a divide-down combo organ. one phase counter -> the pitch never wanders.
-// EARTH  = FM: organ pitch follows EARTH, 0 .. ~4x (unplugged = steady A2)
-// FLIP   = trigger: FM depth x1 (0..4x) <-> x2 (0..8x)
+// EARTH  = FM: organ pitch follows EARTH, 0 .. ~4x — only when FLIP has turned it on (default OFF = a steady A2)
+// FLIP   = trigger: EARTH FM OFF -> x1 (0..4x) -> x2 (0..8x) -> OFF
 // SKIP   = trigger: WOBBLE on/off. the 4 echo taps drift like worn tape (slow wow + a little flutter),
 //          each tap on its own phase -> the echoes smear and detune against each other.
 //          it fades in/out over ~0.2s
@@ -181,7 +181,7 @@ void IRAM_ATTR echo_og() {
   static int unpatch_timer = 0;
   static int32_t rate_s = 256 << 8;                // slewed FM rate (Q16)
   static int32_t rg = 1024;                          // recording gain 0..1024 (freeze ramp)
-  static bool deep = false;                         // FLIP: FM depth x2
+  static int fm_mode = 0;                           // FLIP: EARTH FM off (default) -> x1 -> x2 -> off
   static bool wob_on = false;                       // SKIP: wobble
   static int32_t wob = 0;                           // wobble depth 0..8192 (ramped)
   static uint32_t wph = 0;                          // wobble LFO phase
@@ -260,7 +260,7 @@ void IRAM_ATTR echo_og() {
   if (FLIPPERAT) { if (flip_int < 2000) flip_int += 500; }
   else           { if (flip_int > 0) flip_int -= 50; }
   if (flip_int > 1500) {
-    if (!flip_latch) { flip_latch = true; deep = !deep; }
+    if (!flip_latch) { flip_latch = true; fm_mode = (fm_mode + 1) % 3; }
   } else if (flip_int < 100) flip_latch = false;
 
   // --- EARTH (12 bit) ---
@@ -289,10 +289,10 @@ void IRAM_ATTR echo_og() {
     if (!patched) { if (spread >= 960) { patched = true; unpatch_timer = 0; } }
     else if (spread < 400) { if (++unpatch_timer > 88200) patched = false; }
     else unpatch_timer = 0;
-    if (patched && spread > 0) {
+    if (patched && spread > 0 && fm_mode > 0) {
       int32_t k = ((int32_t)(e - cal_min) << 12) / spread;   // 0..4096, fine steps
       if (k > 4096) k = 4096; if (k < 0) k = 0;
-      rate = deep ? (k >> 1) : (k >> 2);             // FM: 0 .. 4x  (x2: 0 .. 8x)
+      rate = fm_mode == 2 ? (k >> 1) : (k >> 2);             // FM: 0 .. 4x  (x2: 0 .. 8x)
     }                                                // else: jitter / nothing patched -> plain organ
   }
 
@@ -1634,7 +1634,9 @@ void IRAM_ATTR harmony() {
   int32_t in = gyo - 2048;
 
   // a new cycle: the record head moves to the next buffer, the voices start again at their TIMING
+  bool jump = false;                         // a restart (new cycle, tempo, tap, sync): de-click the voices
   if (t == 0) {
+    jump = true;
     if (cycles > 0 && !hold) rb = (rb + 1) % 3;
     cycles++;
     S = hd_S; if (S < 256) S = 256; if (S > HD_STRIDE - 2) S = HD_STRIDE - 2;
@@ -1658,6 +1660,12 @@ void IRAM_ATTR harmony() {
     int32_t x = 0;
     if (mixc > 0) x = ready ? (((hd_voice(b, q[k], S) * gc) >> 6) * mixc) >> 8 : 0;          // GRAIN (rpls)
     if (mixc < 256) x += (hd_clean(k, rb, t, S, r, cycles) * (256 - mixc)) >> 8;           // CLEAN
+    // de-click: at a jump, carry the difference and let it fade (~6 ms) -> a crossfade instead of a step
+    static int32_t lasty[2] = {0, 0}, dk[2] = {0, 0};
+    if (jump) dk[k] = lasty[k] - x;
+    else dk[k] -= dk[k] >> 8;
+    x += dk[k];
+    lasty[k] = x;
     if (hd_tone < 4096) { lp[k] += ((x - lp[k]) * hd_tone) >> 12; x = lp[k]; }
     v[k] = x;
     q[k] += r;
@@ -2219,6 +2227,7 @@ volatile int32_t  fx_gap = 20000;             // LOCK: after a change, FLIP / SK
 volatile bool     fx_capture = false, fx_trig = false, fx_hold_app = false, fx_sync = false;
 volatile uint32_t fx_seed = 0x2545F491;
 volatile int32_t  fx_beat = 22050;            // samples per beat
+volatile int32_t  fx_emq = 0;                 // the same, smoothed (~6 ms), Q8: for delay times (no zipper noise)
 volatile int32_t  fx_em = 0;                  // EARTH for the effects (AC, depth applied), -128..127
 static uint32_t   fx_hw = 0;                  // history write position
 // CLEAN
@@ -2259,7 +2268,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, fill = 0; static int32_t ct = 16000 << 8, lpl = 0, lpr = 0, hpl = 0, hpr = 0;
   if (rs) { w = 0; fill = 0; ct = td_T; lpl = lpr = 0; hpl = hpr = 0; }
   ct += (td_T - ct) >> 11;
-  int32_t tl = ct + fx_em * td_wow;
+  int32_t tl = ct + ((fx_emq * td_wow) >> 8);                        // EARTH, smoothed: bends, never crackles
   if (tl < (64 << 8)) tl = 64 << 8; if (tl > (32000 << 8)) tl = 32000 << 8;
   int32_t tr = (int32_t)(((int64_t)tl * td_ratio) >> 12);
   if (tr < (64 << 8)) tr = 64 << 8; if (tr > (32000 << 8)) tr = 32000 << 8;
@@ -2328,7 +2337,7 @@ static int32_t sm_tick(int32_t in, bool rs) {
     pq[k] += rate[k]; n[k]--;
   }
   if (sm_tone < 4096) sum = fx_lp(&lp, sum, sm_tone);
-  return ((in * sm_dry) >> 8) + ((sum * sm_wet) >> 8);
+  return soft_clip(((in * sm_dry) >> 8) + ((sum * sm_wet * 5) >> 9));   // the slice 2.5x (it sat under the others)
 }
 
 // ---- 3 REVERSE: two heads read the past backwards, sin² windows half a length apart ----
@@ -2432,7 +2441,7 @@ static int32_t gl_tick(int32_t in, bool hold, bool rs) {
       if (gl_crush) { if (++hn >= 1 + (gl_crush >> 2)) { hn = 0; held = v; } v = held; }
     } break;
   }
-  v = (v * 480) >> 8;                                                // the moves ~1.9x louder (they sat under the dry sound)
+  v = (v * 700) >> 8;                                                // the moves ~1.9x louder (they sat under the dry sound)
   int32_t fe = left < 128 ? left * 2 : 256;                          // a soft return at the end of a move
   return soft_clip(in + (((v - in) * ((gl_wet * fe) >> 8)) >> 8));
 }
@@ -2473,7 +2482,7 @@ static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   if (fade < 4096) fade += 4;
   int32_t x = hold ? 0 : (in >> 2);
   int32_t fb = hold ? 4090 : rb_fb + rb_howl + fx_em * 3;          // EARTH = size (and howl)
-  if (fb > 4600) fb = 4600; if (fb < 2000) fb = 2000;
+  if (fb > 4300) fb = 4300; if (fb < 2000) fb = 2000;
   int32_t damp = hold ? 0 : rb_damp;
   lph += rb_lfo;
   int32_t y[4];
@@ -2534,7 +2543,7 @@ static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   ph += sd_lfo;
   int32_t tri = (int32_t)(ph >> 16); tri = tri < 32768 ? tri - 16384 : 49151 - tri;  // -16384..16383
   int32_t m = (int32_t)(((int64_t)tri * sd_mod) >> 14);
-  int32_t e = (int32_t)(((int64_t)ct * fx_em) >> 8);                                  // EARTH = pitch bend
+  int32_t e = (int32_t)(((int64_t)ct * fx_emq) >> 16);                                // EARTH = pitch bend (smoothed)
   int32_t tl = ct + (int32_t)(((int64_t)ct * m) >> 16) + e;
   int32_t tr = (int32_t)(((int64_t)tl * (4096 + sd_spread)) >> 12);
   if (tl < (8 << 8)) tl = 8 << 8; if (tl > (4090 << 8)) tl = 4090 << 8;
@@ -2564,8 +2573,8 @@ static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   dwrite(SD_R + w, soft_clip(il + ((xr * fb) >> 8)) + 2048);
   w = (w + 1) & 0xFFF;
   int32_t dry = (in * sd_dry) >> 8;
-  *rout = dry + ((vr * sd_wet) >> 8);
-  return dry + ((vl * sd_wet) >> 8);
+  *rout = dry + ((vr * sd_wet) >> 9);                                   // the string rings at full scale: half as loud
+  return dry + ((vl * sd_wet) >> 9);
 }
 
 static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) {
@@ -2606,6 +2615,7 @@ void IRAM_ATTR multi() {
   pc_samples++;
   earth_ac();
   fx_em = (pc_emod * fx_edepth) >> 8;
+  { static int32_t es = 0; es += (((pc_emod * fx_edepth)) - es) >> 8; fx_emq = es; }   // Q8 of fx_em, slewed
   int32_t in = gyo - 2048;
 
   // FLIP = next, SKIP = a random other one (same seed on both Cafes), at most one change per LOCK time
@@ -2691,6 +2701,7 @@ void IRAM_ATTR arpdelay() {
   pc_samples++;
   earth_ac();
   fx_em = (pc_emod * fx_edepth) >> 8;
+  { static int32_t es = 0; es += (((pc_emod * fx_edepth)) - es) >> 8; fx_emq = es; }   // Q8 of fx_em, slewed
   if (skip_press()) { tap_note(); bc = 0; click = 300; }
   if (fx_sync) { fx_sync = false; bc = 0; click = 300; }
   bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;

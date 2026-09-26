@@ -42,7 +42,7 @@ enum Preset {
         "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
     ]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
-    static let charNames = ["GRIT", "WEAR", "GRIT", "GRIT", "VOWEL Q", "DRIVE", "CLEAN·GRAIN", "GRIT", "GRIT", "GRIT", "GRIT"]
+    static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
     static let charDefaults: [Double] = [0, 1, 0, 0, 0.714, 0, 1, 0, 0, 0, 0]
     /// presets that exist in the firmware
@@ -52,6 +52,8 @@ enum Preset {
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
+    /// the preset manager's last group: HARMONY, then the ones played with the Cafe's own controls
+    static let cafeOrder = [6, 0, 1, 3, 4, 5, 7, 8]
     static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String { String(format: "%02ld_", n + 1) + (n >= 0 && n < names.count ? names[n] : "—") }
@@ -214,6 +216,7 @@ final class Rig: ObservableObject {
     @Published var fxLink = false          // LINK FX: both Cafes on the same effect
     @Published var fxPadLink = false       // LINK PADS: the XY pads move both Cafes
     @Published var fxHold = false
+    @Published var fxDrift = false         // DRIFT: the pads wander by themselves
     @Published var fxXfade = 0.35          // F 91: 0.02 + v² × 2 s
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s

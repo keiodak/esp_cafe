@@ -65,7 +65,7 @@ What's in the repository:
 3. Click **Upload** (→). If it can't connect, hold the ESP32's **BOOT** button while the upload starts.
 4. Open **Tools → Serial Monitor** at **115200** baud and reset the Cafe. You should see:
    ```
-   --- BOOT START --- (esp_cafe_duo 3.19, last reset reason 1)
+   --- BOOT START --- (esp_cafe_duo 3.20, last reset reason 1)
    [1b] BLE advertising, name Cafe-XXXX ...
    -> initDEL: Allocating delay buffers...
    ```
@@ -87,7 +87,7 @@ What's in the repository:
   *Experimental Web Platform features*, and restart Chrome.
 
 **Use it:**
-- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.19 Cafe-XXXX ota`.
+- **BLE** → choose *Cafe-XXXX*. The page shows `HELLO coco-duo 3.20 Cafe-XXXX ota`.
 - **check** → memory, Bluetooth state, packet size (`mtu`).
 - **log** → everything the Cafe answered.
 - **update** → write a new firmware over Bluetooth (next section).

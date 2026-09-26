@@ -34,6 +34,12 @@ private struct CafeWaveCard: View {
                 .frame(height: 118)
                 .opacity(unit.isConnected ? 1 : 0.4)
             PositionLine(scope: unit.scope, unit: unit)
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                OutWindow(outs: unit.outs, title: "ASH", yellow: false)
+                OutWindow(outs: unit.outs, title: "YELLOW", yellow: true)
+            }
+            .frame(height: 54)
+            .opacity(unit.isConnected ? 1 : 0.4)
 
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "REC", filled: unit.isConnected && unit.recording) {
@@ -177,4 +183,41 @@ private struct TapeView: View {
         }
     }
 
+}
+
+/// ASH / YELLOW: what the output did over the last ~5 s (the Cafe sends its min / max with every status line)
+private struct OutWindow: View {
+    @ObservedObject var outs: OutScope
+    let title: String
+    let yellow: Bool
+
+    var body: some View {
+        let d = yellow ? outs.yellow : outs.ash
+        ZStack(alignment: .topLeading) {
+            Rectangle().fill(PastelTheme.padScreen)
+            Canvas { ctx, size in
+                let n = d.count
+                guard n > 1 else { return }
+                let w = size.width / CGFloat(n)
+                let mid = Path { p in p.move(to: CGPoint(x: 0, y: size.height / 2)); p.addLine(to: CGPoint(x: size.width, y: size.height / 2)) }
+                ctx.stroke(mid, with: .color(PastelTheme.hudLine.opacity(0.6)), lineWidth: 0.5)
+                var p = Path()
+                for (i, v) in d.enumerated() {
+                    let x = CGFloat(i) * w + w / 2
+                    let lo = size.height * (1 - CGFloat(v.0) / 255), hi = size.height * (1 - CGFloat(v.1) / 255)
+                    p.move(to: CGPoint(x: x, y: lo))
+                    p.addLine(to: CGPoint(x: x, y: min(hi, lo - 0.8)))
+                }
+                ctx.stroke(p, with: .color(yellow ? PastelTheme.hudOrange : PastelTheme.hudBlack), lineWidth: max(1, w * 0.9))
+            }
+            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
+            Text(title)
+                .font(.hud(7, .semibold))
+                .tracking(1)
+                .foregroundStyle(PastelTheme.hudBlack)
+                .padding(.horizontal, 3)
+                .background(PastelTheme.padScreen)
+                .padding(3)
+        }
+    }
 }

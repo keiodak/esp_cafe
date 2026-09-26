@@ -1,9 +1,8 @@
 // PresetManager.swift — coco duo (k.odk)
 // The PRESET MANAGER sheet (tap a bar's status in the main screen):
 //   TARGET   A / B / A + B — who the presets (and the pads) go to
-//   PRESETS  1–10 (esp_cafe_duo v3.4). A / B marks show where each Cafe is.
-//   BLE MODE GRAIN / COCO / DELAY / NOISE (preset 3)
-//   TEMPO    the shared BPM (DELAY / HARMONY), TAP
+//   PRESETS  grouped: PLAYED HERE (BLE with its 4 modes under it, MULTI) · iOS + CAFE (ARP_DELAY) · ON THE CAFE.
+//            A / B marks show where each Cafe is. (TEMPO moved to the CAFES panel.)
 //   UPDATE   write a new firmware over Bluetooth to A / B / both (the .ino.bin from "Export Compiled Binary")
 
 import SwiftUI
@@ -19,6 +18,14 @@ struct PresetManagerView: View {
 
     private let who = ["A", "B", "A + B"]
 
+    private func section(_ t: String) -> some View {
+        Text(t)
+            .font(.hud(7, .semibold))
+            .tracking(1.2)
+            .foregroundStyle(PastelTheme.hudOrange)
+            .padding(.top, 4)
+    }
+
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
             PanelColumns {
@@ -29,49 +36,37 @@ struct PresetManagerView: View {
                         }
                     }
                 }
-                PanelCard(title: "PRESETS", note: "1–11", spacing: 3) {
-                    ForEach(0..<Preset.names.count, id: \.self) { n in
-                        PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
-                    }
-                }
-            } right: {
-                PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? "preset 3" : "choose preset 3 first") {
+                PanelCard(title: "PRESETS", note: "tap one", spacing: 3) {
+                    // played from here: BLE (its four modes right under it), MULTI, then iOS + CAFE
+                    section("PLAYED HERE")
+                    PresetRow(n: Preset.ble, rig: rig, a: a, b: b) { d.setPreset(Preset.ble) }
                     HStack(spacing: PanelMetrics.chipSpacing) {
+                        Text("└").font(.hud(9)).foregroundStyle(PastelTheme.textSecondary).frame(width: 14)
                         ForEach(0..<4, id: \.self) { m in
                             ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
+                                if rig.ctxPreset != Preset.ble { d.setPreset(Preset.ble) }
                                 d.setMode(m)
                             }
                         }
                     }
-                    .disabled(rig.ctxPreset != Preset.ble)
-                    .unlit(rig.ctxPreset != Preset.ble)
-                    if rig.padSet == .grain {
-                        GrainOptions(d: d, grain: d.grain)
+                    .padding(.vertical, 2)
+                    PresetRow(n: Preset.multi, rig: rig, a: a, b: b) { d.setPreset(Preset.multi) }
+                    section("iOS + CAFE")
+                    PresetRow(n: Preset.arp, rig: rig, a: a, b: b, indent: true) { d.setPreset(Preset.arp) }
+                    section("ON THE CAFE")
+                    ForEach(Preset.cafeOrder, id: \.self) { n in
+                        PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
                     }
+                }
+            } right: {
+                if rig.padSet == .grain {
+                    PanelCard(title: "GRAIN", note: "BLE · GRAIN") { GrainOptions(d: d, grain: d.grain) }
                 }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
                 }
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
-                }
-                PanelCard(title: "TEMPO", note: "delay · harmony · multi · SKIP on a Cafe = tap") {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(String(format: "%.1f", rig.bpm))
-                            .font(.hudBig(30))
-                            .foregroundStyle(PastelTheme.hudBlack)
-                        Text("BPM")
-                            .font(.hud(9, .semibold))
-                            .foregroundStyle(PastelTheme.hudOrange)
-                        Spacer(minLength: 0)
-                        ChipButton(title: "−", filled: false) { d.setBpm((rig.bpm - 1).rounded()) }.frame(width: 30)
-                        ChipButton(title: "+", filled: false) { d.setBpm((rig.bpm + 1).rounded()) }.frame(width: 30)
-                        ChipButton(title: "TAP", filled: false) { d.tapTempo() }.frame(width: 44)
-                    }
-                    CompactSlider(value: Binding(get: { (rig.bpm - 40) / 200 },
-                                                 set: { d.setBpm((40 + $0 * 200).rounded()) }),
-                                  fillColor: PastelTheme.sliderFill,
-                                  knobColor: PastelTheme.hudOrange, thinLine: true)
                 }
                 PanelCard(title: "UPDATE", note: "firmware over bluetooth") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
@@ -153,6 +148,7 @@ private struct MultiCard: View {
                 ChipButton(title: "LINK FX", filled: rig.fxLink) { d.setFxLink(!rig.fxLink) }
                 ChipButton(title: "LINK PADS", filled: rig.fxPadLink) { d.setFxPadLink(!rig.fxPadLink) }
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+                ChipButton(title: "DRIFT", filled: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }
                 ChipButton(title: "TAKE SAMPLE", filled: false) { d.fxSetting("F 92") }
                 ChipButton(title: "TRIGGER", filled: false) { d.fxSetting("F 93") }
                 ChipButton(title: "SYNC", filled: false) { d.fxSetting("Z") }
@@ -201,6 +197,7 @@ private struct PresetRow: View {
     @ObservedObject var rig: Rig
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
+    var indent = false
     let action: () -> Void
 
     private var exists: Bool { n < Preset.count }
@@ -209,6 +206,7 @@ private struct PresetRow: View {
     var body: some View {
         let chosen = exists && rig.slots.allSatisfy { rig.preset[$0] == n }
         HStack(spacing: 6) {
+            if indent { Text("└").font(.hud(9)).foregroundStyle(PastelTheme.textSecondary).frame(width: 14) }
             HudTag(text: String(format: "%02ld", n + 1),
                    fill: chosen ? PastelTheme.hudOrange : (exists ? PastelTheme.hudBlack : PastelTheme.hudLine), size: 9)
             Text(Preset.names[n])
