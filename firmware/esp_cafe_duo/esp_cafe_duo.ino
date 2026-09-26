@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.13"
+#define FW_VERSION "3.14"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -72,6 +72,7 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <driver/adc.h>
+#include <driver/rtc_io.h>
 volatile uint32_t earth_fail = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
 static volatile bool ble_conn = false;
@@ -731,6 +732,10 @@ void setup() {
 
   // BLE test: start the radio FIRST (clean ADC for its calibration), then the Cafe hardware setup
   Serial.printf("[1b] Starting BLE... Free Heap before: %d bytes\n", ESP.getFreeHeap());
+  // SKIP (GPIO 34) and FLIP (GPIO 35) are plain digital inputs. Their analog (RTC) setting survives a software
+  // restart (v3.12 left GPIO 34 analog = SKIP dead), so give them back to the digital side at every start.
+  rtc_gpio_deinit(GPIO_NUM_34); rtc_gpio_deinit(GPIO_NUM_35);
+  pinMode(34, INPUT); pinMode(35, INPUT);
   pinMode(32, INPUT);                                  // BUTTON (GPIO 32), low = pressed
   delay(5);
   cafe_no_ble = true;                                  // held down for the whole 0.3 s = no Bluetooth
