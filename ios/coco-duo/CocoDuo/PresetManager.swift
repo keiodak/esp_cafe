@@ -22,6 +22,7 @@ struct PresetManagerView: View {
     private func tapSlot(_ i: Int) {
         if bin { var l = rig.design; l[i] = -1; d.setDesign(l) } else { sel = i }
     }
+    @State private var presetsH: CGFloat = 0
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
@@ -59,9 +60,13 @@ struct PresetManagerView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { design.toggle(); sel = design ? 0 : nil; bin = false }      // opens with slot 01 picked
                 }
+                // measure PRESETS: PRESET DESIGN is given exactly this height (one way only: no feedback)
+                .background(GeometryReader { g in Color.clear.preference(key: PresetsHeight.self, value: g.size.height) })
+                .onPreferenceChange(PresetsHeight.self) { h in if abs(h - presetsH) > 0.5 { presetsH = h } }
             } right: {
                 if design {
                     DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
+                        .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                 } else {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
@@ -122,7 +127,7 @@ private struct DesignCard: View {
     @Binding var bin: Bool
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
                 if !g.0.isEmpty {
@@ -423,4 +428,10 @@ struct UpdateRow: View {
                 .frame(width: 150, alignment: .leading)
         }
     }
+}
+
+/// the PRESETS card's height (PRESET DESIGN matches it)
+private struct PresetsHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
