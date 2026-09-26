@@ -25,8 +25,8 @@ struct PresetManagerView: View {
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
         PanelScaffold(title: "PRESET MANAGER") {
-            PanelColumns(equalHeight: design) {
-                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3, fill: design) {
+            PanelColumns {
+                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
                     if design {
                         ForEach(0..<Preset.maxPlaylist, id: \.self) { i in
                             SlotRow(i: i, n: rig.design[i], picked: sel == i)
@@ -122,13 +122,13 @@ private struct DesignCard: View {
     @Binding var bin: Bool
 
     var body: some View {
-        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
+        PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2) {
             // in groups, each starting a new row: played from the phone (top), ours on the Cafe, Apple π
             ForEach(Array(Self.groups.enumerated()), id: \.offset) { _, g in
                 if !g.0.isEmpty {
-                    Text(g.0).font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary)
+                    Text(g.0).font(.hud(7, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).frame(height: 9)
                 }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 2) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 4), alignment: .leading, spacing: 3) {
                     ForEach(g.1, id: \.self) { n in cell(n) }
                 }
                 .padding(.bottom, 2)
