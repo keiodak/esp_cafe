@@ -490,7 +490,7 @@ void IRAM_ATTR resonator() {
     }
     
     // OUTPUT STAGE
-    int32_t final = res_limit(out_accum >> 4); 
+    int32_t final = res_limit((out_accum * 3) >> 7);   // (k.odk) wet ~8 dB quieter: it was far over the dry level 
     
     if (final > 2047) final = 2047;
     if (final < -2047) final = -2047;

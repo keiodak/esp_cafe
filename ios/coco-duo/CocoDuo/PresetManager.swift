@@ -99,7 +99,7 @@ private struct SlotRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            HudTag(text: String(format: "%02ld", i + 1), fill: picked ? PastelTheme.hudOrange : (n >= 0 ? PastelTheme.hudBlack : PastelTheme.hudLine), size: 9)
+            HudTag(text: String(format: "%02ld", i + 1), fill: picked ? PastelTheme.hudOrange : (n < 0 ? PastelTheme.hudLine : (Preset.phonePlayed.contains(n) ? PastelTheme.bleInk : PastelTheme.hudBlack)), size: 9)
             Text(n >= 0 ? Preset.names[n] : "— EMPTY —")
                 .font(.hudBig(13))
                 .foregroundStyle(n >= 0 ? PastelTheme.hudBlack : PastelTheme.textSecondary)
@@ -110,7 +110,7 @@ private struct SlotRow: View {
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 3)
-        .background(Rectangle().fill(picked ? PastelTheme.hudOrange.opacity(0.15) : Color.clear))
+        .background(Rectangle().fill(picked ? PastelTheme.hudOrange.opacity(0.15) : (Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : Color.clear)))
         .overlay(Rectangle().strokeBorder(picked ? PastelTheme.hudOrange : Color.clear, lineWidth: 1))
         .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5) }
         .contentShape(Rectangle())
@@ -144,7 +144,7 @@ private struct DesignCard: View {
                     }
                     .padding(.horizontal, 3)
                     .frame(height: 19)
-                    .background(Rectangle().fill(n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08)))
+                    .background(Rectangle().fill(Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : (n < Preset.count ? PastelTheme.padScreen : PastelTheme.hudOrange.opacity(0.08))))
                     .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture { put(n) }
@@ -337,7 +337,7 @@ private struct PresetRow: View {
         let onA = on(a), onB = on(b)
         HStack(spacing: 6) {
             HudTag(text: String(format: "%02ld", Preset.number(n)),
-                   fill: onA && onB ? PastelTheme.hudOrange : PastelTheme.hudBlack, size: 9)
+                   fill: onA && onB ? PastelTheme.hudOrange : (Preset.phonePlayed.contains(n) ? PastelTheme.bleInk : PastelTheme.hudBlack), size: 9)
             Text(Preset.names[n])
                 .font(.hudBig(13))
                 .foregroundStyle(PastelTheme.hudBlack)
@@ -352,7 +352,7 @@ private struct PresetRow: View {
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 3)
-        .background(Rectangle().fill(onA || onB ? PastelTheme.hudOrange.opacity(0.12) : Color.clear))
+        .background(Rectangle().fill(onA || onB ? PastelTheme.hudOrange.opacity(0.12) : (Preset.phonePlayed.contains(n) ? PastelTheme.bleWash : Color.clear)))
         .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5) }
         .contentShape(Rectangle())
         .onTapGesture { choose(2) }

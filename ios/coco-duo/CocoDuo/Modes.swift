@@ -73,6 +73,8 @@ enum Preset {
     /// how many the firmware has (the pool) and how many the playlist may hold
     static let poolCount = 36
     static let maxPlaylist = 11
+    /// the presets played from the phone over Bluetooth (their rows are tinted)
+    static let phonePlayed: Set<Int> = [2, 9, 10]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)

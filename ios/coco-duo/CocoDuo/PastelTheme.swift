@@ -15,6 +15,9 @@ enum PastelTheme {
     static let hudLine = Color(hex: 0xB4B4AF)
     /// the dot grid
     static let hudDot = Color(hex: 0x9E9E99)
+    /// presets played from the phone over Bluetooth (BLE, MULTI, ARP_DELAY): a cool slate beside the ink
+    static let bleInk = Color(hex: 0x3D5566)
+    static let bleWash = Color(hex: 0x3D5566).opacity(0.09)
 
     // MARK: - ニューモーフィズム(柔らかい影で凹凸を表現するスタイル)基本カラー
     /// 画面全体の背景。ニューモーフィズムの土台になるニュートラルグレー。
