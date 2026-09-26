@@ -68,6 +68,7 @@ struct PresetManagerView: View {
                     DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
                         .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                 } else {
+                if rig.preset.contains(Preset.ble) {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
                         ForEach(0..<4, id: \.self) { m in
@@ -88,6 +89,7 @@ struct PresetManagerView: View {
                             }
                         }
                     }
+                }
                 }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
