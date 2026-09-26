@@ -27,7 +27,7 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.ble) {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
                     HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<4, id: \.self) { m in
+                        ForEach(0..<Preset.modeNames.count, id: \.self) { m in
                             ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m) {
                                 d.setMode(m)
                             }
@@ -37,6 +37,13 @@ struct PresetManagerView: View {
                     .unlit(rig.ctxPreset != Preset.ble)
                     if rig.padSet == .grain {
                         GrainOptions(d: d, grain: d.grain)
+                    }
+                    if rig.padSet == .sidrax {
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
+                            ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
+                            ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+                        }
                     }
                     if rig.padSet == .noise {
                         HStack(spacing: PanelMetrics.chipSpacing) {

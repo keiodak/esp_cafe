@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.44"
+#define FW_VERSION "3.45"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -226,7 +226,7 @@ static void pl_report() {
 //   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
 //   G <n>        switch to preset n (0-based, see the playlist)
-//   M <id> <v>   grain parameter (see mo_update); M 25 <0..3> = BLE preset mode GRAIN / COCO / DELAY / NOISE
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..4> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX · S = SIDRAX (see sx_update)
 //   C <id> <v>   coco parameter (see co_update)
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
@@ -422,6 +422,28 @@ void nz_update() {
   nz_ofold = (int32_t)(fd * 4096.0f);
 }
 
+// ---- SIDRAX parameters (k.odk). "S <id> <0..1000>" ----
+//  0 root (30 Hz .. ~1 kHz)  1 spread (a plate's range: 0 .. 2 octaves)  2 couple (FM between the voices)  3 chaos
+//  4 fold  5 sync  6 cutoff  7 decay (after lifting: 20 ms .. 6 s)  8 aligned (0 free, 1000 aligned)
+void sx_update() {
+  float hz = clock_hz(), p[9];
+  for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
+  sx_base = (uint32_t)(30.0f / hz * 4294967295.0f);
+  sx_root = (int32_t)(p[0] * 5.0f * 256.0f);
+  sx_spread = (int32_t)(p[1] * 2.0f * 256.0f);
+  sx_couple = (int32_t)(p[2] * p[2] * 4096.0f);
+  sx_chaos = (int32_t)(p[3] * 4096.0f);
+  { float cr = 0.3f * powf(60.0f, p[3]); sx_crate = (uint32_t)(cr * 2.0f / hz * 4294967295.0f * 0.875f); }   // 0.3 .. 18 Hz, faster with more chaos
+  sx_drift = (int32_t)(p[3] * 40.0f);
+  sx_fold = (int32_t)(p[4] * 4096.0f);
+  sx_sync = (int32_t)(p[5] * 3900.0f);
+  sx_fc = (int32_t)(p[6] * 9.5f * 256.0f);
+  sx_q = (int32_t)(4096.0f * (1.0f - 0.9f * 0.3f));
+  float sec = 0.02f * powf(300.0f, p[7]);
+  sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (sec * hz))) * 6.0f) + 1;
+  sx_aligned = sx_p[8] >= 500;
+}
+
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
 //  0 VOICE 1 interval  1 VOICE 1 timing  2 VOICE 2 interval  3 VOICE 2 timing  4 cycle (1/4 .. 8 beats)  5 feedback
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
@@ -598,7 +620,7 @@ void fx_update(int e) {
 }
 void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); hd_update(); fx_update_all(); }
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); hd_update(); fx_update_all(); }
 
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
@@ -652,7 +674,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 3 ? 3 : (int)val); }
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 4 ? 4 : (int)val); }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -677,6 +699,15 @@ void pc_line(char *s) {
                 if (id >= 0 && id < 16) { co_p[id] = (int16_t)val; co_update(); }
                 else if (id == 16) co_rev = val != 0;
                 else if (id == 17) co_restart = true;
+              } break;
+    case 'S': {                            // SIDRAX: "S <id> <v>" settings, "S <10+k> <x> <y> <area>" a plate
+                long id = -1, a1 = 0, a2 = 0, a3 = 0; int k = sscanf(s + 1, "%ld %ld %ld %ld", &id, &a1, &a2, &a3);
+                if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
+                if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
+                else if (id >= 10 && id < 14 && k >= 4) {
+                  if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
+                  sx_x[id - 10] = (int16_t)a1; sx_y[id - 10] = (int16_t)a2; sx_a[id - 10] = (int16_t)a3;
+                }
               } break;
     case 'Y': case 'N': case 'V': {
                 long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);

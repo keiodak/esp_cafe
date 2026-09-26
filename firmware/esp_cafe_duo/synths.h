@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE ("M 25 <0..3>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX ("M 25 <0..4>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1749,6 +1749,120 @@ static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
 }
 
 // ==========================================
+// SIDRAX --- mode 4 of the BLE preset (k.odk): a touch organ after Ciat-Lonbarde's Sidrax
+// ==========================================
+// Four voices, one per touch plate (the phone's bottom row of pads: X = pitch, Y = timbre, the touched AREA =
+// how hard: the louder, the brighter and the more it bends the next voice). Each voice is a folded triangle
+// FM'd by the voice before it (a ring: 1 <- 4 <- 3 <- 2 <- 1). ALIGNED = the plates' pitches snap to a scale on
+// the root (they stay in tune with each other) · FREE = anywhere. Lifting a finger lets the voice ring out (DECAY).
+// CHAOS (the top pads): four slow triangle cores in a ring, each flipping the next when it hits a rail
+// (Ciat-Lonbarde-like interlocking), bend each voice's pitch and fold; SYNC = a voice's wrap resets the next one.
+// EARTH (AC) = bends every pitch together. SKIP = all four sound for a moment. main = voices 1 + 3 (+ a little
+// of 2 and 4), ASH = 2 + 4 (+ a little of 1 and 3), YELLOW = high while a plate is touched.
+// Parameters: "S <id> <0..1000>" (0 root, 1 spread, 2 couple, 3 chaos, 4 fold, 5 sync, 6 cutoff, 7 decay,
+// 8 aligned 0|1000) · a plate: "S <10 + k> <x> <y> <area>" (k = 0..3, all 0..1000; area 0 = lifted).
+volatile int16_t sx_p[9] = {350, 450, 300, 250, 250, 0, 700, 350, 1000};
+volatile int32_t sx_chaos = 0, sx_sync = 0;   // chaos depth Q12 · sync Q12
+volatile uint32_t sx_crate = 0;               // the cores' base rate (Q32 per sample)
+volatile int32_t sx_root = 0;              // 1/256 oct above 30 Hz
+volatile int32_t sx_spread = 3072;         // a plate's range, 1/256 oct
+volatile int32_t sx_couple = 1200, sx_fold = 1000;   // Q12
+volatile int32_t sx_fc = 1800, sx_q = 2800;           // cutoff 1/256 oct above 20 Hz, damping Q12
+volatile int32_t sx_rel = 40;               // release step Q16 per sample
+volatile int32_t sx_drift = 0;              // 1/256 oct
+volatile bool sx_aligned = true;
+volatile uint32_t sx_base = 4026531;        // 30 Hz, Q32 per sample (set in sx_update)
+volatile int16_t sx_x[4] = {200, 450, 650, 850}, sx_y[4] = {300, 300, 300, 300}, sx_a[4] = {0, 0, 0, 0};
+volatile bool sx_reset = true, sx_burst = false;
+volatile int sx_gate = 0;
+
+// ALIGNED: a major pentatonic over the plate's range, in 1/256 oct (0 2 4 7 9 semitones, repeating)
+static inline int32_t IRAM_ATTR sx_snap(int32_t o) {
+  static const int32_t deg[5] = {0, 43, 85, 149, 192};   // semitone * 256 / 12
+  int32_t oct = o >= 0 ? o / 256 : -((255 - o) / 256);
+  int32_t r = o - oct * 256, best = 0, bd = 9999;
+  for (int i = 0; i < 6; i++) { int32_t t = i < 5 ? deg[i] : 256; int32_t dd = r > t ? r - t : t - r; if (dd < bd) { bd = dd; best = t; } }
+  return oct * 256 + best;
+}
+
+static int32_t sx_tick(int32_t *rout) {
+  static uint32_t ph[4] = {0, 0x40000000u, 0x80000000u, 0xC0000000u};
+  static int32_t env[4] = {0, 0, 0, 0}, out[4] = {0, 0, 0, 0}, pit[4] = {0, 0, 0, 0};
+  static int32_t dr[4] = {0, 0, 0, 0}, dt[4] = {0, 0, 0, 0};
+  static uint32_t rnd = 0x1234567u, cnt = 0;
+  static int32_t la = 0, ba = 0, lb = 0, bb = 0;
+  static uint32_t cph[4] = {0, 0x30000000u, 0x70000000u, 0xB0000000u};   // the chaos cores (triangles)
+  static int8_t cdir[4] = {1, -1, 1, -1};
+  static bool wrapped[4] = {false, false, false, false};
+  if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } la = ba = lb = bb = 0; }
+  // DRIFT: every ~30 ms each voice gets a new slow target, glided to
+  if ((++cnt & 1023) == 0) for (int k = 0; k < 4; k++) { rnd = rnd * 1664525u + 1013904223u; dt[k] = (int32_t)((((int64_t)(rnd >> 16) - 32768) * sx_drift) >> 15); }
+  int32_t em = pc_emod * 3;                                  // EARTH: about ±1.5 octaves at full swing
+  // CHAOS: four triangle cores at different speeds; one hitting a rail turns the next one around
+  int32_t cv[4];
+  if (sx_chaos > 0) {
+    static const uint16_t mul[4] = {4096, 6317, 9133, 14011};      // 1 · 1.54 · 2.23 · 3.42
+    for (int k = 0; k < 4; k++) {
+      uint32_t st = (uint32_t)(((uint64_t)sx_crate * mul[k]) >> 12);
+      uint32_t o = cph[k];
+      if (cdir[k] > 0) { cph[k] += st; if (cph[k] < o || cph[k] > 0xF0000000u) { cph[k] = 0xF0000000u; cdir[k] = -1; cdir[(k + 1) & 3] = -cdir[(k + 1) & 3]; } }
+      else { cph[k] -= st; if (cph[k] > o || cph[k] < 0x10000000u) { cph[k] = 0x10000000u; cdir[k] = 1; cdir[(k + 1) & 3] = -cdir[(k + 1) & 3]; } }
+      cv[k] = (int32_t)(cph[k] >> 20) - 2048;                         // ±~1900
+    }
+  } else { cv[0] = cv[1] = cv[2] = cv[3] = 0; }
+  bool wr[4] = {false, false, false, false};
+  int32_t press = 0, touched = 0;
+  for (int k = 0; k < 4; k++) {
+    dr[k] += (dt[k] - dr[k]) >> 12;
+    int32_t a = sx_burst ? 700 : sx_a[k];                    // 0..1000
+    if (a > 0) touched = 1;
+    // pitch: the plate's place + its X over the spread (snapped when ALIGNED), glided a little
+    int32_t o = (k * 5 * 256) / 12 + (int32_t)(((int64_t)sx_x[k] * sx_spread) / 1000);
+    if (sx_aligned) o = sx_snap(o);
+    o += sx_root;
+    pit[k] += (o - pit[k]) >> 7;
+    int32_t oo = pit[k] + dr[k] + em + (int32_t)(((int64_t)cv[k] * sx_chaos) >> 15);   // CHAOS: up to ±1 oct
+    if (oo < 0) oo = 0; if (oo > 7 * 256) oo = 7 * 256;
+    uint32_t inc = (uint32_t)(((uint64_t)sx_base * bj_exp2(oo)) >> 16);
+    // FM from the voice before, deeper the harder this plate is pressed
+    int32_t cp = (sx_couple * (1024 + a * 3)) >> 12;          // Q12
+    int32_t m = out[(k + 3) & 3];                            // ±2048
+    inc = (uint32_t)((int64_t)inc + (((int64_t)inc * m * cp) >> 23));
+    uint32_t op = ph[k];
+    ph[k] += inc;
+    if (ph[k] < op) wr[k] = true;
+    if (sx_sync > 0 && wrapped[(k + 3) & 3]) ph[k] = (uint32_t)(((uint64_t)ph[k] * (4096 - sx_sync)) >> 12);   // SYNC to the voice before
+    int32_t t = (int32_t)(ph[k] >> 20);
+    int32_t tri = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;     // ±2048
+    // timbre: Y folds the triangle, pressing folds it more
+    int32_t f = sx_fold + ((int32_t)sx_y[k] * 4) + a * 2 + (int32_t)(((int64_t)(cv[(k + 2) & 3] + 2048) * sx_chaos) >> 13);
+    if (f < 0) f = 0;
+    int32_t w = nz_fold((int32_t)(((int64_t)tri * (4096 + f)) >> 12));
+    // envelope: area -> level (a quick rise, DECAY after lifting)
+    int32_t tg = (a * 4096) / 1000;
+    if (tg > env[k]) env[k] += (tg - env[k]) >> 6;
+    else env[k] += (int32_t)(((int64_t)(tg - env[k]) * sx_rel) >> 16);
+    out[k] = (w * env[k]) >> 12;
+    press += a;
+  }
+  for (int k = 0; k < 4; k++) wrapped[k] = wr[k];
+  sx_gate = touched;
+  int32_t xl = (out[0] + out[2]) / 2 + (out[1] + out[3]) / 6;
+  int32_t xr = (out[1] + out[3]) / 2 + (out[0] + out[2]) / 6;
+  // filter: CUTOFF + the whole hand (all four areas) opens it
+  int32_t oc = sx_fc + press / 2;
+  if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
+  int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
+  if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
+  la += (fq * ba) >> 12; int32_t hl = xl - la - ((sx_q * ba) >> 12); ba += (fq * hl) >> 12;
+  lb += (fq * bb) >> 12; int32_t hr = xr - lb - ((sx_q * bb) >> 12); bb += (fq * hr) >> 12;
+  if (la > 32767) la = 32767; if (la < -32768) la = -32768; if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;
+  if (lb > 32767) lb = 32767; if (lb < -32768) lb = -32768; if (bb > 32767) bb = 32767; if (bb < -32768) bb = -32768;
+  *rout = nz_tanh(lb * 2);                                  // (a little hotter, the tanh keeps it round)
+  return nz_tanh(la * 2);
+}
+
+// ==========================================
 // COCO --- mode 1 of the BLE preset (k.odk)
 // ==========================================
 // coco with a separate play head: the record head keeps writing the input (BUTTON / REC key = hold),
@@ -1910,6 +2024,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 1) co_reset = true;
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
+    else if (cur == 4) sx_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -1920,9 +2035,10 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 1) co_reset = true;
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
+      else if (cur == 4) sx_reset = true;
     }
   } else if (mg < 4096) mg += 16;
-  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3;
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4;
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
   // --- SKIP: GRAIN = restart the score · COCO = back to the loop start · DELAY = tap tempo · NOISE = burst (held) ---
@@ -1937,6 +2053,7 @@ void IRAM_ATTR coco_pc() {
     }
   }
   nz_burst = nmode && SKIPPERAT;
+  sx_burst = smode && SKIPPERAT;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
   bool rec = (gmode || bmode) && pc_rec && !audio_frozen_state && !frz;
@@ -1963,6 +2080,8 @@ void IRAM_ATTR coco_pc() {
   } else if (dmode) {
     bool hold = dl_hold || FLIPPERAT || audio_frozen_state;
     l = dl_tick(gyo - 2048, &r, hold);
+  } else if (smode) {
+    l = sx_tick(&r);
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -1995,7 +2114,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = nz_gate;
+  } else y = smode ? sx_gate : nz_gate;
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2019,8 +2138,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode) {
-    if (nz_gate) {
+  } else if (nmode || smode) {
+    if (smode ? sx_gate : nz_gate) {
       LAMP_ON;
     } else {
       LAMP_OFF;

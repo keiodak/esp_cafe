@@ -84,6 +84,7 @@ final class Director: ObservableObject {
         case .coco: return rig.coAxes
         case .delay: return rig.dlAxes
         case .noise: return rig.nzAxes
+        case .sidrax: return rig.sxAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -111,6 +112,7 @@ final class Director: ObservableObject {
             case 0: grain.allCommands(slot: s).forEach(u.send)
             case 1: rig.coAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
+            case 4: rig.sxAll().forEach(u.send)
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -159,7 +161,7 @@ final class Director: ObservableObject {
     }
 
     func cycleMode() {
-        if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % 4) }
+        if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
         else if rig.ctxPreset == Preset.arp { setArpMode(1 - rig.arpMode) }       // ARP <-> SPEECH
     }
 
@@ -185,7 +187,7 @@ final class Director: ObservableObject {
     /// both Cafes on the same thing: start them together (grain score / coco loop / the click)
     func syncIfPair() {
         let u = ctxUnits()
-        if u.count == 2 && rig.padSet != .knob && rig.padSet != .noise { u.forEach { $0.send("Z") } }
+        if u.count == 2 && rig.padSet != .knob && rig.padSet != .noise && rig.padSet != .sidrax { u.forEach { $0.send("Z") } }
     }
     func sync() { ctxUnits().forEach { $0.send("Z") } }
 
@@ -202,6 +204,8 @@ final class Director: ObservableObject {
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
+        case .sidrax:
+            for u in ctxUnits() { rig.sxCommands(pad: i).forEach(u.send) }
         case .delay, .harmony:
             let delay = rig.padSet == .delay
             let axes = delay ? rig.dlAxes : rig.hdAxes
@@ -528,6 +532,18 @@ final class Director: ObservableObject {
         ctxUnits().forEach { $0.send("N 15 \(rig.nzSpeed * 500)") }
     }
 
+    // MARK: SIDRAX
+    func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
+    /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
+    func setSxHold(_ on: Bool) {
+        rig.sxHold = on
+        if !on { rig.sxArea = [0, 0, 0, 0]; for k in 0..<4 { padMoved(4 + k) } }
+    }
+    func sxDice() {
+        for i in 0..<4 { rig.sxAxes[i].x = Double.random(in: 0.05...0.95); rig.sxAxes[i].y = Double.random(in: 0.0...0.8) }
+        for i in 0..<4 { padMoved(i) }
+    }
+
     func noiseDice() {
         rig.nzDice()
         for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }
@@ -629,6 +645,7 @@ private struct MainScreen: View {
         case .coco: return (rig.coAxes[i], CoPad(rawValue: i)!.title)
         case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
+        case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -649,13 +666,21 @@ private struct MainScreen: View {
         case .speech:
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
+        case .sidrax:
+            if i >= 4 { return nil }
+            return { x, y in SxPad.caption(i, x, y) }
         default:
             return nil
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if rig.isTapPad(i) {
+        if rig.padSet == .sidrax && i >= 4 {                  // SIDRAX: the bottom row = four touch plates
+            let director = d
+            PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
+                .frame(height: padHeight)
+                .id("sx\(i)")
+        } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
                 .frame(height: padHeight)
         } else {
@@ -864,7 +889,7 @@ private struct HudBar: View {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
                         key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 1 ? "waveform.and.mic" : "pianokeys")
-                                                        : Preset.modeIcons[min(max(rig.ctxMode, 0), 3)], on: false,
+                                                        : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
                 }
@@ -901,7 +926,7 @@ private struct HudBar: View {
                 .lineLimit(1)
             HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 9)
             if p == Preset.ble {
-                Text(Preset.modeNames[min(max(m, 0), 3)])
+                Text(Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)])
                     .font(.hud(9, .semibold))
                     .tracking(1)
                     .foregroundStyle(PastelTheme.hudOrange)
@@ -979,6 +1004,13 @@ private struct HudBar: View {
                 else { key("arrow.triangle.2.circlepath") { d.sync() } }       // HARMONY: cycles start together
             default: key("hand.tap") { d.tapTempo() }
             }
+        case .sidrax:
+            switch n {
+            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
+            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
+            case 2: key("dice") { d.sxDice() }
+            default: blank
+            }
         case .noise:
             switch n {
             case 0: key("dice") { d.noiseDice() }
@@ -1025,6 +1057,7 @@ private struct HudBar: View {
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
+        "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
         "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
     ]

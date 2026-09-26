@@ -85,13 +85,13 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE"]
+    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX"]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable"]
+    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -100,7 +100,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, delay, noise, sidrax, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -291,6 +291,18 @@ final class Rig: ObservableObject {
     let dlAxes: [PadAxis] = (0..<8).map { PadAxis(DlPad(rawValue: $0 % 4)!.start) }
     let hdAxes: [PadAxis] = (0..<8).map { PadAxis(HdPad(rawValue: $0 % 4)!.start) }
     let nzAxes: [PadAxis] = NzPad.allCases.map { PadAxis($0.start) }
+    /// SIDRAX: the four settings pads, then the four plates (their X / Y; the touched area is in sxArea)
+    let sxAxes: [PadAxis] = SxPad.starts.map { PadAxis($0) }
+    @Published var sxArea: [Double] = [0, 0, 0, 0]
+    @Published var sxAligned = true
+    @Published var sxHold = false
+    func sxCommands(pad i: Int) -> [String] {
+        let a = sxAxes[i]
+        if i < 4 { return ["S \(2 * i) \(Int((a.x * 1000).rounded()))", "S \(2 * i + 1) \(Int((a.y * 1000).rounded()))"] }
+        let k = i - 4
+        return ["S \(10 + k) \(Int((a.x * 1000).rounded())) \(Int((a.y * 1000).rounded())) \(Int((sxArea[k] * 1000).rounded()))"]
+    }
+    func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 
@@ -346,7 +358,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .coco, .delay, .noise][min(max(ctxMode, 0), 3)]
+        return [PadSet.grain, .coco, .delay, .noise, .sidrax][min(max(ctxMode, 0), 4)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
