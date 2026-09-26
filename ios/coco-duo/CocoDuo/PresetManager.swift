@@ -18,12 +18,15 @@ struct PresetManagerView: View {
 
     private let who = ["A", "B", "A + B"]
 
-    private func section(_ t: String) -> some View {
-        Text(t)
-            .font(.hud(7, .semibold))
-            .tracking(1.2)
-            .foregroundStyle(PastelTheme.hudOrange)
-            .padding(.top, 4)
+    private func section(_ t: String, _ c: Color) -> some View {
+        HStack(spacing: 5) {
+            Rectangle().fill(c).frame(width: 3, height: 9)
+            Text(t)
+                .font(.hud(7, .semibold))
+                .tracking(1.2)
+                .foregroundStyle(c)
+        }
+        .padding(.top, 4)
     }
 
     var body: some View {
@@ -38,7 +41,7 @@ struct PresetManagerView: View {
                 }
                 PanelCard(title: "PRESETS", note: "tap one", spacing: 3) {
                     // played from here: BLE (its four modes right under it), MULTI, then iOS + CAFE
-                    section("PLAYED HERE")
+                    section("PLAYED HERE", PastelTheme.cafeBlue)
                     PresetRow(n: Preset.ble, rig: rig, a: a, b: b) { d.setPreset(Preset.ble) }
                     HStack(spacing: PanelMetrics.chipSpacing) {
                         Text("└").font(.hud(9)).foregroundStyle(PastelTheme.textSecondary).frame(width: 14)
@@ -47,13 +50,14 @@ struct PresetManagerView: View {
                                 if rig.ctxPreset != Preset.ble { d.setPreset(Preset.ble) }
                                 d.setMode(m)
                             }
+                            .overlay(alignment: .bottom) { Rectangle().fill(PastelTheme.mode(m)).frame(height: 2) }
                         }
                     }
                     .padding(.vertical, 2)
                     PresetRow(n: Preset.multi, rig: rig, a: a, b: b) { d.setPreset(Preset.multi) }
-                    section("iOS + CAFE")
+                    section("iOS + CAFE", PastelTheme.cafePurple)
                     PresetRow(n: Preset.arp, rig: rig, a: a, b: b, indent: true) { d.setPreset(Preset.arp) }
-                    section("ON THE CAFE")
+                    section("ON THE CAFE", PastelTheme.cafeGreen)
                     ForEach(Preset.cafeOrder, id: \.self) { n in
                         PresetRow(n: n, rig: rig, a: a, b: b) { d.setPreset(n) }
                     }

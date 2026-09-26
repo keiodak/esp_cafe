@@ -499,6 +499,20 @@ private struct MainScreen: View {
         }
     }
 
+    /// the pads wear the Cafe colours: BLE modes, MULTI effects, iOS (purple) / Cafe (blue) in ARP_DELAY
+    private func accent(_ i: Int) -> Color {
+        switch rig.padSet {
+        case .grain: return PastelTheme.mode(0)
+        case .coco: return PastelTheme.mode(1)
+        case .delay: return PastelTheme.mode(2)
+        case .noise: return PastelTheme.mode(3)
+        case .multi: return PastelTheme.fx(rig.fxLocal[i / 4])
+        case .harmony: return PastelTheme.cafeGreen
+        case .arp: return i < 4 ? PastelTheme.cafePurple : PastelTheme.cafeBlue
+        case .knob: return PastelTheme.hudOrange
+        }
+    }
+
     @ViewBuilder private func pad(_ i: Int) -> some View {
         if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
@@ -511,7 +525,8 @@ private struct MainScreen: View {
         let director = d
         HudPad(axis: item.0, title: item.1, tag: tag,
                send: { director.padMoved(i) },
-               cam: camera.state, cameraMode: camera.enabled, index: i, padHeight: padHeight, caption: caption)
+               cam: camera.state, cameraMode: camera.enabled, index: i, padHeight: padHeight, caption: caption,
+               accent: accent(i))
             .frame(height: padHeight)
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
@@ -542,6 +557,8 @@ private struct HudPad: View {
     let index: Int
     let padHeight: CGFloat
     var caption: ((Double, Double) -> String)? = nil
+    /// the Cafe colour of what this pad plays (BLE mode, MULTI effect, iOS / Cafe side)
+    var accent: Color = PastelTheme.hudOrange
 
     private var edgeGlow: Double {
         guard cameraMode else { return 0 }
@@ -571,11 +588,11 @@ private struct HudPad: View {
         )
         .overlay(alignment: .topLeading) {
             HStack(spacing: 4) {
-                HudTag(text: tag, size: 7)
+                HudTag(text: tag, fill: accent, size: 7)
                 Text(title.replacingOccurrences(of: " · ", with: "_").replacingOccurrences(of: " ", with: "_"))
                     .font(.hud(8, .semibold))
                     .tracking(0.8)
-                    .foregroundStyle(PastelTheme.hudOrange)
+                    .foregroundStyle(accent)
             }
             .padding(.leading, 7)
             .padding(.top, 6)
@@ -736,13 +753,14 @@ private struct HudBar: View {
                 Text(Preset.modeNames[min(max(m, 0), 3)])
                     .font(.hud(10, .semibold))
                     .tracking(1)
-                    .foregroundStyle(PastelTheme.hudOrange)
+                    .foregroundStyle(PastelTheme.mode(m))
             }
             if p == Preset.multi {
-                Text(Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)])
+                let fe = min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)
+                Text(Fx.names[fe])
                     .font(.hud(10, .semibold))
                     .tracking(1)
-                    .foregroundStyle(PastelTheme.hudOrange)
+                    .foregroundStyle(PastelTheme.fx(fe))
                 if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 7) }
             }
             if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {

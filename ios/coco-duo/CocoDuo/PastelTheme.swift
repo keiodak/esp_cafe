@@ -16,6 +16,20 @@ enum PastelTheme {
     /// the dot grid
     static let hudDot = Color(hex: 0x9E9E99)
 
+    // the Cafe's own colours (its jacks): used for what they stand for, next to the one orange
+    static let cafeBlue = Color(hex: 0x2E63B8)
+    static let cafeGreen = Color(hex: 0x2F8A57)
+    static let cafeGray = Color(hex: 0x8C8C88)
+    static let cafePurple = Color(hex: 0x7B4FA6)
+    static let cafeBrown = Color(hex: 0x8B5A36)
+    static let cafeYellow = Color(hex: 0xE3AE12)
+    /// EARTH = brown · ASH = gray · YELLOW = yellow · FLIP = blue · SKIP = green · BUTTON = purple
+    static let earth = cafeBrown, ash = cafeGray, yellow = cafeYellow, flip = cafeBlue, skip = cafeGreen, button = cafePurple
+    /// BLE modes: GRAIN blue · COCO green · DELAY purple · NOISE brown
+    static func mode(_ m: Int) -> Color { [cafeBlue, cafeGreen, cafePurple, cafeBrown][min(max(m, 0), 3)] }
+    /// MULTI effects, in turn
+    static func fx(_ e: Int) -> Color { [cafeGray, cafeBlue, cafeGreen, cafePurple, cafeBrown, cafeYellow, cafeBlue, cafeGreen][min(max(e, 0), 7)] }
+
     // MARK: - ニューモーフィズム(柔らかい影で凹凸を表現するスタイル)基本カラー
     /// 画面全体の背景。ニューモーフィズムの土台になるニュートラルグレー。
     static let screenBackground = Color(hex: 0xE2E2DE)

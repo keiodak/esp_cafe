@@ -77,13 +77,13 @@ private struct CafeWaveCard: View {
             // what the Cafe's own inputs are doing
             HStack(spacing: PanelMetrics.rowGap) {
                 Text("EARTH")
-                    .font(.hud(PanelMetrics.labelFont, .medium))
-                    .foregroundStyle(PastelTheme.textPrimary)
+                    .font(.hud(PanelMetrics.labelFont, .semibold))
+                    .foregroundStyle(PastelTheme.earth)
                     .frame(width: PanelMetrics.labelWidth, alignment: .leading)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Rectangle().strokeBorder(PastelTheme.textPrimary.opacity(0.45), lineWidth: 1)
-                        Rectangle().fill(PastelTheme.textPrimary.opacity(0.8))
+                        Rectangle().fill(PastelTheme.earth)
                             .frame(width: max(0, (geo.size.width - 2) * CGFloat(unit.earth) / 255))
                             .padding(1)
                     }
@@ -91,9 +91,9 @@ private struct CafeWaveCard: View {
                 .frame(height: 8)
             }
             HStack(spacing: 12) {
-                lamp("FLIP", unit.flip)
-                lamp("SKIP", unit.skip)
-                lamp("BUTTON", unit.button)
+                lamp("FLIP", unit.flip, PastelTheme.flip)
+                lamp("SKIP", unit.skip, PastelTheme.skip)
+                lamp("BUTTON", unit.button, PastelTheme.button)
                 Spacer(minLength: 0)
             }
             DiagRow("CLOCK", unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")
@@ -124,15 +124,15 @@ private struct CafeWaveCard: View {
         }
     }
 
-    private func lamp(_ name: String, _ on: Bool) -> some View {
+    private func lamp(_ name: String, _ on: Bool, _ c: Color) -> some View {
         HStack(spacing: 5) {
             Rectangle()
-                .fill(on ? PastelTheme.textPrimary : Color.clear)
-                .overlay(Rectangle().strokeBorder(PastelTheme.textPrimary, lineWidth: 1))
+                .fill(on ? c : Color.clear)
+                .overlay(Rectangle().strokeBorder(c, lineWidth: 1))
                 .frame(width: 8, height: 8)
             Text(name)
-                .font(.hud(PanelMetrics.labelFont, .medium))
-                .foregroundStyle(PastelTheme.textPrimary)
+                .font(.hud(PanelMetrics.labelFont, .semibold))
+                .foregroundStyle(c)
         }
     }
 }
@@ -208,15 +208,10 @@ private struct OutWindow: View {
                     p.move(to: CGPoint(x: x, y: lo))
                     p.addLine(to: CGPoint(x: x, y: min(hi, lo - 0.8)))
                 }
-                ctx.stroke(p, with: .color(yellow ? PastelTheme.hudOrange : PastelTheme.hudBlack), lineWidth: max(1, w * 0.9))
+                ctx.stroke(p, with: .color(yellow ? PastelTheme.yellow : PastelTheme.ash), lineWidth: max(1, w * 0.9))
             }
-            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
-            Text(title)
-                .font(.hud(7, .semibold))
-                .tracking(1)
-                .foregroundStyle(PastelTheme.hudBlack)
-                .padding(.horizontal, 3)
-                .background(PastelTheme.padScreen)
+            Rectangle().strokeBorder(yellow ? PastelTheme.yellow : PastelTheme.ash, lineWidth: 1)
+            HudTag(text: title, fill: yellow ? PastelTheme.yellow : PastelTheme.ash, size: 7)
                 .padding(3)
         }
     }
