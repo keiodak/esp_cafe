@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.50"
+#define FW_VERSION "3.52"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -443,6 +443,25 @@ void sx_update() {
   sx_rel = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.45f * hz)))) + 1;          // a little release (~0.45 s)
   sx_pan = 2048;
   sx_aligned = sx_p[8] >= 500;
+  // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
+  static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
+                                    {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
+  static const int8_t cdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}, {0, 3, 6, 9}, {0, 4, 8, 12}, {0, 4, 9, 13}, {0, 100, 102, 104}};
+  static const int8_t csem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
+  float clk = sx_hz > 1000 ? sx_hz : hz;
+  int ch = sx_chord < 0 ? 0 : (sx_chord > 6 ? 6 : sx_chord);
+  int keyS = (int)(p[1] * 11.99f);
+  for (int k = 0; k < 4; k++) {
+    int semi;
+    if (sx_aligned && sx_scale >= 1 && sx_scale <= 6) {
+      int n = 0; while (n < 12 && sc[sx_scale][n] >= 0) n++;
+      int d = cdeg[ch][k]; if (d >= 100) d = n * (d - 99);
+      semi = sc[sx_scale][d % n] + 12 * (d / n);
+    } else semi = csem[ch][k];
+    float f = 32.703f * powf(2.0f, (sx_oct * 12 + keyS + semi) / 12.0f);
+    if (f > clk * 0.2f) f = clk * 0.2f;
+    sx_inc[k] = (uint32_t)(f / clk * 4294967296.0f);
+  }
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -705,6 +724,7 @@ void pc_line(char *s) {
                 long id = -1, a1 = 0, a2 = 0, a3 = 0; int k = sscanf(s + 1, "%ld %ld %ld %ld", &id, &a1, &a2, &a3);
                 if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
+                else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
                   sx_x[id - 10] = (int16_t)a1; sx_y[id - 10] = (int16_t)a2; sx_a[id - 10] = (int16_t)a3;

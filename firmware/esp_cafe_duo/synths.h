@@ -1772,6 +1772,8 @@ static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}
 static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
+volatile uint32_t sx_inc[4] = {0, 0, 0, 0};   // each plate's exact phase step (sx_update)
+volatile int sx_role = 2;   // SIDRAX across two Cafes: 0 = A, 1 = B, 2 = alone (both halves) — "S 9 <n>"
 volatile bool grit_off = false;   // SIDRAX: CHAR's grit is bypassed (pure) while this preset load lasts
 volatile int32_t sx_relk[4] = {5, 5, 5, 5};  // each plate's release: its Y (up = longer), set with the plate
 volatile int32_t sx_pan = 2048;            // Q12: how far press / release swing to the sides
@@ -1810,22 +1812,9 @@ static int32_t sx_tick(int32_t *rout) {
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
     if (a > 0) touched = 1;
-    // pitch: each plate is ONE note (like a Sidrax bar) — moving on it changes nothing. CHORD picks which notes the
-    // four plates are: degrees of the SCALE on the KEY, or (FREE) semitones above the key. OCTAVE = the register.
-    int32_t o;
-    int ch = sx_chord < 0 ? 0 : (sx_chord > 6 ? 6 : sx_chord);
-    if (sx_aligned && sx_scale >= 1 && sx_scale <= 6) {
-      int n = 0; while (n < 12 && sx_scales[sx_scale][n] >= 0) n++;
-      int deg = sx_chdeg[ch][k];
-      if (deg >= 100) deg = n * (deg - 99);                  // (100 = an octave up, in any scale)
-      o = sx_oct * 256 + sx_key + ((sx_scales[sx_scale][deg % n] + 12 * (deg / n)) * 256) / 12;
-    } else {
-      o = sx_oct * 256 + sx_key + (sx_chsem[ch][k] * 256) / 12;
-    }
-    pit[k] += (o - pit[k]) >> 7;
-    int32_t oo = pit[k];
-    if (oo < 0) oo = 0; if (oo > 7 * 256) oo = 7 * 256;
-    uint32_t inc = (uint32_t)(((uint64_t)sx_base * bj_exp2(oo)) >> 16);
+    // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
+    // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
+    uint32_t inc = sx_inc[k];
     // CHAOS: the one on the left modulates this one · SELF: this one modulates itself (triangle -> saw)
     int32_t left = out[(k + 3) & 3];                         // (its last sample, ±2048 · level)
     int32_t sf = sx_self;                                    // Q12 (the plates only tune and play: no modulation from them)
@@ -1844,28 +1833,34 @@ static int32_t sx_tick(int32_t *rout) {
       if ((int32_t)(rnd >> 20) < sx_glitch) ph[k] = 0u - ph[k];
     }
     lastLeft[k] = left;
-    // SEESAW (the Sidrax's press / release): pressing sounds on one side — as loud as the touched area, a soft
-    // ~40 ms rise — and lifting sounds on the OTHER side: the note swings over and rings out there (the plate's Y =
-    // how long). Plates alternate: 1 and 3 press left / release right, 2 and 4 press right / release left.
-    static int32_t eR1[4] = {0, 0, 0, 0}, eR[4] = {0, 0, 0, 0};
+    // SEESAW across the two Cafes (the Sidrax's press / release): a plate sounds on one Cafe while pressed — as loud
+    // as the touched area, a soft ~40 ms rise — and when it is lifted the note crossfades over to the OTHER Cafe
+    // (from that moment, ~60 ms) and rings out there (the plate's Y = how long). Plates 1 and 3 press on A / release
+    // on B, plates 2 and 4 press on B / release on A. One Cafe alone (role "both") does both halves itself.
+    static int32_t eRt[4] = {0, 0, 0, 0}, eR1[4] = {0, 0, 0, 0}, eR[4] = {0, 0, 0, 0};
     bool h = a > 0;
-    if (!h && held[k]) { int32_t lv = env[k] << 12; if (lv > eR1[k]) eR1[k] = lv; }   // lifted: the other side takes it
+    if (!h && held[k]) { int32_t lv = env[k] << 12; if (lv > eRt[k]) eRt[k] = lv; }   // lifted: the other Cafe takes it
     held[k] = h;
     if (h) {
       int32_t tq = ((a * 4096) / 1000) << 12;                // (12 extra bits: long releases must not stall)
       env1[k] += ((tq - env1[k]) >> 9) + (tq > env1[k] ? 1 : 0);
-      eR1[k] -= eR1[k] >> 9;                                 // pressed again: the release side fades out
+      eRt[k] -= (eRt[k] >> 9) + (eRt[k] > 0 ? 1 : 0);        // pressed again: the release side fades out
     } else {
-      env1[k] -= (env1[k] >> 9) + (env1[k] > 0 ? 1 : 0);     // the press side lets go quickly (~40 ms)
-      eR1[k] += (int32_t)(((int64_t)(0 - eR1[k]) * sx_relk[k]) >> 16);   // RELEASE: the plate's Y
+      env1[k] -= (env1[k] >> 11) + (env1[k] > 0 ? 1 : 0);    // the press side hands over (~60 ms crossfade)
+      eRt[k] += (int32_t)(((int64_t)(0 - eRt[k]) * sx_relk[k]) >> 16);   // RELEASE: the plate's Y
     }
     if (env1[k] < 0) env1[k] = 0;
+    if (eRt[k] < 0) eRt[k] = 0;
+    eR1[k] += (eRt[k] - eR1[k]) >> 11;                       // the other Cafe comes in over the same ~60 ms
     env[k] += ((env1[k] >> 12) - env[k]) >> 8;
     eR[k] += ((eR1[k] >> 12) - eR[k]) >> 8;
     out[k] = tri;                                            // (the circle hears the oscillator itself)
-    int32_t vp = (tri * env[k]) >> 12, vr = (tri * eR[k]) >> 12;
-    if (k & 1) { r += vp; l += vr; } else { l += vp; r += vr; }
+    int side = k & 1;                                        // 0 = presses on A, 1 = presses on B
+    bool pressHere = sx_role == 2 || sx_role == side, relHere = sx_role == 2 || sx_role == 1 - side;
+    if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
+    if (relHere) l += (tri * eR[k]) >> 13;
   }
+  r = l;                                                     // (one Cafe = one side: main and ASH the same)
   sx_gate = touched;
   int32_t ol = l, orr = r;                                   // (no filter: the triangles as they are; a soft ceiling only near the top)
   if (ol > 1600) ol = 1600 + ((ol - 1600) >> 2); if (ol < -1600) ol = -1600 + ((ol + 1600) >> 2);

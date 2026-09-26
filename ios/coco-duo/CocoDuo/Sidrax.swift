@@ -1,10 +1,10 @@
 // Sidrax.swift — coco duo (k.odk)
 // SIDRAX: mode 5 of the BLE preset, after Ciat-Lonbarde's Sidrax Organ (firmware: sx_tick, "S" lines).
-// Plain triangle oscillators, one per touch PLATE (bottom row): each plate is one note, the touched AREA = the volume,
-// where the finger is up the plate = how long it rings after lifting (bottom 0.05 s … top 6 s).
+// Plain triangle oscillators, one per touch PLATE (bottom row): each plate is one note, the touched AREA = the volume.
+// SEESAW across the two Cafes: plates 1 and 3 sound on A while pressed and, lifted, crossfade over to B and ring out
+// there; plates 2 and 4 the other way round. How long it rings = where the finger was up the plate (0.05 … 6 s).
 // Top row: SCALE · KEY (left) and CHORD · OCTAVE (right) decide the four notes; in between FM · SELF (mutual FM, and
-// each on itself) and CHAOS · GLITCH (each one FMs the one on its right, in a circle · a triangle turns round when the
-// one on its left crosses zero). ALIGN off = FREE (the chords in semitones). HOLD keeps the plates sounding.
+// each on itself) and CHAOS · GLITCH (the Sidrax's circle of FM · a triangle turning round). One Cafe alone does both.
 
 import SwiftUI
 import UIKit

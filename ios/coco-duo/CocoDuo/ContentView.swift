@@ -112,7 +112,7 @@ final class Director: ObservableObject {
             case 0: grain.allCommands(slot: s).forEach(u.send)
             case 1: rig.coAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
-            case 4: rig.sxAll().forEach(u.send)
+            case 4: rig.sxAll().forEach(u.send); sxRoles()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -533,6 +533,11 @@ final class Director: ObservableObject {
     }
 
     // MARK: SIDRAX
+    /// the seesaw needs to know which Cafe is which: two on SIDRAX = A (0) and B (1); one alone plays both halves (2)
+    func sxRoles() {
+        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 4 }
+        for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
+    }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
