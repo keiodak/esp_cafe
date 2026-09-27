@@ -87,6 +87,7 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
+        case .benjo: return rig.bnAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -116,6 +117,7 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
+            case 6: rig.bnAll().forEach(u.send); sxRoles()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -211,6 +213,8 @@ final class Director: ObservableObject {
             for u in ctxUnits() { rig.sxCommands(pad: i).forEach(u.send) }
         case .wave:
             for u in ctxUnits() { rig.wvCommands(pad: i).forEach(u.send) }
+        case .benjo:
+            for u in ctxUnits() { rig.bnCommands(pad: i).forEach(u.send) }
         case .delay, .harmony:
             let delay = rig.padSet == .delay
             let axes = delay ? rig.dlAxes : rig.hdAxes
@@ -540,7 +544,7 @@ final class Director: ObservableObject {
     // MARK: SIDRAX
     /// the seesaw needs to know which Cafe is which: two on SIDRAX = A (0) and B (1); one alone plays both halves (2)
     func sxRoles() {
-        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && (rig.mode[$0.slot] == 4 || rig.mode[$0.slot] == 5) }
+        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] >= 4 && rig.mode[$0.slot] <= 6 }
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
@@ -549,8 +553,6 @@ final class Director: ObservableObject {
         rig.sxHold = on
         if !on { rig.sxArea = [0, 0, 0, 0]; for k in 0..<4 { padMoved(4 + k) } }
     }
-    /// WAVE: the four switches' rows
-    func sendWvRows() { for u in ctxUnits() { rig.wvRows().forEach(u.send) } }
     /// WAVE: an audio file -> a 64-frame wavetable -> the start of the tape of every Cafe on WAVE
     func loadWaveTable(_ url: URL) {
         let targets = ctxUnits()
@@ -572,6 +574,12 @@ final class Director: ObservableObject {
     func sxDice() {
         for i in 0..<4 { rig.sxAxes[i].x = Double.random(in: 0.05...0.95); rig.sxAxes[i].y = Double.random(in: 0.0...0.8) }
         for i in 0..<4 { padMoved(i) }
+    }
+
+    /// BENJO: new places for the oscillators, the filter and the cross-modulation
+    func bnDice() {
+        rig.bnDice()
+        for i in 0..<5 { padMoved(i) }
     }
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
@@ -682,6 +690,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
+        case .benjo: return (rig.bnAxes[i], BnPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -711,6 +720,9 @@ private struct MainScreen: View {
             let r = rig
             if i == 1 || i == 2 { return { x, y in WvPad.caption(i, x, y) } }
             return { x, y in SxPad.caption(i, x, y, rig: r) }
+        case .benjo:
+            if i > 3 { return nil }
+            return { x, y in BnPad.caption(i, x, y) }
         default:
             return nil
         }
@@ -1053,6 +1065,11 @@ private struct HudBar: View {
             case 2: key("dice") { d.sxDice() }
             default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
+        case .benjo:
+            switch n {
+            case 0: key("dice") { d.bnDice() }
+            default: blank
+            }
         case .sidrax:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
@@ -1110,6 +1127,7 @@ private struct HudBar: View {
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
         "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
+        "waveform.circle": "MODE", "dial.medium": "MODE",
     ]
 
     /// a key with a word only (no icon)

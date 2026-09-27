@@ -54,17 +54,36 @@ enum SxPad {
 
 /// WAVE: the two pads of its own (the rest are SIDRAX's)
 enum WvPad {
-    static let titles = ["SCALE · KEY", "FRAME · RUNGLER", "CLOCK · DATA", "CHORD · OCTAVE",
+    static let titles = ["SCALE · KEY", "FRAME · SPREAD", "SCAN · DEPTH", "CHORD · OCTAVE",
                          "PLATE 1", "PLATE 2", "PLATE 3", "PLATE 4"]
-    static func rate(_ v: Double) -> Double { 0.1 * pow(20000, v) }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 1: return "FRAME \(Int(x * 63) + 1)/64 · RUNG \(Int(y * 100))%"
-        case 2: return String(format: "%@ · %@", hz(rate(x)), hz(rate(y)))
+        case 1: return "FRAME \(Int(x * 63) + 1)/64 · SPREAD \(Int(y * 100))%"
+        case 2: return String(format: "%.2f Hz · %d%%", 0.02 * pow(400, x), Int(y * 100))
         default: return ""
         }
     }
-    private static func hz(_ f: Double) -> String { f < 10 ? String(format: "%.2f Hz", f) : String(format: "%.0f Hz", f) }
+}
+
+/// BENJO (BLE mode 6): an audio-rate Benjolin on the Cafe — two triangles, the rungler, a resonant filter.
+/// Cafe A plays it, Cafe B too (DETUNE apart); ASH = the rungler's stepped voltage.
+enum BnPad {
+    static let titles = ["OSC 1 · RUN 1", "OSC 2 · RUN 2", "FILTER · RES", "RUN→FILTER · LOOP",
+                         "X-MOD 2→1 · 1→2", "PWM↔TRI · DRIVE", "EARTH→OSC · →FILTER", "DETUNE · LEVEL"]
+    static let starts: [(Double, Double)] = [(0.45, 0.3), (0.25, 0.35), (0.55, 0.35), (0.3, 0.0),
+                                             (0.15, 0.0), (0.0, 0.3), (0.0, 0.0), (0.1, 0.7)]
+    static func hz(_ v: Double) -> String {
+        let f = 0.05 * pow(100000, v)
+        return f < 10 ? String(format: "%.2f Hz", f) : String(format: "%.0f Hz", f)
+    }
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 0, 1: return "\(hz(x)) · RUN \(Int(y * 100))%"
+        case 2: return "CUT \(Int(x * 100))% · RES \(Int(y * 100))%"
+        case 3: return "RUN \(Int(x * 100))% · LOOP \(Int(y * 100))%"
+        default: return ""
+        }
+    }
 }
 
 /// one plate: the finger's place and its touched area (0 = lifted). UIKit, because SwiftUI does not give the area.

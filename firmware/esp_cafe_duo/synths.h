@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = BENJO ("M 25 <0..6>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1773,18 +1773,13 @@ static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
 // WAVE (mode 5): the same plates, but each voice reads a WAVETABLE from the tape — 64 frames of 256 samples at
-// the start of the tape, made from an audio file on the phone ("W" lines) — and an audio-rate BENJOLIN built from
-// the same table: two table oscillators (CLOCK and DATA), an 8-step shift register (the rungler) clocked by the one
-// and fed by the other; the rungler moves the voices' frame (timbre), optionally their pitch, and bends the two
-// oscillators themselves (CHAOS). BENJO = the Benjolin's own voice (the two compared). "S 20..27" (see sx_update).
+// the start of the tape, made from an audio file on the phone ("W" lines). FRAME picks the timbre, SPREAD gives
+// each plate its own frame, SCAN moves the frame slowly back and forth (rate · depth). "S 20..23" (see sx_update).
+// (The Benjolin that used to live here has its own mode now: BENJO, mode 6.)
 volatile bool sx_wave = false;
-volatile int32_t wv_frame = 0, wv_rdepth = 0;           // frame base (Q8 frames, 0..63·256) · rungler -> frame (Q8 per step)
-volatile uint32_t wv_r1 = 0, wv_r2 = 0;                 // CLOCK / DATA oscillators (Q32 per sample)
-volatile int32_t wv_lock = 0, wv_chaos = 0;             // LOCK: the register keeps its pattern (Q12 chance) · rungler -> rates (1/256 oct per step)
-volatile int32_t wv_pstep = 0;                          // rungler -> pitch: semitones per step (0 = off)
-volatile int32_t wv_benjo = 0;                          // the Benjolin's own voice, Q12
-volatile uint32_t wv_semi[25];                          // 2^(n/12), Q16 (sx_update)
-volatile int wv_rv = 0;                                 // the rungler now (0..7), for the status line
+volatile int32_t wv_frame = 0, wv_spread = 0;           // frame base (Q8 frames, 0..63·256) · per-plate frame step (Q8)
+volatile uint32_t wv_scaninc = 0;                       // SCAN rate (Q32 per sample)
+volatile int32_t wv_sdepth = 0;                         // SCAN depth (Q8 frames)
 static inline int32_t IRAM_ATTR wv_read(int32_t fq8, uint32_t ph) {   // the table at frame (Q8) and phase (Q32)
   if (fq8 < 0) fq8 = 0; if (fq8 > 63 * 256) fq8 = 63 * 256;
   int f0 = fq8 >> 8, f1 = f0 < 63 ? f0 + 1 : 63; int32_t ff = fq8 & 255;
@@ -1831,25 +1826,12 @@ static int32_t sx_tick(int32_t *rout) {
   if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } tl = tr = 0; }
   static int32_t env1[4] = {0, 0, 0, 0};                  // (no EARTH here: it wobbled the pitch — a chorus)
   int32_t touched = 0, l = 0, r = 0;
-  // WAVE: the Benjolin — CLOCK and DATA oscillators read the table; CLOCK's wrap shifts the register
-  static uint32_t bp1 = 0, bp2 = 0; static uint8_t reg = 0x5A; static int32_t rvs = 0, bj = 0;
-  static uint32_t brnd = 0x2545F491u;
-  int rv = 0, benjo = 0;
+  // WAVE: SCAN, a slow triangle moving the frame (the same for all four)
+  static uint32_t scph = 0; int32_t scan = 0;
   if (sx_wave) {
-    rv = (reg >> 5) & 7;                                     // the rungler: the top three bits
-    rvs += ((rv << 8) - rvs) >> 5;                           // (a little smoothing: no clicks in the frame)
-    int32_t bend = (rv * wv_chaos);                          // CHAOS: the rungler bends both oscillators
-    uint32_t i1 = (uint32_t)(((uint64_t)wv_r1 * bj_exp2(bend)) >> 16), i2 = (uint32_t)(((uint64_t)wv_r2 * bj_exp2(bend >> 1)) >> 16);
-    uint32_t o1 = bp1; bp1 += i1; bp2 += i2;
-    int32_t s1 = wv_read(wv_frame, bp1), s2 = wv_read(wv_frame, bp2);
-    if (bp1 < o1) {                                          // CLOCK: shift; the new bit = DATA, or (LOCK) the old one again
-      brnd = brnd * 1664525u + 1013904223u;
-      int nb = ((int32_t)(brnd >> 20) < wv_lock) ? (reg >> 7) & 1 : (s2 > 0 ? 1 : 0) ^ ((reg >> 7) & 1);
-      reg = (uint8_t)((reg << 1) | nb);
-    }
-    wv_rv = rv;
-    bj += (((s1 > s2 ? 1400 : -1400)) - bj) >> 3;            // the comparator of the two, softened a little
-    benjo = (bj * wv_benjo) >> 12;
+    scph += wv_scaninc;
+    int32_t st = (int32_t)(scph >> 20); st = st < 2048 ? st * 2 - 2048 : 6143 - st * 2;   // ±2048
+    scan = (st * wv_sdepth) >> 11;
   }
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
@@ -1857,7 +1839,6 @@ static int32_t sx_tick(int32_t *rout) {
     // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
     // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
     uint32_t inc = sx_inc[k];
-    if (sx_wave && wv_pstep > 0) inc = (uint32_t)(((uint64_t)inc * wv_semi[(rv * wv_pstep) % 25]) >> 16);   // the rungler steps the pitch
     // CHAOS: the one on the left modulates this one · SELF: this one modulates itself (triangle -> saw)
     int32_t left = out[(k + 3) & 3];                         // (its last sample, ±2048 · level)
     int32_t sf = sx_self;                                    // Q12 (the plates only tune and play: no modulation from them)
@@ -1868,7 +1849,7 @@ static int32_t sx_tick(int32_t *rout) {
     ph[k] += inc;
     int32_t t = (int32_t)(ph[k] >> 20);
     int32_t tri = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;    // ±2048, a plain triangle
-    if (sx_wave) tri = wv_read(wv_frame + ((rvs * wv_rdepth) >> 8) + k * 96, ph[k]);   // WAVE: the table, its frame moved by the rungler
+    if (sx_wave) tri = wv_read(wv_frame + scan + k * wv_spread, ph[k]);   // WAVE: the table (FRAME + SCAN + SPREAD per plate)
     // GLITCH: when the left one crosses zero, this one may turn round (same value, the other direction)
     static int32_t lastLeft[4] = {0, 0, 0, 0};
     if (sx_glitch > 0 && ((left ^ lastLeft[k]) < 0)) {
@@ -1904,7 +1885,6 @@ static int32_t sx_tick(int32_t *rout) {
     if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
     if (relHere) l += (tri * eR[k]) >> 13;
   }
-  l += benjo;                                                // WAVE: the Benjolin's own voice (both Cafes)
   r = l;                                                     // (one Cafe = one side: main and ASH the same)
   sx_gate = touched;
   int32_t ol = l, orr = r;                                   // (no filter: the triangles as they are; a soft ceiling only near the top)
@@ -1914,6 +1894,75 @@ static int32_t sx_tick(int32_t *rout) {
   if (orr > 2047) orr = 2047; if (orr < -2047) orr = -2047;
   *rout = orr;
   return ol;
+}
+
+// ==========================================
+// BENJO --- mode 6 of the BLE preset (k.odk): after Rob Hordijk's Benjolin
+// ==========================================
+// Two triangle oscillators; an 8-step shift register (the RUNGLER) clocked by OSC 2 and fed by OSC 1's pulse
+// (XOR the bit falling out; LOOP keeps the pattern going round instead). The top three bits are a stepped
+// voltage that moves both oscillators (RUN 1 / RUN 2) and the filter (RUN -> FILTER). The two oscillators also
+// FM each other (X-MOD). The voice is the comparator of the two (PWM) or OSC 1's triangle, through a resonant
+// low-pass. EARTH moves OSC 1 and / or the filter. SKIP = LOOP while held. YELLOW = OSC 2's pulse (the clock).
+// Out: main = the filter · ASH = the rungler's stepped voltage (patch it into the other Cafe's EARTH).
+// On the second Cafe (role B) both oscillators are detuned by DETUNE. Parameters: "S 30..45" (see bn_update).
+volatile uint32_t bn_r1 = 0, bn_r2 = 0;                 // OSC 1 / OSC 2, Q32 per sample
+volatile int32_t bn_run1 = 0, bn_run2 = 0, bn_runf = 0; // rungler -> OSC 1 / OSC 2 / filter, 1/256 oct per step
+volatile int32_t bn_fm1 = 0, bn_fm2 = 0;                // X-MOD: OSC 2 -> OSC 1, OSC 1 -> OSC 2 (Q12)
+volatile int32_t bn_fc = 1400, bn_q = 4096;             // filter cutoff (1/256 oct over bj_fk) · damping Q12
+volatile int32_t bn_lock = 0;                           // LOOP: the chance the register just goes round (Q12)
+volatile int32_t bn_mix = 0;                            // 0 = PWM (the comparator) .. 4096 = OSC 1's triangle
+volatile int32_t bn_drive = 256, bn_gain = 256;         // Q8
+volatile int32_t bn_e1 = 0, bn_ef = 0;                  // EARTH -> OSC 1 · EARTH -> filter (Q8: 256 = ±2 oct)
+volatile int32_t bn_det = 0;                            // role B: both oscillators this much apart (1/256 oct)
+volatile bool bn_reset = true;
+volatile int bn_gate = 0;
+
+static int32_t bn_tick(int32_t *rout, bool hold) {
+  static uint32_t p1 = 0, p2 = 0x40000000u, rnd = 0x2545F491u;
+  static uint8_t reg = 0xA5;
+  static int32_t la = 0, ba = 0, t1 = 0, t2 = 0;
+  if (bn_reset) { bn_reset = false; la = ba = 0; }
+  int rv = (reg >> 5) & 7;                                  // the rungler, 0..7
+  int32_t det = sx_role == 1 ? bn_det : 0;
+  int32_t e = pc_emod;
+  int32_t o1 = rv * bn_run1 + ((t2 * bn_fm1) >> 14) + ((e * bn_e1) >> 6) + det;
+  int32_t o2 = rv * bn_run2 + ((t1 * bn_fm2) >> 14) - det;
+  if (o1 > 3072) o1 = 3072; if (o1 < -3072) o1 = -3072;
+  if (o2 > 3072) o2 = 3072; if (o2 < -3072) o2 = -3072;
+  uint32_t i1 = (uint32_t)(((uint64_t)bn_r1 * bj_exp2(o1)) >> 16), i2 = (uint32_t)(((uint64_t)bn_r2 * bj_exp2(o2)) >> 16);
+  if (i1 > 0x20000000u) i1 = 0x20000000u; if (i2 > 0x20000000u) i2 = 0x20000000u;
+  uint32_t old2 = p2;
+  p1 += i1; p2 += i2;
+  int32_t a1 = (int32_t)(p1 >> 20); t1 = a1 < 2048 ? a1 * 2 - 2048 : 6143 - a1 * 2;   // ±2048
+  int32_t a2 = (int32_t)(p2 >> 20); t2 = a2 < 2048 ? a2 * 2 - 2048 : 6143 - a2 * 2;
+  if (p2 < old2) {                                          // OSC 2 wrapped: clock the register
+    rnd = rnd * 1664525u + 1013904223u;
+    int out = (reg >> 7) & 1;
+    bool loop = hold || (int32_t)(rnd >> 20) < bn_lock;
+    int nb = loop ? out : ((p1 < 0x80000000u ? 1 : 0) ^ out);
+    reg = (uint8_t)((reg << 1) | nb);
+  }
+  bn_gate = p2 < 0x80000000u;
+  // the voice: the comparator (PWM) <-> OSC 1's triangle
+  int32_t pwm = t1 > t2 ? 1400 : -1400;
+  int32_t x = (int32_t)((((int64_t)pwm * (4096 - bn_mix)) + ((int64_t)((t1 * 700) >> 10) * bn_mix)) >> 12);
+  // the filter (a resonant 2-pole, as NOISE's), its cutoff stepped by the rungler
+  int32_t oc = bn_fc + rv * bn_runf + ((e * bn_ef) >> 6);
+  if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
+  int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
+  if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
+  la += (fq * ba) >> 12;
+  int32_t hl = x - la - ((bn_q * ba) >> 12);
+  ba += (fq * hl) >> 12;
+  if (la > 32767) la = 32767; if (la < -32768) la = -32768;
+  if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;
+  int32_t y = (la * bn_drive) >> 8;
+  if (y > 1500) y = 1500 + ((y - 1500) >> 3); if (y < -1500) y = -1500 + ((y + 1500) >> 3);   // DRIVE into a soft ceiling
+  y = (y * bn_gain) >> 8;
+  if (y > 2047) y = 2047; if (y < -2047) y = -2047;
+  *rout = rv * 580 - 2030;                                  // ASH: the rungler's stepped voltage
+  return y;
 }
 
 // ==========================================
@@ -2079,6 +2128,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
     else if (cur == 4 || cur == 5) sx_reset = true;
+    else if (cur == 6) bn_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2090,10 +2140,11 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
+      else if (cur == 6) bn_reset = true;
     }
   } else if (mg < 4096) mg += 16;
-  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
-  sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables + an audio Benjolin
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5, jmode = cur == 6;
+  sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
   // --- SKIP: GRAIN = restart the score · COCO = back to the loop start · DELAY = tap tempo · NOISE = burst (held) ---
@@ -2109,7 +2160,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode;                                          // SIDRAX: pure, CHAR's grit stays out
+  grit_off = smode || jmode;                                 // SIDRAX / BENJO: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2140,6 +2191,9 @@ void IRAM_ATTR coco_pc() {
   } else if (smode) {
     l = sx_tick(&r);
     r >>= 1;                                                 // (ASH doubles its input and clips: keep it clean)
+  } else if (jmode) {
+    l = bn_tick(&r, SKIPPERAT);
+    r >>= 1;
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2172,7 +2226,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = smode ? sx_gate : nz_gate;
+  } else y = smode ? sx_gate : (jmode ? bn_gate : nz_gate);
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2196,8 +2250,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || smode) {
-    if (smode ? sx_gate : nz_gate) {
+  } else if (nmode || smode || jmode) {
+    if (smode ? sx_gate : (jmode ? bn_gate : nz_gate)) {
       LAMP_ON;
     } else {
       LAMP_OFF;

@@ -85,13 +85,13 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX", "WAVE"]
+    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX", "WAVE", "BENJO"]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle"]
+    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "dial.medium"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -100,7 +100,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, sidrax, wave, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, delay, noise, sidrax, wave, benjo, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -303,12 +303,9 @@ final class Rig: ObservableObject {
         return ["S \(10 + k) \(Int((a.x * 1000).rounded())) \(Int((a.y * 1000).rounded())) \(Int((sxArea[k] * 1000).rounded()))"]
     }
     /// WAVE: SCALE · KEY and CHORD · OCTAVE and the plates are SIDRAX's own; its two pads in between are its own
-    let wvTop: [PadAxis] = [PadAxis((0.3, 0.4)), PadAxis((0.35, 0.55))]
+    /// (FRAME · SPREAD, SCAN rate · depth)
+    let wvTop: [PadAxis] = [PadAxis((0.3, 0.0)), PadAxis((0.3, 0.0))]
     var wvAxes: [PadAxis] { [sxAxes[0], wvTop[0], wvTop[1], sxAxes[3]] + Array(sxAxes[4...7]) }
-    @Published var wvLock = 0.0
-    @Published var wvPitch = 0.0
-    @Published var wvBenjo = 0.0
-    @Published var wvChaos = 0.2
     @Published var wvPicking = false       // the file picker for the table
     @Published var wvNote = ""             // which file the table came from
     func wvCommands(pad i: Int) -> [String] {
@@ -319,10 +316,17 @@ final class Rig: ObservableObject {
         default: return sxCommands(pad: i)
         }
     }
-    func wvRows() -> [String] {
-        ["S 24 \(Int(wvLock * 1000))", "S 25 \(Int(wvPitch * 1000))", "S 26 \(Int(wvBenjo * 1000))", "S 27 \(Int(wvChaos * 1000))"]
+    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) }
+    /// BENJO (mode 6): eight pads of its own ("S 30..45")
+    let bnAxes: [PadAxis] = BnPad.starts.map { PadAxis($0) }
+    func bnCommands(pad i: Int) -> [String] {
+        let a = bnAxes[i]
+        return ["S \(30 + 2 * i) \(Int((a.x * 1000).rounded()))", "S \(31 + 2 * i) \(Int((a.y * 1000).rounded()))"]
     }
-    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + wvRows() }
+    func bnAll() -> [String] { (0..<8).flatMap { bnCommands(pad: $0) } }
+    func bnDice() {
+        for i in [0, 1, 2, 3, 4] { bnAxes[i].x = Double.random(in: 0.1...0.9); bnAxes[i].y = Double.random(in: 0.0...0.8) }
+    }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
@@ -380,7 +384,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .coco, .delay, .noise, .sidrax, .wave][min(max(ctxMode, 0), 5)]
+        return [PadSet.grain, .coco, .delay, .noise, .sidrax, .wave, .benjo][min(max(ctxMode, 0), 6)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

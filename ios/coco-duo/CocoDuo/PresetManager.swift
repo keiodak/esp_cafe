@@ -49,11 +49,6 @@ struct PresetManagerView: View {
                                 .foregroundStyle(PastelTheme.textSecondary)
                                 .lineLimit(1)
                         }
-                        PanelRow(label: "LOCK", value: Binding(get: { rig.wvLock }, set: { rig.wvLock = $0; d.sendWvRows() }))
-                        PanelRow(label: "CHAOS", value: Binding(get: { rig.wvChaos }, set: { rig.wvChaos = $0; d.sendWvRows() }))
-                        PanelRow(label: "PITCH", value: Binding(get: { rig.wvPitch }, set: { rig.wvPitch = $0; d.sendWvRows() }),
-                                 format: { ["OFF", "1 st", "2 st", "3 st", "4TH", "5TH", "8VE"][min(6, Int($0 * 6.99))] })
-                        PanelRow(label: "BENJO", value: Binding(get: { rig.wvBenjo }, set: { rig.wvBenjo = $0; d.sendWvRows() }))
                     }
                     if rig.padSet == .sidrax {
                         HStack(spacing: PanelMetrics.chipSpacing) {
