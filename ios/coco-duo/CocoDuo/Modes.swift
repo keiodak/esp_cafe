@@ -373,6 +373,7 @@ final class Rig: ObservableObject {
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
     @Published var habit8k = false
     @Published var habitHold = false
+    @Published var habitSeconds = 150.0         // the memory: 30 s … 10 min
     @Published var habitWav: Data? = nil
     func habitLevels() -> [String] {
         let a = habitAxes[4]

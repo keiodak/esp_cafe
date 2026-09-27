@@ -54,6 +54,14 @@ struct PresetManagerView: View {
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
                         }
                     }
+                    if rig.padSet == .habit {                              // HABIT: how long the memory is
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ForEach(HabitEngine.lengths, id: \.self) { v in
+                                ChipButton(title: v < 60 ? "\(Int(v))S" : (v == 150 ? "2M30" : "\(Int(v / 60))M"),
+                                           filled: rig.habitSeconds == v) { d.setHabitSeconds(v) }
+                            }
+                        }
+                    }
                     if rig.padSet == .noise {
                         HStack(spacing: PanelMetrics.chipSpacing) {
                             ChipButton(title: "FAST", filled: rig.nzSpeed == 0) { d.setNzSpeed(0) }

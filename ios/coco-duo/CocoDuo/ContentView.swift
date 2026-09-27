@@ -123,7 +123,8 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
-                habits[s].div = rig.habit8k ? 4 : 2; habits[s].hold = rig.habitHold; habits[s].start()
+                habits[s].div = rig.habit8k ? 4 : 2; habits[s].hold = rig.habitHold
+                habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].start()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -584,6 +585,10 @@ final class Director: ObservableObject {
         for u in ctxUnits() { u.send("B 0 \(on ? 1000 : 0)"); habits[u.slot].div = on ? 4 : 2; habits[u.slot].clear() }
     }
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
+    func setHabitSeconds(_ v: Double) {
+        rig.habitSeconds = v; HabitEngine.shownSeconds = v
+        habits.forEach { $0.seconds = v }
+    }
     func habitClear() { for u in ctxUnits() { habits[u.slot].clear() } }
     /// the memory of the first Cafe on HABIT, as a WAV
     func habitSave() {
