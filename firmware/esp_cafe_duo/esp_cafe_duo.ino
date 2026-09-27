@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.61"
+#define FW_VERSION "3.62"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -488,7 +488,7 @@ void hd_update() {
   hd_off[1] = (int32_t)(p[3] * 15.0f + 0.5f);
   hd_S = HD_STRIDE - 2;                                           // the buffers turn at one fixed length (~1 s): no CYCLE
   hd_fb = (int32_t)(p[5] * 0.6f * 256.0f);                        // OVERDUB: the voices back onto the tape (rpls' > page)
-  hd_lvl = (int32_t)(p[6] * 1.5f * 256.0f);
+  hd_lvl = (int32_t)(p[6] * 3.2f * 256.0f);                      // (louder: one voice has to stand beside the input)
   hd_dry = (int32_t)(p[7] * 256.0f);
   hd_keep = (int32_t)(p[4] * 0.85f * 256.0f);                    // ECHO: record-to-record feedback (the old tape kept)
   hd_tone = p[9] >= 0.98f ? 4096 : (int32_t)(300.0f + p[9] * p[9] * 3796.0f);

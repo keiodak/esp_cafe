@@ -2365,8 +2365,8 @@ void IRAM_ATTR harmony() {
   if (++t >= S) t = 0;
 
   int32_t dry = (in * hd_dry) >> 8;
-  int32_t l = dry + ((v[0] * hd_lvl) >> 8);                   // main = VOICE 1, ASH = VOICE 2 (not both on both)
-  int32_t r = dry + ((v[1] * hd_lvl) >> 8);
+  int32_t l = soft_clip(dry + ((v[0] * hd_lvl) >> 8));        // main = VOICE 1, ASH = VOICE 2 (not both on both)
+  int32_t r = soft_clip(dry + ((v[1] * hd_lvl) >> 8));        // (a soft ceiling: louder voices don't crack)
   int32_t o = l + 2048;
   if (o > 4095) o = 4095;
   if (o < 0) o = 0;

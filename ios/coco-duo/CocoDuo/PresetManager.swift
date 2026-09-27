@@ -124,14 +124,14 @@ struct PresetManagerView: View {
                         if case .success(let url) = result { d.loadWaveTable(url) }
                     }
                 } else {
-                    // the same height as PRESETS: the cards and NOW, shrunk to fit if they are taller (no scrolling)
-                    FitToWindow {
-                        VStack(spacing: 8) {
-                            rightCards
-                            NowCard(rig: rig).frame(minHeight: 64)
-                        }
+                    // one fixed box, the height of PRESETS: the cards on top, NOW takes what is left (it may shrink
+                    // to nothing). The box never changes size, whichever cards are shown: nothing moves.
+                    VStack(spacing: 8) {
+                        rightCards
+                        NowCard(rig: rig).frame(maxHeight: .infinity)
                     }
-                    .frame(height: presetsH > 0 ? presetsH : 300, alignment: .top)
+                    .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
+                    .clipped()
                 }
             }
         }
@@ -175,7 +175,7 @@ private struct DesignCard: View {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
             grid([2, 9, 10])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
-            FitToWindow {
+            ScrollView {
                 grid(Self.appleOrder)
             }
             .frame(maxHeight: .infinity)
@@ -347,11 +347,20 @@ private struct MultiCard: View {
 
     var body: some View {
         PanelCard(title: "MULTI", note: "FLIP = next · SKIP = random") {
+            // the eight effects in two rows of four per Cafe (one row of eight made the keys too narrow)
             ForEach(0..<2, id: \.self) { s in
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    HudTag(text: s == 0 ? "A" : "B", size: 8)
-                    ForEach(0..<Fx.count, id: \.self) { e in
-                        ChipButton(title: Fx.short[e], filled: rig.fxLocal[s] == e) { d.setFx(s, e) }
+                HStack(alignment: .top, spacing: 6) {
+                    HudTag(text: s == 0 ? "A" : "B", size: 9)
+                        .frame(width: 16, alignment: .leading)
+                    VStack(spacing: 4) {
+                        ForEach(0..<2, id: \.self) { row in
+                            HStack(spacing: PanelMetrics.chipSpacing) {
+                                ForEach(0..<4, id: \.self) { c in
+                                    let e = row * 4 + c
+                                    ChipButton(title: Fx.short[e], filled: rig.fxLocal[s] == e) { d.setFx(s, e) }
+                                }
+                            }
+                        }
                     }
                 }
                 .disabled(rig.preset[s] != Preset.multi)
@@ -367,6 +376,7 @@ private struct MultiCard: View {
                 ChipButton(title: "TAKE SAMPLE", filled: false) { d.fxSetting("F 92") }
                 ChipButton(title: "TRIGGER", filled: false) { d.fxSetting("F 93") }
                 ChipButton(title: "SYNC", filled: false) { d.fxSetting("Z") }
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)       // (four columns, like the row above)
             }
             PanelRow(label: "XFADE", value: Binding(get: { rig.fxXfade },
                                                     set: { rig.fxXfade = $0; d.fxSetting("F 91 \(Int($0 * 1000))") }))
@@ -374,10 +384,6 @@ private struct MultiCard: View {
                                                     set: { rig.fxEarth = $0; d.fxSetting("F 95 \(Int($0 * 1000))") }))
             PanelRow(label: "LOCK", value: Binding(get: { rig.fxLock },
                                                    set: { rig.fxLock = $0; d.fxSetting("F 96 \(Int($0 * 1000))") }))
-            Text("XFADE 0.02–2 s between effects · EARTH = how much it modulates each effect (level, delay time, sampler pitch + trigger, reverse speed, glitch chance, fold drive, reverb size) · LOCK = the shortest time between two changes (0.05–5 s), so fast gates on FLIP / SKIP don't make it flutter. LINK FX: both Cafes on the same effect (and the same random jumps). LINK PADS: the XY pads move both Cafes. Each can be on or off.")
-                .font(.hud(8))
-                .foregroundStyle(PastelTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

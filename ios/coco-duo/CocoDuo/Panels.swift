@@ -142,8 +142,7 @@ struct PanelScaffold<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        // no scrolling: the whole panel is kept inside the window (shrunk to fit when it is taller)
-        FitToWindow {
+        ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Cafe BLE")
