@@ -672,7 +672,9 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
-        .sheet(isPresented: $rig.showMake) { MakeSheet(d: d) }
+        .sheet(isPresented: Binding(get: { rig.makeFor != nil }, set: { if !$0 { rig.makeFor = nil } })) {
+            MakeSheet(d: d, target: rig.makeFor ?? 0)
+        }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -990,6 +992,7 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
+                textKey("MAKE", on: rig.makeFor == unit.slot) { rig.makeFor = unit.slot }      // STRETCH / CHORDS for this bar's Cafe
             }
         }
     }
@@ -1028,7 +1031,6 @@ private struct HudBar: View {
                 .foregroundStyle(PastelTheme.hudOrange)
                 .lineLimit(1)
                 .frame(width: 64, alignment: .leading)
-            GuideTicker(text: guide)
             // the preset manager lives behind this box: say so
             HudTag(text: "▾", size: 9)
         }
@@ -1067,7 +1069,7 @@ private struct HudBar: View {
         case .grain:
             switch n {
             case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
-            case 1: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape (PERC: PRESET)
+            case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
             case 2: key(grain.fold ? "wave.3.forward" : "waveform.path", on: grain.move || grain.fold) {   // off -> PITCH -> FOLD
                         grain.cyclePitchFold(d.ctxUnits())
                     }

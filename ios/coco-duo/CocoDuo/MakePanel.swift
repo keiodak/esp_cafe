@@ -4,18 +4,27 @@
 
 import SwiftUI
 
-/// the MAKE key's sheet
+/// the MAKE key's sheet: to A, B or both, then STRETCH / CHORDS
 struct MakeSheet: View {
     let d: Director
+    @State var target: Int                 // 0 A · 1 B · 2 both
     var body: some View {
         PanelScaffold(title: "MAKE") {
-            PanelCard(title: "MAKE") { MakeRows(d: d) }
+            PanelCard(title: "MAKE") {
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    ForEach(0..<3, id: \.self) { t in
+                        ChipButton(title: ["→ A", "→ B", "→ A + B"][t], filled: target == t) { target = t }
+                    }
+                }
+                MakeRows(d: d, pick: target)
+            }
         }
     }
 }
 
 struct MakeRows: View {
     let d: Director
+    var pick: Int? = nil                   // 0 A · 1 B · 2 both · nil = the Cafes the pads go to
     @State private var stretchI = 1
     @State private var keyI = 0
     @State private var setI = 0
@@ -46,8 +55,10 @@ struct MakeRows: View {
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { stretchFile($0) }
     }
 
-    /// the Cafes the pads go to
-    private var units: [CafeUnit] { d.ctxUnits() }
+    private var units: [CafeUnit] {
+        guard let p = pick else { return d.ctxUnits() }
+        return p == 2 ? d.units : [d.units[p]]
+    }
     private var ready: Bool { !busy && !units.isEmpty && units.allSatisfy { $0.isConnected && $0.loadProgress == nil } }
     private func stretchFile(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }

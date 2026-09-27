@@ -368,8 +368,8 @@ final class Rig: ObservableObject {
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(Rig.freezeValue(sxFreeze))"] }
     /// FREEZE (COCO's): 0 off · 1 the last ~2 s of SIDRAX held as a loop under the plates ("S 24")
     @Published var sxFreeze = 0
-    /// MAKE (the key in SIDRAX / WAVE): the STRETCH / CHORDS sheet
-    @Published var showMake = false
+    /// MAKE (the key beside WAVE / CAM): the STRETCH / CHORDS sheet, for A (0) or B (1)
+    @Published var makeFor: Int? = nil
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 
