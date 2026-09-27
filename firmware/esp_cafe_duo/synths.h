@@ -1046,8 +1046,6 @@ volatile int32_t mo_edge = 1500;            // fade in / out, samples (len/2 = a
 volatile int32_t mo_rate = 4096;            // base speed, Q12
 volatile uint8_t mo_spread = 1;             // intervals a grain may take (1..9)
 volatile int32_t mo_back = 4096;            // how far behind the record head grains are taken
-volatile int32_t mo_back_play = 4096;       // CLOUD: where on the tape (evenly across it)
-volatile bool mo_cloud = false;             // CLOUD: nothing recorded, the head stands still, PLACE = mo_back_play
 volatile int32_t mo_scat = 1;               // + up to this much, per grain
 volatile int32_t mo_f = 4096, mo_q = 4096;  // filter, Q12 (f = 4096 = open)
 volatile uint16_t mo_rev = 0;               // share of backwards grains, 0..65535
@@ -1093,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = CLOUD ("M 25 <0..6>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1185,7 +1183,7 @@ static int32_t __attribute__((noinline)) grain_tick(uint32_t wpos, int64_t now, 
         }
     }
     if (start < 0) {
-      int32_t back = (mo_cloud ? mo_back_play : mo_back) + (int32_t)((mo_rnd(n, 3) * (uint32_t)(mo_scat > 0 ? mo_scat : 1)) >> 16) + span + 64;
+      int32_t back = mo_back + (int32_t)((mo_rnd(n, 3) * (uint32_t)(mo_scat > 0 ? mo_scat : 1)) >> 16) + span + 64;
       if (back > 131072 - 1024) back = 131072 - 1024;
       back -= pc_emod * 64;  // EARTH moves the place (±~8000 samples)
       if (back < span + 64) back = span + 64;
@@ -2257,7 +2255,7 @@ void IRAM_ATTR coco_pc() {
   int want = pc_mode;
   if (cur < 0) {
     cur = want;
-    if (cur == 0 || cur == 6) mo_reset = true;
+    if (cur == 0) mo_reset = true;
     else if (cur == 1) bb_reset = true;
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
@@ -2268,16 +2266,14 @@ void IRAM_ATTR coco_pc() {
     else {
       cur = want;
       audio_frozen_state = false;
-      if (cur == 0 || cur == 6) mo_reset = true;
+      if (cur == 0) mo_reset = true;
       else if (cur == 1) bb_reset = true;
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
     }
   } else if (mg < 4096) mg += 16;
-  bool gmode = cur == 0 || cur == 6, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
-  bool cmode = cur == 6;                                     // CLOUD: GRAIN's grains over the tape as it is
-  mo_cloud = cmode;
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2298,7 +2294,7 @@ void IRAM_ATTR coco_pc() {
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
-  bool rec = gmode && !cmode && pc_rec && !audio_frozen_state && !frz;
+  bool rec = gmode && pc_rec && !audio_frozen_state && !frz;
   if (rec) wv_valid = false;                                 // (the recording goes over WAVE's table)
   if (rec) {
     if (rg < 256) rg++;
@@ -2310,7 +2306,7 @@ void IRAM_ATTR coco_pc() {
     int32_t g = rg;
     dwrite(wpos, old + (((gyo - old) * g) >> 8));
   }
-  if (gmode && !cmode) wpos = (wpos + 1) & 0x1FFFF;          // (CLOUD: the head stands still)
+  if (gmode) wpos = (wpos + 1) & 0x1FFFF;
 
   // --- THE SOUND ---
   int32_t l = 0, r = 0;

@@ -22,13 +22,6 @@
 
 import Foundation
 
-/// CLOUD (BLE mode 7): the tape as a cloud — the same grains, but nothing is recorded: what is on the tape (a file,
-/// or MAKE: a stretched sound, 16 chords) is played, WHERE = a place across the whole tape
-enum CloudPad {
-    static let starts: [(Double, Double)] = [(0.8, 0.3), (0.75, 0.35), (0.5, 0), (0.5, 0.05), (1.0, 0.2), (0, 0.7), (0, 0), (0.7, 0.5)]
-    static func title(_ i: Int) -> String { i == GrainPad.place.rawValue ? "PLACE · SPREAD" : GrainPad(rawValue: i)!.title }
-}
-
 enum GrainPad: Int, CaseIterable {
     case density, length, pitch, place, filter, reverse, stereo, layers
     var title: String { ["DENSITY", "LENGTH", "PITCH", "WHERE", "FILTER", "REV · HOLD", "L · R", "LAYERS · —"][rawValue] }
@@ -60,11 +53,7 @@ final class GrainMode: ObservableObject {
     @Published var marks = 0                       // how many of the 8 slots hold something
     private var nextMark = 0
 
-    let axes: [PadAxis]
-    /// CLOUD is a second one of these, with its own starting places
-    init(starts: [(Double, Double)]? = nil) {
-        axes = (starts ?? GrainPad.allCases.map { $0.start }).map { PadAxis($0) }
-    }
+    let axes: [PadAxis] = GrainPad.allCases.map { PadAxis($0.start) }
 
     /// one parameter for one side (slot 0 = A = left, 1 = B = right)
     func value(_ id: Int, slot: Int) -> Double {
