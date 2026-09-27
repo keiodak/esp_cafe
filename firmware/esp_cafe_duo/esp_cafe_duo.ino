@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.56"
+#define FW_VERSION "3.57"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -591,7 +591,7 @@ void co_update() {
 static const int16_t fx_default[FX_N][8] = {
   {500, 0, 0, 0, 0, 0, 0, 0},
   {625, 550, 1000, 500, 800, 300, 900, 1000},
-  {333, 400, 0, 300, 0, 1000, 900, 600},
+  {500, 300, 0, 300, 400, 1000, 900, 600},   // SAMPLER: either octave, AUTO on (now and then)
   {400, 500, 1000, 0, 0, 0, 1000, 300},
   {300, 550, 400, 300, 750, 300, 150, 1000},
   {300, 500, 600, 200, 800, 0, 1000, 0},
@@ -620,8 +620,7 @@ void fx_update(int e) {
       td_dry = (int32_t)(p[7] * 256.0f);
     } break;
     case 2: {
-      int semis = (int)(p[0] * 36.0f + 0.5f) - 12;
-      sm_rate = (int32_t)(4096.0f * powf(2.0f, semis / 12.0f));
+      sm_up = (int32_t)(p[0] * 65536.0f);                                // DOWN · UP: 0 = always an octave down .. 1 = always up
       float len = hz * (0.05f + p[1] * 0.55f); if (len > SM_LEN - 64) len = SM_LEN - 64;
       sm_len = (int32_t)len;
       sm_start = (int32_t)(p[2] * (SM_LEN - 1 - len));
@@ -629,7 +628,7 @@ void fx_update(int e) {
       sm_dec = (uint32_t)(65536.0f * powf(2.0f, -1.0f / hl)); if (sm_dec > 65535) sm_dec = 65535;
       sm_auto = fx_p[2][4] > 0 ? (int32_t)(beat * beat_div[div_index(fx_p[2][4])]) : 0;
       sm_tone = fx_lpk(p[5]);
-      sm_wet = (int32_t)(p[6] * 2.6f * 256.0f);                          // (louder: the sample stands out)
+      sm_wet = (int32_t)(p[6] * 0.7f * 256.0f);                          // (quiet: a passing one-shot)
       sm_dry = (int32_t)(p[7] * 256.0f);
     } break;
     case 3: {
@@ -673,7 +672,7 @@ void fx_update(int e) {
       sd_mod = (int32_t)(p[4] * p[4] * 0.02f * 65536.0f);                // WOBBLE: up to ±2 % of the period
       sd_lfo = (uint32_t)(0.3f / hz * 4294967295.0f);
       sd_spread = (int32_t)(p[5] * 0.03f * 4096.0f);                     // SPREAD: R up to 3 % longer
-      sd_wet = (int32_t)(p[6] * 1.4f * 256.0f);
+      sd_wet = (int32_t)(p[6] * 1.0f * 256.0f);                          // (with >> 10 in sd_tick: about a third of before)
       sd_dry = (int32_t)(p[7] * 256.0f);
     } break;
     default: {

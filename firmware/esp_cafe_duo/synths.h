@@ -3123,7 +3123,7 @@ volatile int32_t cl_g = 256;
 // TAP DELAY
 volatile int32_t td_T = 16000 << 8, td_fb = 140, td_pp = 256, td_ratio = 4096, td_tone = 3500, td_wow = 0, td_wet = 360, td_dry = 256;
 // SAMPLER
-volatile int32_t sm_rate = 4096, sm_len = 8000, sm_start = 0, sm_auto = 0, sm_tone = 4096, sm_wet = 256, sm_dry = 256;
+volatile int32_t sm_up = 32768, sm_len = 8000, sm_start = 0, sm_auto = 0, sm_tone = 4096, sm_wet = 256, sm_dry = 256;
 volatile uint32_t sm_dec = 65535;
 // REVERSE
 volatile int32_t rv_W = 12000, rv_speed = 4096, rv_tone = 4096, rv_wet = 256, rv_dry = 128;
@@ -3214,7 +3214,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   return dry + ((vl * td_wet) >> 8);
 }
 
-// ---- 2 SAMPLER: a slice of the recent past, played once per trigger at -1 .. +2 octaves ----
+// ---- 2 SAMPLER: now and then a slice of the recent past comes back once, an octave up or an octave down ----
 static int32_t sm_tick(int32_t in, bool rs) {
   static int32_t cp = -1;
   static uint32_t csrc = 0;
@@ -3247,17 +3247,17 @@ static int32_t sm_tick(int32_t in, bool rs) {
     ehi = true;
     trig = true;
   } else if (ehi && pc_emod < 10) ehi = false;  // EARTH rises = trigger
-  if (sm_auto > 0 && ++ac >= (uint32_t)sm_auto) {
+  static uint32_t srnd = 0x6C8E9CF5u;
+  if (sm_auto > 0 && ++ac >= (uint32_t)sm_auto) {             // AUTO: on the beat, but only now and then (4 in 10)
     ac = 0;
-    trig = true;
+    srnd = srnd * 1664525u + 1013904223u;
+    if ((srnd >> 16) < 26214) trig = true;
   }
   if (trig) {
     if (n[vi] > 256) n[vi] = 256;  // the old voice fades out quickly
     vi ^= 1;
-    int32_t r = sm_rate + (int32_t)(((int64_t)sm_rate * fx_em) >> 7);  // EARTH = pitch (up to an octave)
-    if (r < 1024) r = 1024;
-    if (r > 32768) r = 32768;
-    rate[vi] = r;
+    srnd = srnd * 1664525u + 1013904223u;
+    rate[vi] = (int32_t)(srnd >> 16) < sm_up ? 8192 : 2048;               // an octave up or an octave down (DOWN · UP)
     pq[vi] = sm_start << 12;
     len[vi] = sm_len;
     n[vi] = sm_len;
@@ -3284,7 +3284,7 @@ static int32_t sm_tick(int32_t in, bool rs) {
     n[k]--;
   }
   if (sm_tone < 4096) sum = fx_lp(&lp, sum, sm_tone);
-  return soft_clip(((in * sm_dry) >> 8) + ((sum * sm_wet * 5) >> 9));  // the slice 2.5x (it sat under the others)
+  return soft_clip(((in * sm_dry) >> 8) + ((sum * sm_wet) >> 8));     // (quiet: it is a passing event, not the main voice)
 }
 
 // ---- 3 REVERSE: two heads read the past backwards, sin² windows half a length apart ----
@@ -3654,8 +3654,8 @@ static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   dwrite(SD_R + w, soft_clip(il + ((xr * fb) >> 8)) + 2048);
   w = (w + 1) & 0xFFF;
   int32_t dry = (in * sd_dry) >> 8;
-  *rout = dry + ((vr * sd_wet) >> 9);  // the string rings at full scale: half as loud
-  return dry + ((vl * sd_wet) >> 9);
+  *rout = dry + ((vr * sd_wet) >> 10);  // the string rings at full scale: a quarter as loud
+  return dry + ((vl * sd_wet) >> 10);
 }
 
 static inline void fx_run(int e, int32_t in, int32_t *l, int32_t *r, bool hold) {

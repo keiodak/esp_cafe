@@ -156,7 +156,7 @@ enum Fx {
     static let titles: [[String]] = [
         ["—", "—", "—", "—"],
         ["TIME · FEEDBACK", "PING-PONG · SPREAD", "TONE · WOW", "—"],
-        ["PITCH · LENGTH", "START · DECAY", "AUTO · TONE", "—"],
+        ["DOWN UP · LENGTH", "START · DECAY", "AUTO · TONE", "—"],
         ["LENGTH · SPEED", "TONE · —", "—", "—"],
         ["GRID · CHANCE", "SLICE · LENGTH", "VARIETY · PITCH", "—"],
         ["DRIVE · BIAS", "OCT DN · OCT UP", "TONE · —", "—"],
@@ -167,7 +167,7 @@ enum Fx {
     static let defaults: [[Int]] = [
         [500, 0, 0, 0, 0, 0, 0, 0],
         [625, 550, 1000, 500, 800, 300, 900, 1000],
-        [333, 400, 0, 300, 0, 1000, 900, 600],
+        [500, 300, 0, 300, 400, 1000, 900, 600],
         [400, 500, 1000, 0, 0, 0, 1000, 300],
         [300, 550, 400, 300, 750, 300, 150, 1000],
         [300, 500, 600, 200, 800, 0, 1000, 0],
