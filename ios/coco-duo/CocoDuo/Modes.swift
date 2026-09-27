@@ -216,7 +216,7 @@ enum HdPad: Int, CaseIterable {
     // after rpls: the tape turns once a second (no CYCLE); ECHO = record-to-record feedback, OVERDUB = the voices
     // back onto the tape (transposed overdubs), TONE = a low-pass on the voices
     var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "ECHO · TONE", "OVERDUB"][rawValue] }
-    var start: (Double, Double) { [(0.727, 0.0), (0.545, 0.0), (0.3, 1.0), (0.0, 0.0)][rawValue] }
+    var start: (Double, Double) { [(0.727, 0.0), (0.545, 0.0), (0.0, 1.0), (0.0, 0.0)][rawValue] }
     var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (5, 5)][rawValue] }
     static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
     static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]

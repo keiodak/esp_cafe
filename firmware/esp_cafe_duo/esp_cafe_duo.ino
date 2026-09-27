@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.64"
+#define FW_VERSION "3.65"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -498,7 +498,7 @@ void bb_update() {
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
 //  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
 //  timing: 16 steps of the cycle
-static const int16_t hd_default[14] = {727, 0, 545, 0, 300, 0, 600, 1000, 0, 1000, 0, 0, 0, 0};   // (VOICE 1 +5th, VOICE 2 at UNISON = off: one harmony)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
+static const int16_t hd_default[14] = {727, 0, 545, 0, 0, 0, 600, 1000, 0, 1000, 0, 0, 0, 0};   // (VOICE 1 +5th, VOICE 2 at UNISON = off: one harmony)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
 void hd_update() {
   float hz = clock_hz(), p[14];
   for (int i = 0; i < 14; i++) p[i] = hd_p[i] / 1000.0f;
@@ -508,12 +508,12 @@ void hd_update() {
   hd_rate[1] = hd_iv[(int)(p[2] * 11.0f + 0.5f)];
   hd_off[1] = (int32_t)(p[3] * 15.0f + 0.5f);
   hd_S = HD_STRIDE - 2;                                           // the buffers turn at one fixed length (~1 s): no CYCLE
-  hd_fb = (int32_t)(p[5] * 0.6f * 256.0f);                        // OVERDUB: the voices back onto the tape (rpls' > page)
+  hd_keep = (int32_t)(p[4] * p[4] * 0.55f * 256.0f);             // ECHO: record-to-record feedback (the old tape kept, gentle)
+  hd_fb = (int32_t)(p[5] * p[5] * 0.35f * (1.0f - p[4] * p[4] * 0.55f) * 256.0f);  // OVERDUB: the voices back onto the tape (loop gain < 1)
   hd_lvl = (int32_t)(p[6] * 3.2f * 256.0f);                      // (louder: one voice has to stand beside the input)
   hd_dry = (int32_t)(p[7] * 256.0f);
-  hd_keep = (int32_t)(p[4] * 0.85f * 256.0f);                    // ECHO: record-to-record feedback (the old tape kept)
   hd_tone = p[9] >= 0.98f ? 4096 : (int32_t)(300.0f + p[9] * p[9] * 3796.0f);
-  hd_wob = (int32_t)(p[11] * 256.0f);
+  hd_wob = 0;                                                     // (no EARTH wobble: it was a vibrato on the voices)
   hd_hold = hd_p[13] > 0;
   hd_beat = (int32_t)(beat > 64 ? beat : 64);
 }
@@ -1133,7 +1133,6 @@ void loop() {
     while (bpm > 240.0f) bpm *= 0.5f;
     cafe_bpm = bpm;
     if (dl_p[8] < 500) dl_p[8] = 1000;
-    if (hd_p[11] < 500) hd_p[11] = 1000;
     dl_update(); hd_update(); fx_update_all();
     Serial.printf("[tap] %.1f bpm\n", bpm);
   }
