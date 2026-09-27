@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.55"
+#define FW_VERSION "3.56"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -472,30 +472,47 @@ void sx_update() {
   }
 }
 
-// ---- BENJO parameters (k.odk). "S 30..45" ----
-//  30 OSC 1  31 RUN 1  32 OSC 2  33 RUN 2  34 FILTER  35 RES  36 RUN -> FILTER  37 LOOP
-//  38 X-MOD 2->1  39 X-MOD 1->2  40 PWM <-> TRI  41 DRIVE  42 EARTH -> OSC 1  43 EARTH -> FILTER  44 DETUNE (B)  45 LEVEL
-volatile int16_t bn_p[16] = {450, 300, 250, 350, 550, 350, 300, 0, 150, 0, 0, 300, 0, 0, 100, 700};
+// ---- BENJO parameters (k.odk). "S 30..46" ----
+//  30 OSC 1 (FREE: rate · CHORD: the note · PLAY: the octave)  31 RUN 1  32 OSC 2 (FREE: rate · CHORD / PLAY: interval)
+//  33 RUN 2  34 FILTER  35 RES  36 X-MOD 2->1  37 X-MOD 1->2  38 PWM / TRI  39 DRIVE  40 LOOP  41 GLIDE
+//  42 EARTH -> OSC 1  43 EARTH -> FILTER  44 KEY  45 SCALE  46 mode (0 FREE · 500 CHORD · 1000 PLAY)
+volatile int16_t bn_p[17] = {450, 300, 250, 350, 550, 350, 150, 0, 0, 300, 0, 0, 0, 0, 0, 200, 0};
 void bn_update() {
-  float hz = clock_hz(), p[16];
-  for (int i = 0; i < 16; i++) p[i] = bn_p[i] / 1000.0f;
-  float f1 = 0.05f * powf(100000.0f, p[0]), f2 = 0.05f * powf(100000.0f, p[2]);   // 0.05 Hz .. 5 kHz
+  float hz = clock_hz(), p[17];
+  float clk = sx_hz > 1000 ? sx_hz : hz;
+  for (int i = 0; i < 17; i++) p[i] = bn_p[i] / 1000.0f;
+  bn_mode = bn_p[16] < 250 ? 0 : (bn_p[16] < 750 ? 1 : 2);
+  float f1 = 0.05f * powf(100000.0f, p[0]), f2 = 0.05f * powf(100000.0f, p[2]);   // FREE: 0.05 Hz .. 5 kHz
   if (f1 > hz * 0.25f) f1 = hz * 0.25f; if (f2 > hz * 0.25f) f2 = hz * 0.25f;
   bn_r1 = (uint32_t)(f1 / hz * 4294967295.0f); bn_r2 = (uint32_t)(f2 / hz * 4294967295.0f);
-  bn_run1 = (int32_t)(p[1] * p[1] * 110.0f);                         // up to 7 steps · 110 = 3 oct
+  bn_run1 = (int32_t)(p[1] * p[1] * 110.0f);                         // FREE: up to 7 steps · 110 = 3 oct
   bn_run2 = (int32_t)(p[3] * p[3] * 110.0f);
+  bn_c1 = (uint32_t)(32.703f / clk * 4294967295.0f);
+  // the scale (KEY · SCALE): 0 chromatic · 1 major · 2 minor · 3 pentatonic · 4 minor pentatonic · 5 whole tone
+  static const int8_t sc[6][13] = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
+                                   {0, 2, 4, 7, 9, -1}, {0, 3, 5, 7, 10, -1}, {0, 2, 4, 6, 8, 10, -1}};
+  int s = (int)(p[15] * 5.99f), key = (int)(p[14] * 11.99f);
+  int n = 0; while (n < 12 && sc[s][n] >= 0) n++;
+  for (int d = 0; d < 48; d++) bn_deg[d] = ((d / n) * 12 + sc[s][d % n] + key) * 256 / 12;
+  int deg1 = (int)(p[0] * 5.0f * n);                                // CHORD: OSC 1 = a degree over C1 (5 octaves)
+  bn_n1 = bn_deg[deg1 > 47 ? 47 : deg1] + 256;                       // (from C2)
+  static const int8_t iv[8] = {0, 3, 4, 5, 7, 12, 19, 24};           // OSC 2 above OSC 1
+  bn_iv = iv[(int)(p[2] * 7.99f)] * 256 / 12;
+  bn_st1 = (int32_t)(p[1] * 3.99f);                                  // CHORD / PLAY: 0..3 degrees per rungler step
+  bn_st2 = (int32_t)(p[3] * 3.99f);
+  bn_oct = (int32_t)(p[0] * 5.99f);                                  // PLAY: the octave C1 .. C6
   bn_fc = (int32_t)(p[4] * 2560.0f);
   bn_q = (int32_t)(4096.0f * (1.0f - 0.94f * p[5]));
-  bn_runf = (int32_t)(p[6] * 180.0f);                                // up to 7 steps · 180 = 5 oct
-  bn_lock = (int32_t)(p[7] * 4096.0f);
-  bn_fm1 = (int32_t)(p[8] * p[8] * 4096.0f);
-  bn_fm2 = (int32_t)(p[9] * p[9] * 4096.0f);
-  bn_mix = (int32_t)(p[10] * 4096.0f);
-  bn_drive = (int32_t)((0.6f + p[11] * 5.0f) * 256.0f);
+  bn_fm1 = (int32_t)(p[6] * p[6] * 4096.0f);
+  bn_fm2 = (int32_t)(p[7] * p[7] * 4096.0f);
+  bn_mix = (int32_t)(p[8] * 4096.0f);
+  bn_drive = (int32_t)((0.6f + p[9] * 5.0f) * 256.0f);
+  bn_lock = (int32_t)(p[10] * 4096.0f);
+  bn_glide = p[11] < 0.01f ? 4096 : (int32_t)(4096.0f * (1.0f - expf(-1.0f / (0.001f + p[11] * p[11] * 0.8f) / hz)));
+  if (bn_glide < 1) bn_glide = 1;
   bn_e1 = (int32_t)(p[12] * 256.0f);
   bn_ef = (int32_t)(p[13] * 256.0f);
-  bn_det = (int32_t)(p[14] * p[14] * 256.0f);                        // up to an octave apart
-  bn_gain = (int32_t)(p[15] * 1.4f * 256.0f);
+  bn_relk = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.25f * hz)))) + 1;
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -503,10 +520,11 @@ void bn_update() {
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
 //  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
 //  timing: 16 steps of the cycle
-static const int16_t hd_default[14] = {273, 0, 727, 267, 600, 0, 700, 1000, 0, 1000, 0, 0, 0, 0};   // (no feedback, no EARTH wobble: dry)
+static const int16_t hd_default[14] = {273, 0, 727, 0, 600, 0, 700, 1000, 0, 1000, 0, 0, 0, 0};   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
 static const float hd_cyc[6] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
 void hd_update() {
   float hz = clock_hz(), p[14];
+  for (int i = 0; i <= 256; i++) hd_win[i] = (int16_t)(4096.0f * (0.5f - 0.5f * cosf(6.2831853f * i / 256.0f)));
   for (int i = 0; i < 14; i++) p[i] = hd_p[i] / 1000.0f;
   float beat = hz * 60.0f / cafe_bpm;
   hd_rate[0] = hd_iv[(int)(p[0] * 11.0f + 0.5f)];
@@ -759,7 +777,11 @@ void pc_line(char *s) {
                 if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
                 else if (id >= 20 && id < 24 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
-                else if (id >= 30 && id < 46 && k >= 2) { bn_p[id - 30] = (int16_t)a1; bn_update(); }   // BENJO
+                else if (id >= 30 && id < 47 && k >= 2) { bn_p[id - 30] = (int16_t)a1; bn_update(); }   // BENJO
+                else if (id >= 50 && id < 54 && k >= 4) {                          // BENJO: a plate (PLAY)
+                  if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
+                  bn_px[id - 50] = (int16_t)a1; bn_pa[id - 50] = (int16_t)a3;
+                }
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
@@ -1087,13 +1109,18 @@ void loop() {
     if (hz > 1000 && fabsf(hz - mo_hz) > mo_hz * 0.03f) { mo_hz = hz; all_update(); }
   }
   // SIDRAX's pitches on the clock as it really is: measured over 4 s (±0.03 %), retuned when it moves 0.05 %
-  static uint32_t sxh_t = 0, sxh_n = 0;
-  if (millis() - sxh_t >= 4000) {
+  // (µs timer, 8 s: ±0.0001 %; averaged, so the notes never step by the measuring's own jitter — that moved them)
+  static int64_t sxh_t = 0; static uint32_t sxh_n = 0; static float sxh_avg = 0;
+  if (esp_timer_get_time() - sxh_t >= 8000000) {
+    int64_t now = esp_timer_get_time();
     uint32_t n = pc_samples;
-    float hz = (n - sxh_n) * 1000.0f / (float)(millis() - sxh_t);
+    float hz = (float)((double)(n - sxh_n) * 1000000.0 / (double)(now - sxh_t));
     bool first = sxh_t == 0;
-    sxh_t = millis(); sxh_n = n;
-    if (!first && hz > 1000 && (sx_hz < 1000 || fabsf(hz - sx_hz) > sx_hz * 0.0005f)) { sx_hz = hz; sx_update(); }
+    sxh_t = now; sxh_n = n;
+    if (!first && hz > 1000) {
+      sxh_avg = sxh_avg < 1000 ? hz : sxh_avg + (hz - sxh_avg) * 0.25f;
+      if (sx_hz < 1000 || fabsf(sxh_avg - sx_hz) > sx_hz * 0.0003f) { sx_hz = sxh_avg; sx_update(); bn_update(); }
+    }
   }
   // (no more fighting the radio for ADC2: EARTH is read on ADC1 alone now, see CTRLJING in setup.h)
   // EARTH test over USB: once a second, the raw word and the ADC registers (Serial Monitor, 115200)

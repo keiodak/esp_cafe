@@ -2,8 +2,8 @@
 // WAVE (BLE mode 6): an audio file -> a wavetable for the Cafe: 64 frames of 256 samples (one cycle each), taken at
 // 64 even places through the file. At each place the pitch is found (autocorrelation, 40 Hz … 1 kHz) and exactly
 // one period, from an upward zero crossing, is stretched to 256 samples — so the table walks through the file's
-// timbres. Where no pitch is found (noise, breath) 256 samples are taken as they are. Each frame: DC out, the seam
-// smoothed (the end runs into the start), levelled. -> 16384 twelve-bit samples for the start of the tape ("W").
+// timbres. Where no pitch is found (noise, breath) the nearest pitched cycle is used. Each frame: DC out, the top
+// gently rounded, blended a little with its neighbours, all at the same loudness (steady, no bursts). -> 16384 twelve-bit samples for the start of the tape ("W").
 
 import Foundation
 import AVFoundation
@@ -26,7 +26,9 @@ enum WaveTable {
         for c in 0..<ch { let p = data[c]; for i in 0..<n { mono[i] += p[i] / Float(ch) } }
 
         let minLag = Int(sr / 1000), maxLag = Int(sr / 40), win = 2048
-        var out = [UInt16](repeating: 2048, count: frames * size)
+        guard n > win + maxLag + 4 else { throw AudioLoader.Failure(errorDescription: "the file is too short") }
+        // 1) one cycle per place; a place with no clear pitch (noise, breath) is left empty for now
+        var cycles = [[Float]?](repeating: nil, count: frames)
         for fi in 0..<frames {
             let start = min(n - win - maxLag - 1, max(0, Int(Double(fi) / Double(frames - 1) * Double(n - win - maxLag - 1))))
             // the period: the best normalised autocorrelation between 1 ms and 25 ms
@@ -44,32 +46,55 @@ enum WaveTable {
                     lag += 1
                 }
             }
+            guard best > 0 && bestR > 0.6 else { continue }
+            // one period from an upward zero crossing, stretched to 256
+            var z = start
+            while z < start + best && !(mono[z] <= 0 && mono[z + 1] > 0) { z += 1 }
             var cyc = [Float](repeating: 0, count: size)
-            if best > 0 && bestR > 0.55 {
-                // one period from an upward zero crossing, stretched to 256
-                var z = start
-                while z < start + best && !(mono[z] <= 0 && mono[z + 1] > 0) { z += 1 }
-                for k in 0..<size {
-                    let pos = Double(z) + Double(k) * Double(best) / Double(size)
-                    let j = min(Int(pos), n - 2), fr = Float(pos - Double(j))
-                    cyc[k] = mono[j] + (mono[j + 1] - mono[j]) * fr
-                }
-            } else {
-                for k in 0..<size { cyc[k] = mono[min(n - 1, start + k)] }
-            }
-            // DC out, the seam smoothed over 16 samples, levelled to the full range
-            let dc = cyc.reduce(0, +) / Float(size)
-            for k in 0..<size { cyc[k] -= dc }
-            let seam = 16
-            for k in 0..<seam {
-                let w = Float(k) / Float(seam)
-                cyc[size - seam + k] = cyc[size - seam + k] * (1 - w) + cyc[k] * w * 0.5 + cyc[size - seam + k] * w * 0.5
-            }
-            var pk: Float = 0
-            for v in cyc { pk = max(pk, abs(v)) }
-            let g: Float = pk > 1e-5 ? 0.92 / pk : 0
             for k in 0..<size {
-                out[fi * size + k] = UInt16(max(0, min(4095, 2048 + Int((cyc[k] * g * 2047).rounded()))))
+                let pos = Double(z) + Double(k) * Double(best) / Double(size)
+                let j = min(Int(pos), n - 2), fr = Float(pos - Double(j))
+                cyc[k] = mono[j] + (mono[j + 1] - mono[j]) * fr
+            }
+            cycles[fi] = cyc
+        }
+        // 2) the empty places take the nearest pitched cycle (a steady tone instead of a burst of noise)
+        let found = cycles.indices.filter { cycles[$0] != nil }
+        guard !found.isEmpty else { throw AudioLoader.Failure(errorDescription: "no pitch found in the file") }
+        for fi in 0..<frames where cycles[fi] == nil {
+            let near = found.min { abs($0 - fi) < abs($1 - fi) }!
+            cycles[fi] = cycles[near]
+        }
+        // 3) each cycle: DC out, the seam closed, the top gently rounded (two passes of a 1-2-1 filter, round the cycle)
+        var tab = cycles.map { $0! }
+        for fi in 0..<frames {
+            var c = tab[fi]
+            let dc = c.reduce(0, +) / Float(size)
+            for k in 0..<size { c[k] -= dc }
+            for _ in 0..<2 {
+                var t = c
+                for k in 0..<size { t[k] = 0.25 * c[(k + size - 1) % size] + 0.5 * c[k] + 0.25 * c[(k + 1) % size] }
+                c = t
+            }
+            tab[fi] = c
+        }
+        // 4) neighbouring frames blended a little (1-2-1): moving through the table does not jump
+        var smooth = tab
+        for fi in 0..<frames {
+            let a = tab[max(0, fi - 1)], b = tab[fi], c = tab[min(frames - 1, fi + 1)]
+            for k in 0..<size { smooth[fi][k] = 0.25 * a[k] + 0.5 * b[k] + 0.25 * c[k] }
+        }
+        // 5) every frame at the same loudness (RMS), the peak kept under the ceiling
+        var out = [UInt16](repeating: 2048, count: frames * size)
+        for fi in 0..<frames {
+            let c = smooth[fi]
+            var sq: Float = 0, pk: Float = 0
+            for v in c { sq += v * v; pk = max(pk, abs(v)) }
+            let rms = (sq / Float(size)).squareRoot()
+            var g: Float = rms > 1e-5 ? 0.33 / rms : 0
+            if pk * g > 0.95 { g = 0.95 / pk }
+            for k in 0..<size {
+                out[fi * size + k] = UInt16(max(0, min(4095, 2048 + Int((c[k] * g * 2047).rounded()))))
             }
         }
         return out

@@ -87,7 +87,7 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
-        case .benjo: return rig.bnAxes
+        case .benjo: return rig.bnShown
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -579,7 +579,14 @@ final class Director: ObservableObject {
     /// BENJO: new places for the oscillators, the filter and the cross-modulation
     func bnDice() {
         rig.bnDice()
-        for i in 0..<5 { padMoved(i) }
+        for i in 0..<4 { padMoved(i) }
+    }
+    /// BENJO: FREE · CHORD · PLAY
+    func setBnMode(_ m: Int) {
+        rig.bnMode = m
+        if m != 2 { rig.sxArea = [0, 0, 0, 0] }
+        for u in ctxUnits() { rig.bnAll().forEach(u.send) }
+        refresh()
     }
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
@@ -690,7 +697,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
-        case .benjo: return (rig.bnAxes[i], BnPad.titles[i])
+        case .benjo: return (rig.bnShown[i], BnPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -721,15 +728,16 @@ private struct MainScreen: View {
             if i == 1 || i == 2 { return { x, y in WvPad.caption(i, x, y) } }
             return { x, y in SxPad.caption(i, x, y, rig: r) }
         case .benjo:
-            if i > 3 { return nil }
-            return { x, y in BnPad.caption(i, x, y) }
+            if i == 3 || (i > 3 && i != 7) || (i == 7 && rig.bnPlay) { return nil }
+            let m = rig.bnMode
+            return { x, y in BnPad.caption(i, x, y, mode: m) }
         default:
             return nil
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
+        if (rig.padSet == .sidrax || rig.padSet == .wave || (rig.padSet == .benjo && rig.bnPlay)) && i >= 4 {   // SIDRAX / WAVE / BENJO PLAY: the bottom row = four touch plates
             let director = d
             PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
                 .frame(height: padHeight)
@@ -1067,7 +1075,9 @@ private struct HudBar: View {
             }
         case .benjo:
             switch n {
-            case 0: key("dice") { d.bnDice() }
+            case 0: textKey(BnPad.modeNames[min(max(rig.bnMode, 0), 2)], on: rig.bnMode != 0) { d.setBnMode((rig.bnMode + 1) % 3) }
+            case 1: key("dice") { d.bnDice() }
+            case 2: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
             default: blank
             }
         case .sidrax:

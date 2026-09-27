@@ -205,7 +205,7 @@ enum DlPad: Int, CaseIterable {
 enum HdPad: Int, CaseIterable {
     case voice1, voice2, cycle, tape
     var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · TONE", "TAP"][rawValue] }
-    var start: (Double, Double) { [(0.273, 0.0), (0.727, 0.267), (0.6, 1.0), (0.0, 1.0)][rawValue] }
+    var start: (Double, Double) { [(0.273, 0.0), (0.727, 0.0), (0.6, 1.0), (0.0, 1.0)][rawValue] }
     var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (8, 9)][rawValue] }       // (no FEEDBACK: the Cafe's WET knob does it)
     static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
     static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]
@@ -319,13 +319,22 @@ final class Rig: ObservableObject {
     func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) }
     /// BENJO (mode 6): eight pads of its own ("S 30..45")
     let bnAxes: [PadAxis] = BnPad.starts.map { PadAxis($0) }
+    /// 0 FREE · 1 CHORD (in the scale) · 2 PLAY (the bottom row = four plates, SIDRAX's)
+    @Published var bnMode = 0
+    var bnPlay: Bool { bnMode == 2 }
+    /// the 8 pads on screen: in PLAY the bottom row is the plates
+    var bnShown: [PadAxis] { bnPlay ? Array(bnAxes[0...3]) + Array(sxAxes[4...7]) : bnAxes }
     func bnCommands(pad i: Int) -> [String] {
+        if bnPlay && i >= 4 {
+            let a = sxAxes[i], k = i - 4
+            return ["S \(50 + k) \(Int((a.x * 1000).rounded())) \(Int((a.y * 1000).rounded())) \(Int((sxArea[k] * 1000).rounded()))"]
+        }
         let a = bnAxes[i]
         return ["S \(30 + 2 * i) \(Int((a.x * 1000).rounded()))", "S \(31 + 2 * i) \(Int((a.y * 1000).rounded()))"]
     }
-    func bnAll() -> [String] { (0..<8).flatMap { bnCommands(pad: $0) } }
+    func bnAll() -> [String] { (0..<8).flatMap { i in bnPlay && i >= 4 ? [] : bnCommands(pad: i) } + ["S 46 \(bnMode * 500)"] }
     func bnDice() {
-        for i in [0, 1, 2, 3, 4] { bnAxes[i].x = Double.random(in: 0.1...0.9); bnAxes[i].y = Double.random(in: 0.0...0.8) }
+        for i in [0, 1, 2, 3] { bnAxes[i].x = Double.random(in: 0.1...0.9); bnAxes[i].y = Double.random(in: 0.0...0.8) }
     }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
