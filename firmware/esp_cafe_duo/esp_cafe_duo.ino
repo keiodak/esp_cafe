@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.71"
+#define FW_VERSION "3.72"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -458,6 +458,8 @@ void nz_update() {
 volatile int16_t wv_p[5] = {500, 500, 300, 0, 0};
 void sx_update() {
   float hz = clock_hz(), p[9];
+  static bool sin_ok = false;
+  if (!sin_ok) { for (int i = 0; i <= 256; i++) wv_sin[i] = (int16_t)(2047.0f * sinf(6.2831853f * i / 256.0f)); sin_ok = true; }
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
   sx_base = (uint32_t)(32.703f / (sx_hz > 1000 ? sx_hz : hz) * 4294967295.0f);   // C1 (on the exactly measured clock)
   sx_scale = (int32_t)(p[0] * 6.99f);
@@ -787,6 +789,7 @@ void pc_line(char *s) {
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
                 else if (id >= 20 && id < 25 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
+                else if (id == 25 && k >= 2) wv_valid = a1 != 0;                 // WAVE: the tape now holds a table
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
                   sx_x[id - 10] = (int16_t)a1; sx_y[id - 10] = (int16_t)a2; sx_a[id - 10] = (int16_t)a3;
@@ -841,6 +844,7 @@ void pc_line(char *s) {
                 // W <start> <2 chars per sample: each char = 48 + 6 bits, high then low>  ->  "w <start>"
                 char *q = s + 1;
                 long st = strtol(q, &q, 10);
+                if (st < 16384) wv_valid = false;                  // (over WAVE's table: until "S 25 1" says it is one)
                 while (*q == ' ') q++;
                 int n = 0;
                 while (q[0] >= 48 && q[0] < 112 && q[1] >= 48 && q[1] < 112 && n < 256) {

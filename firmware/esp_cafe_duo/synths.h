@@ -1815,8 +1815,22 @@ static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f
   int32_t a = dread(f * 256 + i0), b = dread(f * 256 + i1);
   return a + (((b - a) * fi) >> 8) - 2048;
 }
+// the tape's first 16384 samples hold a table the phone made ("S 25 1" once it is in); anything else writing there
+// (a file, MAKE, GRAIN's recording) makes it just a sound again -> the built-in waves: sine · triangle · saw · square,
+// the same on every Cafe, always in tune
+volatile bool wv_valid = false;
+int16_t wv_sin[257];
+static inline int32_t wv_builtin(int c, uint32_t ph) {
+  if (c == 0) { int i = ph >> 24; int32_t fi = (ph >> 16) & 255, a = wv_sin[i], b = wv_sin[i + 1]; return a + (((b - a) * fi) >> 8); }
+  int32_t t = (int32_t)(ph >> 20); t = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;             // triangle ±2048
+  if (c == 1) return t;
+  if (c == 2) { int32_t w = (int32_t)(ph >> 20) - 2048; return (w * 3 + t) >> 2; }         // saw, a little rounded
+  t *= 3; return t > 1900 ? 1900 : (t < -1900 ? -1900 : t);                                  // square, soft edges
+}
 static inline int32_t wv_vec(uint32_t ph, int32_t vx, int32_t vy) {    // the four corners mixed by the vector
-  int32_t a = wv_at(0, ph), b = wv_at(21, ph), c = wv_at(42, ph), d = wv_at(63, ph);
+  int32_t a, b, c, d;
+  if (wv_valid) { a = wv_at(0, ph); b = wv_at(21, ph); c = wv_at(42, ph); d = wv_at(63, ph); }
+  else { a = wv_builtin(0, ph); b = wv_builtin(1, ph); c = wv_builtin(2, ph); d = wv_builtin(3, ph); }
   int32_t ab = a + (((b - a) * vx) >> 12), cd = c + (((d - c) * vx) >> 12);
   return ab + (((cd - ab) * vy) >> 12);
 }
@@ -2281,6 +2295,7 @@ void IRAM_ATTR coco_pc() {
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
   bool rec = gmode && pc_rec && !audio_frozen_state && !frz;
+  if (rec) wv_valid = false;                                 // (the recording goes over WAVE's table)
   if (rec) {
     if (rg < 256) rg++;
   } else {

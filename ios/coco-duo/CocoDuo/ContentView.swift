@@ -587,7 +587,7 @@ final class Director: ObservableObject {
                 switch outcome {
                 case .success(let t):
                     self.rig.wvNote = url.deletingPathExtension().lastPathComponent
-                    targets.forEach { $0.load(t) }
+                    targets.forEach { u in u.load(t) { u.send("S 25 1") } }       // (then: the table is good)
                 case .failure(let e): self.rig.wvNote = e.localizedDescription
                 }
             }

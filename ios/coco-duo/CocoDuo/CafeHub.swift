@@ -94,6 +94,7 @@ final class CafeUnit: ObservableObject {
     fileprivate var polls = 0
     // file loading: "W <start> <data>" lines of 128 samples, up to 3 waiting for their "w <start>" answer
     private var loadBuf: [UInt16]? = nil
+    private var loadDoneAction: (() -> Void)? = nil     // (once every line is in: e.g. WAVE marks its table good)
     private var loadSent = 0
     private var loadDone = 0
     private var loadPending: [Int: (t: Date, tries: Int)] = [:]
@@ -272,9 +273,10 @@ final class CafeUnit: ObservableObject {
 
     /// Put these samples on the tape from the start. Recording is switched off first
     /// (otherwise the record head would write over the file), and the loop is set to the file.
-    func load(_ samples: [UInt16]) {
+    func load(_ samples: [UInt16], then done: (() -> Void)? = nil) {
         guard rx != nil, loadBuf == nil, !samples.isEmpty else { return }
         loadBuf = samples
+        loadDoneAction = done
         loadSent = 0; loadDone = 0; loadPending = [:]
         loadProgress = 0; loadNote = ""
         send("R 0")
@@ -296,6 +298,8 @@ final class CafeUnit: ObservableObject {
             loadTimer?.invalidate(); loadTimer = nil
             loadBuf = nil; loadProgress = nil
             loadNote = String(format: "loaded %.2f s", hz > 1000 ? Double(buf.count) / hz : Double(buf.count) / 44100)
+            let a = loadDoneAction; loadDoneAction = nil
+            a?()
         }
     }
 
