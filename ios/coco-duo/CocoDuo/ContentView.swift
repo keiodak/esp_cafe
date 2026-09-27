@@ -718,7 +718,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
-        case .cloud: return (cloud.axes[i], CloudPad.title(i))
+        case .cloud: return (d.cloud.axes[i], CloudPad.title(i))
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
