@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.59"
+#define FW_VERSION "3.60"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -476,7 +476,7 @@ void sx_update() {
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
 //  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
 //  timing: 16 steps of the cycle
-static const int16_t hd_default[14] = {636, 0, 727, 0, 600, 0, 700, 1000, 0, 1000, 0, 0, 0, 0};   // (+4th and +5th: no octave down, no boom)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
+static const int16_t hd_default[14] = {727, 0, 545, 0, 600, 0, 500, 1000, 0, 1000, 0, 0, 0, 0};   // (VOICE 1 +5th, VOICE 2 at UNISON = off: one harmony)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
 static const float hd_cyc[6] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
 void hd_update() {
   float hz = clock_hz(), p[14];

@@ -214,13 +214,15 @@ enum DlPad: Int, CaseIterable {
 enum HdPad: Int, CaseIterable {
     case voice1, voice2, cycle, tape
     var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · TONE", "TAP"][rawValue] }
-    var start: (Double, Double) { [(0.636, 0.0), (0.727, 0.0), (0.6, 1.0), (0.0, 1.0)][rawValue] }
+    var start: (Double, Double) { [(0.727, 0.0), (0.545, 0.0), (0.6, 1.0), (0.0, 1.0)][rawValue] }
     var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (8, 9)][rawValue] }       // (no FEEDBACK: the Cafe's WET knob does it)
     static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
     static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]
     static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
         switch k {
-        case 0, 1: return "\(intervals[min(11, Int(x * 11 + 0.5))]) · \(Int(y * 15 + 0.5))/16"
+        case 0, 1:
+            let iv = min(11, Int(x * 11 + 0.5)), tm = Int(y * 15 + 0.5)
+            return iv == 6 && tm == 0 ? "OFF" : "\(intervals[iv]) · \(tm)/16"      // (UNISON, no TIMING = silent)
         case 2: return "\(cycles[min(5, Int(x * 5 + 0.5))]) BEAT · " + (y >= 0.98 ? "OPEN" : "TONE \(Int(y * 100))%")
         default: return "KEEP \(Int(x * 90))%"
         }

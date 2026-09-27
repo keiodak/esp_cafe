@@ -2363,7 +2363,7 @@ void IRAM_ATTR harmony() {
   static int32_t chs = 0;                                       // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
   // CHAR is a switch here: below the middle = CLEAN only (before, any value above 0 mixed some of the chopped
   // rpls cycles in, even while the app said CLEAN — the grainy, "not clean" sound)
-  chs += ((((int32_t)(ch_v[6] >= 500 ? 1000 : 0)) << 8) - chs) >> 10;
+  chs = 0;   // CLEAN only: the chopped rpls cycles (a granular sound) are not used any more
   int32_t mixc = ((chs >> 8) * 256) / 1000;
   if (mixc < 0) mixc = 0;
   if (mixc > 256) mixc = 256;
@@ -2372,7 +2372,9 @@ void IRAM_ATTR harmony() {
     bool ready = cycles > (uint32_t)(k + 1);                                             // those buffers hold this input yet
     int32_t r = hd_rate[k] + (int32_t)(((int64_t)hd_rate[k] * pc_emod * hd_wob) >> 15);  // EARTH = wobble
     int32_t x = 0;
-    if (mixc > 0) x = ready ? (((hd_voice(b, q[k], S) * gc) >> 6) * mixc) >> 8 : 0;  // GRAIN (rpls)
+    (void)b; (void)ready; (void)gc;
+    // a voice at UNISON with no TIMING would only double the input: it stays silent (one harmony at a time)
+    bool mute = hd_rate[k] == 4096 && hd_off[k] == 0;
     if (mixc < 256) x += (hd_clean(k, rb, t, S, r, cycles) * (256 - mixc)) >> 8;     // CLEAN
     // de-click: at a jump, carry the difference and let it fade (~6 ms) -> a crossfade instead of a step
     static int32_t lasty[2] = { 0, 0 }, dk[2] = { 0, 0 }, lastoff[2] = { 0, 0 }, lastrate[2] = { 0, 0 };
@@ -2391,7 +2393,9 @@ void IRAM_ATTR harmony() {
     static int32_t hpl[2] = { 0, 0 };
     hpl[k] += ((x << 8) - hpl[k]) >> 6;
     x -= hpl[k] >> 8;
-    v[k] = x;
+    static int32_t mg[2] = { 0, 0 };                                  // (the mute fades, ~20 ms)
+    mg[k] += ((mute ? 0 : 4096) - mg[k]) >> 9;
+    v[k] = (x * mg[k]) >> 12;
     q[k] += r;
     int32_t Sq = S << 12;
     while (q[k] >= Sq) q[k] -= Sq;
@@ -2408,8 +2412,8 @@ void IRAM_ATTR harmony() {
   if (++t >= S) t = 0;
 
   int32_t dry = (in * hd_dry) >> 8;
-  int32_t l = dry + ((((v[0] * 205) >> 8) + ((v[1] * 77) >> 8)) * hd_lvl >> 8);
-  int32_t r = dry + ((((v[1] * 205) >> 8) + ((v[0] * 77) >> 8)) * hd_lvl >> 8);
+  int32_t l = dry + ((v[0] * hd_lvl) >> 8);                   // main = VOICE 1, ASH = VOICE 2 (not both on both)
+  int32_t r = dry + ((v[1] * hd_lvl) >> 8);
   int32_t o = l + 2048;
   if (o > 4095) o = 4095;
   if (o < 0) o = 0;

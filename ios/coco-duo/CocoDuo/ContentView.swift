@@ -1333,8 +1333,8 @@ private struct CharControl: View {
         .frame(height: 18)
         .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
         .fixedSize()
-        .opacity(preset >= 0 && preset < Preset.count ? 1 : 0)
-        .allowsHitTesting(preset >= 0 && preset < Preset.count)
+        .opacity(preset >= 0 && preset < Preset.count && !isHarmony ? 1 : 0)     // (HARMONY: no CHAR any more — always clean)
+        .allowsHitTesting(preset >= 0 && preset < Preset.count && !isHarmony)
     }
 }
 
