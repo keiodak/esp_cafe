@@ -647,6 +647,9 @@ private struct MainScreen: View {
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets, makeSlot: $makeSlot)
                 .frame(height: barHeight)
         }
+        .overlayPreferenceValue(PlateAnchors.self) { a in                                   // SIDRAX / WAVE: the fingers, over everything
+            if rig.padSet == .sidrax || rig.padSet == .wave { FingerDiscs(rig: rig, anchors: a) }
+        }
         .fileImporter(isPresented: $rig.wvPicking, allowedContentTypes: [.audio]) { result in   // WAVE: FILE
             if case .success(let url) = result { d.loadWaveTable(url) }
         }

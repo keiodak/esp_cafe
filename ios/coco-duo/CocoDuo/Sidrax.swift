@@ -78,7 +78,7 @@ struct PlatePad: View {
 
     var body: some View {
         let a = rig.sxArea[k]
-        GeometryReader { g in
+        GeometryReader { _ in
             ZStack {
                 Rectangle().fill(PastelTheme.padScreen)
                 HudDots(step: 12)
@@ -111,18 +111,46 @@ struct PlatePad: View {
                 .padding(.leading, 8).padding(.bottom, 6)
                 .allowsHitTesting(false)
         }
-        .overlay {                                   // the finger: a disc as big as it presses — on top of everything
-            GeometryReader { g in
-                Circle()
-                    .fill(PastelTheme.hudOrange.opacity(a > 0 ? 0.25 + a * 0.55 : 0))
-                    .overlay(Circle().strokeBorder(PastelTheme.hudBlack, lineWidth: a > 0 ? 1 : 0.6))
-                    .frame(width: 10 + a * 64, height: 10 + a * 64)
-                    .position(x: axis.x * g.size.width, y: (1 - axis.y) * g.size.height)
-                    .animation(.easeOut(duration: 0.08), value: a)
-                    .allowsHitTesting(false)
+        .anchorPreference(key: PlateAnchors.self, value: .bounds) { [k: $0] }   // (the finger's disc is drawn on top of the whole screen: FingerDiscs)
+    }
+}
+
+/// where the four plates are (for the finger discs drawn over everything)
+struct PlateAnchors: PreferenceKey {
+    static var defaultValue: [Int: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [Int: Anchor<CGRect>], nextValue: () -> [Int: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// the fingers: a disc as big as it presses, over the plate it is on — laid over the whole screen, so nothing (the
+/// pads beside it, the bars) ever covers it
+struct FingerDiscs: View {
+    @ObservedObject var rig: Rig
+    let anchors: [Int: Anchor<CGRect>]
+    var body: some View {
+        GeometryReader { proxy in
+            ForEach(Array(anchors.keys).sorted(), id: \.self) { k in
+                FingerDisc(axis: rig.sxAxes[k + 4], rig: rig, k: k, rect: proxy[anchors[k]!])
             }
-            .allowsHitTesting(false)
         }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct FingerDisc: View {
+    @ObservedObject var axis: PadAxis
+    @ObservedObject var rig: Rig
+    let k: Int
+    let rect: CGRect
+    var body: some View {
+        let a = rig.sxArea[k]
+        Circle()
+            .fill(PastelTheme.hudOrange.opacity(a > 0 ? 0.25 + a * 0.55 : 0))
+            .overlay(Circle().strokeBorder(PastelTheme.hudBlack, lineWidth: a > 0 ? 1 : 0.6))
+            .frame(width: 10 + a * 64, height: 10 + a * 64)
+            .position(x: rect.minX + axis.x * rect.width, y: rect.minY + (1 - axis.y) * rect.height)
+            .animation(.easeOut(duration: 0.08), value: a)
     }
 }
 
