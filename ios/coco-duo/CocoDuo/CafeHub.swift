@@ -54,6 +54,8 @@ final class CafeUnit: ObservableObject {
     @Published var recording = true
     @Published var preset = -1
     @Published var hz: Double = 0
+    /// the Cafe's firmware version (from its HELLO)
+    @Published var fw = ""
     @Published var ls = 0
     @Published var le = TAPE
     @Published var speed = 1000               // x1000
@@ -202,7 +204,11 @@ final class CafeUnit: ObservableObject {
     }
 
     private func handle(_ l: String) {
-        if l.hasPrefix("HELLO") { return }
+        if l.hasPrefix("HELLO") {                                       // "HELLO coco-duo <version> <name> ota"
+            let w = l.split(separator: " ")
+            if w.count >= 3 { fw = String(w[2]) }
+            return
+        }
         guard let c = l.first else { return }
         switch c {
         case "T":
@@ -503,7 +509,7 @@ final class CafeUnit: ObservableObject {
         rx = nil; peri = nil; name = nil
         out.removeAll(); inbuf.removeAll()
         waitingQ = false; lastSmp = nil; polls = 0
-        hz = 0; preset = -1; bpm = 0; fx = -1
+        hz = 0; preset = -1; bpm = 0; fx = -1; fw = ""
         state = why
     }
 }
