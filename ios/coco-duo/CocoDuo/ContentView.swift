@@ -1067,7 +1067,7 @@ private struct HudBar: View {
         case .grain:
             switch n {
             case 0: key("snowflake", on: grain.freeze) { grain.setFreeze(!grain.freeze, d.ctxUnits()) }
-            case 1: key("metronome", on: grain.perc) { grain.setPerc(!grain.perc, d.ctxUnits()) }
+            case 1: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape (PERC: PRESET)
             case 2: key(grain.fold ? "wave.3.forward" : "waveform.path", on: grain.move || grain.fold) {   // off -> PITCH -> FOLD
                         grain.cyclePitchFold(d.ctxUnits())
                     }
@@ -1101,7 +1101,7 @@ private struct HudBar: View {
             case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
             case 1: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
             case 2: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                 // an audio file -> the table
-            default: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape
+            default: blank
             }
         case .sidrax:
             switch n {

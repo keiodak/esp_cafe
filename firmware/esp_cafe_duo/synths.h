@@ -1046,6 +1046,7 @@ volatile int32_t mo_edge = 1500;            // fade in / out, samples (len/2 = a
 volatile int32_t mo_rate = 4096;            // base speed, Q12
 volatile uint8_t mo_spread = 1;             // intervals a grain may take (1..9)
 volatile int32_t mo_back = 4096;            // how far behind the record head grains are taken
+volatile int32_t mo_back_play = 4096;       // REC off: WHERE across the whole tape, evenly (a sound made on the phone is played by hand)
 volatile int32_t mo_scat = 1;               // + up to this much, per grain
 volatile int32_t mo_f = 4096, mo_q = 4096;  // filter, Q12 (f = 4096 = open)
 volatile uint16_t mo_rev = 0;               // share of backwards grains, 0..65535
@@ -1183,7 +1184,7 @@ static int32_t __attribute__((noinline)) grain_tick(uint32_t wpos, int64_t now, 
         }
     }
     if (start < 0) {
-      int32_t back = mo_back + (int32_t)((mo_rnd(n, 3) * (uint32_t)(mo_scat > 0 ? mo_scat : 1)) >> 16) + span + 64;
+      int32_t back = ((pc_rec && !audio_frozen_state) ? mo_back : mo_back_play) + (int32_t)((mo_rnd(n, 3) * (uint32_t)(mo_scat > 0 ? mo_scat : 1)) >> 16) + span + 64;
       if (back > 131072 - 1024) back = 131072 - 1024;
       back -= pc_emod * 64;  // EARTH moves the place (±~8000 samples)
       if (back < span + 64) back = span + 64;
@@ -2306,7 +2307,7 @@ void IRAM_ATTR coco_pc() {
     int32_t g = rg;
     dwrite(wpos, old + (((gyo - old) * g) >> 8));
   }
-  if (gmode) wpos = (wpos + 1) & 0x1FFFF;
+  if (gmode && pc_rec && !audio_frozen_state) wpos = (wpos + 1) & 0x1FFFF;   // REC off: the head stands still, WHERE = a place on the tape
 
   // --- THE SOUND ---
   int32_t l = 0, r = 0;
