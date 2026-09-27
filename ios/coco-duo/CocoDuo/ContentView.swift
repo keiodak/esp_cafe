@@ -672,9 +672,6 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
-        .sheet(isPresented: Binding(get: { rig.makeFor != nil }, set: { if !$0 { rig.makeFor = nil } })) {
-            MakeSheet(d: d, target: rig.makeFor ?? 0)
-        }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -992,7 +989,6 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
-                textKey("MAKE", on: rig.makeFor == unit.slot) { rig.makeFor = unit.slot }      // STRETCH / CHORDS for this bar's Cafe
             }
         }
     }
@@ -1031,6 +1027,7 @@ private struct HudBar: View {
                 .foregroundStyle(PastelTheme.hudOrange)
                 .lineLimit(1)
                 .frame(width: 64, alignment: .leading)
+            GuideTicker(text: guide)
             // the preset manager lives behind this box: say so
             HudTag(text: "▾", size: 9)
         }

@@ -3,7 +3,7 @@
 //   PRESETS  the playlist, numbered in its order. A · B on each row: where each Cafe is, and a tap puts it there
 //            (that is also who the pads go to); the row itself = both. 12 = PRESET DESIGN: 11 slots, pick one then a
 //            preset from the right (3 across), the bin empties a slot; empty slots are skipped on the Cafe.
-//   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on · NOW (+ MAKE: STRETCH / CHORDS)
+//   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on · NOW
 //   (TEMPO and UPDATE live in the CAFES panel.)
 
 import SwiftUI
@@ -562,8 +562,6 @@ private struct NowCard: View {
                             .minimumScaleFactor(0.6)
                     }
                 }
-                Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5)
-                MakeRows(d: d)                                         // MAKE: STRETCH / CHORDS onto the tape
                 Spacer(minLength: 0)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Spacer(minLength: 0)
