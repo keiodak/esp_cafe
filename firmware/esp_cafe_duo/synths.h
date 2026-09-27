@@ -2059,42 +2059,38 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 // ==========================================
 // BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
 // ==========================================
-// ONE formula of t (the phone compiles it to a little stack program: "J 0 <hex bytes>", and before it "J 1 <hex>" =
-// its cells: the byte positions of its numbers and operators, in the order they are written). A cellular automaton
-// (a Wolfram RULE, one cell per number / operator) grows the formula: every STEP a generation; where a cell is alive,
-// its number moves (DEPTH; up with the left neighbour, down with the right, further with both) and, if OPS lets that
-// cell, its operator turns into another one. The SOUND = the seed formula and the grown one, mixed by MORPH, XOR'ed
-// by XOR (low 8 bits). The BEAT = one BIT of the grown one: every rising edge -> YELLOW clicks, and ASH plays a short
-// click (CLICK = its pitch, DECAY = its length). SKIP / SYNC = t back to 0 and the automaton back to its seed.
-// SLOW = t at 1/32. FREEZE = t stops moving on: it loops the last beat (two periods of BIT), the automaton stops.
+// ONE formula of t (the phone compiles it to a little stack program: "J 0 <hex bytes>"). What moves it:
+//  WINDOW  which 8 bits of the result are heard (sliding smoothly: low = buzz and grain, high = rhythm)
+//  LOOP    t goes round one slice of the bar (2^LOOP steps; off at the bottom) · SLICE = which of the 16 slices
+//  FEEDBACK the output of DELAY steps ago pushes t (and is the formula's "y") -> it runs away with itself
+//  INPUT   the input jack pushes t (IN) and breaks the low bits (XOR) -> patch the other Cafe in: they collide
+//          (the formula's "i" = the input)
+//  RHYTHM  a 16-step cellular automaton (RULE; off at the bottom) gates the sound, a step every 2^STEP of t, a new
+//          generation every bar; each live step clicks YELLOW, and ASH plays a click (CLICK pitch, DECAY)
+// SLOW = t at 1/32. FREEZE = t loops the last two steps. SKIP / SYNC = t back to 0, the automaton to its seed.
 // Parameters: "J 9 <id> <0..1000>" (bb_update).
-// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >>
-//      20 ~ 21 neg · 22 < 23 > 24 ==
-#define BB_MAXC 32
+// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 9 y (the fed-back output) · 25 i (the input)
+//      10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >> · 20 ~ 21 neg · 22 < 23 > 24 ==
 volatile uint8_t bb_prog[2][64] = { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } };   // t*(t>>5|t>>8)
-volatile uint8_t bb_cpos[2][BB_MAXC] = { { 10, 4, 2, 9, 8, 6 }, { 0 } };                // * >> 5 | >> 8
-volatile uint8_t bb_ncell[2] = { 6, 0 };
-volatile uint8_t bb_pend[BB_MAXC];          // the cells of the formula on its way ("J 1", then "J 0" flips)
-volatile uint8_t bb_npend = 0;
 volatile uint8_t bb_cur = 0;
 volatile uint32_t bb_inc = 11889;          // t per sample, Q16 (8 kHz)
-volatile int32_t bb_morph = 0, bb_xor = 0; // Q8
 volatile int32_t bb_v[4] = { 64, 128, 32, 16 };
 volatile int32_t bb_level = 180;           // Q8
-volatile int bb_bit = 8;                   // BEAT: the bit of the grown formula
+volatile int32_t bb_win = 0;               // WINDOW: the lowest bit heard, Q8 (0 .. 16 << 8)
+volatile int bb_loopb = 0;                 // LOOP: 0 off, else 2^bb_loopb steps
+volatile int bb_slice = 0;                 // SLICE: 0..15
+volatile int32_t bb_fb = 0, bb_fbd = 64;   // FEEDBACK into t (Q8) · its DELAY (steps)
+volatile int32_t bb_int = 0;               // INPUT -> t (Q8)
+volatile int bb_inx = 0;                   // INPUT -> the low bits (0..8)
+volatile int bb_rule = 0;                  // RHYTHM rule (0 = no gate)
+volatile int bb_stepb = 11;                // a step every 2^bb_stepb of t
 volatile uint32_t bb_cinc = 0;             // CLICK pitch (Q32 per sample)
 volatile int32_t bb_cdec = 65000;          // CLICK decay (Q16 per sample)
-volatile bool bb_restart = false, bb_reset = true, bb_reseed = true;
+volatile bool bb_restart = false, bb_reset = true;
+volatile bool bb_slow = false, bb_frz = false;
 volatile int bb_gate = 0;
-volatile int bb_rule = 30;                 // RULE (Wolfram)
-volatile int bb_seedd = 0;                 // SEED: 0 = one cell in the middle, else the density of a fixed random row
-volatile int bb_gsh = 10;                  // STEP: a generation every 2^bb_gsh steps of t
-volatile int bb_depth = 5;                 // DEPTH: how far a live number moves
-volatile int bb_ops = 77;                  // OPS: how many operator cells may turn (0..256)
-volatile bool bb_slow = false;             // SLOW: t at 1/32
-volatile bool bb_frz = false;              // FREEZE: t loops the last beat
-static uint8_t bb_live[64];                // the grown formula
-static uint32_t bb_ca = 0;                 // the automaton's row (bit i = cell i)
+static uint32_t bb_yv = 128, bb_iv = 128;  // "y" and "i" for the formula
+static uint8_t bb_hist[2048];              // the output, for FEEDBACK
 
 static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   uint32_t st[16];
@@ -2105,6 +2101,8 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
     if (op == 1) { if (sp < 16) st[sp++] = t; }
     else if (op >= 2 && op <= 5) { if (sp < 16) st[sp++] = (uint32_t)bb_v[op - 2]; }
     else if (op == 6) { if (sp < 16) st[sp++] = (uint32_t)(pc_emod + 128); }
+    else if (op == 9) { if (sp < 16) st[sp++] = bb_yv; }
+    else if (op == 25) { if (sp < 16) st[sp++] = bb_iv; }
     else if (op == 7) { if (sp < 16) st[sp++] = pr[pc]; pc++; }
     else if (op == 8) { if (sp < 16) st[sp++] = pr[pc] | (pr[pc + 1] << 8); pc += 2; }
     else if (op == 20) { if (sp) st[sp - 1] = ~st[sp - 1]; }
@@ -2134,86 +2132,70 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   return sp ? st[sp - 1] : 0;
 }
 
-// the automaton (the phone runs the same one for its picture: keep the two alike)
-static void bb_seed_ca(int n) {
-  uint32_t c = 0, st = 12345;
-  if (n <= 0) { bb_ca = 0; return; }
-  if (bb_seedd > 0)
-    for (int i = 0; i < n; i++) { st = st * 1103515245u + 12345u; if (((st >> 16) & 255) < (uint32_t)bb_seedd) c |= 1u << i; }
-  if (!c) c = 1u << (n / 2);
-  bb_ca = c;
-}
-static void bb_step_ca(int n) {
-  if (n <= 0) return;
-  uint32_t c = bb_ca, nc = 0;
-  for (int i = 0; i < n; i++) {
-    int l = (c >> ((i + n - 1) % n)) & 1, m = (c >> i) & 1, r = (c >> ((i + 1) % n)) & 1;
-    nc |= (uint32_t)((bb_rule >> ((l << 2) | (m << 1) | r)) & 1) << i;
-  }
-  if (nc) bb_ca = nc; else bb_seed_ca(n);                  // (died out: back to the seed)
-}
-static void bb_grow(const volatile uint8_t *pr, const volatile uint8_t *cp, int n) {
-  static const uint8_t ops[8] = { 10, 11, 12, 15, 16, 17, 18, 19 };   // + - * & | ^ << >>
-  for (int i = 0; i < 64; i++) bb_live[i] = pr[i];
-  for (int i = 0; i < n; i++) {
-    if (!((bb_ca >> i) & 1)) continue;
-    int l = (bb_ca >> ((i + n - 1) % n)) & 1, r = (bb_ca >> ((i + 1) % n)) & 1;
-    int p = cp[i];
-    if (p > 60) continue;
-    uint8_t op = pr[p];
-    if (op == 7 || op == 8) {
-      int32_t v = op == 7 ? pr[p + 1] : (pr[p + 1] | (pr[p + 2] << 8));
-      int32_t d = bb_depth * (1 + l + r);
-      if (r > l) d = -d;
-      int32_t x = v + d;
-      if (x < 1) x = v ? 1 : 0;
-      if (op == 7) { if (x > 255) x = 255; bb_live[p + 1] = (uint8_t)x; }
-      else { if (x > 65535) x = 65535; bb_live[p + 1] = (uint8_t)(x & 255); bb_live[p + 2] = (uint8_t)(x >> 8); }
-    } else if (((i * 37 + 11) & 255) < bb_ops) {
-      int k = 0;
-      while (k < 8 && ops[k] != op) k++;
-      if (k < 8) bb_live[p] = ops[(k + 1 + l + 2 * r) & 7];
-    }
-  }
-}
-
-static int32_t __attribute__((noinline)) bb_tick(int32_t *rout) {
-  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0, gc = 0, tf = 0, fl = 0;
-  static int32_t out = 0, dc = 0, cenv = 0;
-  static int beat = 0, ylit = 0, seen = -1;
+static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
+  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0, tf = 0, fl = 0, hp = 0;
+  static int32_t out = 0, dc = 0, cenv = 0, gg = 4096, ins = 0;
+  static int ylit = 0, laststep = -1, topb = 0;
+  static uint16_t ca = 0x0100;
   static bool was = false;
-  int cur = bb_cur, n = bb_ncell[cur];
-  bool regrow = false;
-  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; beat = 0; bb_reseed = true; }
-  if (bb_restart) { bb_restart = false; frac = 0; t = 0; bb_reseed = true; }
-  if (cur != seen || bb_reseed) { seen = cur; bb_reseed = false; bb_seed_ca(n); gc = 0; regrow = true; }
+  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; ca = 0x0100; laststep = -1; }
+  if (bb_restart) { bb_restart = false; frac = 0; t = 0; ca = 0x0100; laststep = -1; }
+  ins += (in - ins) >> 3;                                    // (the input, a little smoothed)
   frac += bb_slow ? (bb_inc >> 5) : bb_inc;
   uint32_t adv = frac >> 16;
   frac &= 0xFFFF;
-  // FREEZE: t no longer moves on — it goes round the last beat (two periods of BIT) — and the automaton waits
-  if (bb_frz) {
-    if (!was) { was = true; fl = 2u << bb_bit; tf = t - fl; }
+  if (bb_frz) {                                              // FREEZE: t goes round the last two steps
+    if (!was) { was = true; fl = 2u << bb_stepb; tf = t - fl; }
     t += adv;
     if (t - tf >= fl) t = tf + ((t - tf) % fl);
   } else {
     was = false;
     t += adv;
-    if (adv && n > 0 && (gc += adv) >= (1u << bb_gsh)) { gc = 0; bb_step_ca(n); regrow = true; }
   }
-  if (regrow) bb_grow(bb_prog[cur], bb_cpos[cur], n);
   if (t != lastt) {
     lastt = t;
-    uint32_t v0 = bb_run(bb_prog[cur], t), v1 = bb_run(bb_live, t);
-    int g = (v1 >> bb_bit) & 1;
-    if (g && !beat) { cenv = 4096 << 8; cph = 0; ylit = 220; }   // a rising edge: click
-    beat = g;
-    int32_t f1 = (int32_t)(v0 & 255), f2 = (int32_t)(v1 & 255);
-    int32_t m = (f1 * (256 - bb_morph) + f2 * bb_morph) >> 8;
-    m += (((f1 ^ f2) - m) * bb_xor) >> 8;
-    out = ((m & 255) - 128) * 12;
-  }
+    // RHYTHM: the 16 steps of the bar; a new generation at every bar
+    int step = (int)((t >> bb_stepb) & 15);
+    bool onset = step != laststep;
+    if (onset && step == 0 && laststep >= 0 && bb_rule) {
+      uint16_t nc = 0;
+      for (int i = 0; i < 16; i++) {
+        int l = (ca >> ((i + 15) & 15)) & 1, m = (ca >> i) & 1, r = (ca >> ((i + 1) & 15)) & 1;
+        nc |= (uint16_t)(((bb_rule >> ((l << 2) | (m << 1) | r)) & 1) << i);
+      }
+      ca = nc ? nc : 0x0100;                                 // (died out: the seed again)
+    }
+    laststep = step;
+    bool live = !bb_rule || ((ca >> step) & 1);
+    // the t the formula hears: LOOP / SLICE, then FEEDBACK and INPUT push it
+    uint32_t tl = t;
+    if (bb_loopb) {
+      uint32_t L = 1u << bb_loopb;
+      tl = (t & ~((L << 4) - 1)) + (uint32_t)bb_slice * L + (t & (L - 1));
+    }
+    bb_yv = bb_hist[(hp - (uint32_t)bb_fbd) & 2047];
+    tl += (uint32_t)((((int32_t)bb_yv - 128) * bb_fb) >> 5);
+    tl += (uint32_t)((ins * bb_int) >> 8);
+    bb_iv = (uint32_t)((ins >> 4) + 128) & 255;
+    uint32_t v = bb_run(bb_prog[bb_cur], tl);
+    // WINDOW: which 8 bits (between two neighbouring windows, smoothly)
+    int sh = bb_win >> 8, fr = bb_win & 255;
+    int32_t w0 = (int32_t)((v >> sh) & 255), w1 = (int32_t)((v >> (sh + 1)) & 255);
+    int32_t m = (w0 * (256 - fr) + w1 * fr) >> 8;
+    if (bb_inx) m ^= (int32_t)(bb_iv & ((1u << bb_inx) - 1));   // INPUT breaks the low bits
+    m &= 255;
+    bb_hist[hp & 2047] = (uint8_t)m;
+    hp++;
+    out = (m - 128) * 12;
+    // the clicks: every live step (RHYTHM on), else the top bit of the window rising
+    int tb = (m >> 7) & 1;
+    bool hit = bb_rule ? (onset && live) : (tb && !topb);
+    topb = tb;
+    if (hit) { cenv = 4096 << 8; cph = 0; ylit = 220; }
+    gg += ((live ? 4096 : 0) - gg) >> 4;
+  } else gg += (((!bb_rule || ((ca >> ((t >> bb_stepb) & 15)) & 1)) ? 4096 : 0) - gg) >> 4;
   dc += (out - dc) >> 10;
-  int32_t y = ((out - dc) * bb_level) >> 8;
+  int32_t y = ((((out - dc) * gg) >> 12) * bb_level) >> 8;
   if (y > 2047) y = 2047; if (y < -2047) y = -2047;
   // the click (ASH): a short falling blip — a triangle whose pitch drops as it dies away
   int32_t ce = cenv >> 8;
@@ -2317,7 +2299,7 @@ void IRAM_ATTR coco_pc() {
     l = grain_tick(wpos, now, frz, g_restart);
     r = l;
   } else if (bmode) {
-    l = bb_tick(&r);                                         // BYTEBEAT: main = the formulas, ASH = the click
+    l = bb_tick(gyo - 2048, &r);                             // BYTEBEAT: main = the formula, ASH = the click
   } else if (dmode) {
     bool hold = dl_hold || FLIPPERAT || audio_frozen_state;
     l = dl_tick(gyo - 2048, &r, hold);

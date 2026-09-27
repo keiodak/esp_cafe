@@ -113,7 +113,7 @@ final class Director: ObservableObject {
             u.send("M 25 \(rig.mode[s])")
             switch rig.mode[s] {
             case 0: grain.allCommands(slot: s).forEach(u.send)
-            case 1: rig.bbAll(slot: s).forEach(u.send); rig.bbCA.load(rig.bbCode); rig.bbCAUpdate()
+            case 1: rig.bbAll(slot: s).forEach(u.send); rig.bbCA.reseed(); rig.bbCAUpdate()
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
@@ -559,12 +559,11 @@ final class Director: ObservableObject {
         ctxUnits().forEach { $0.send("J 9 14 \(on ? 1000 : 0)") }
         rig.bbCAUpdate()
     }
-    /// BYTEBEAT: the formula, sent when it reads (the automaton starts again on it)
+    /// BYTEBEAT: the formula, sent when it reads
     func setBbFormula(_ f: String) {
         rig.bbCode = f
         guard Bytebeat.parse(f) != nil else { return }
         for u in ctxUnits() { rig.bbFormulaLines(slot: u.slot).forEach(u.send) }
-        rig.bbCA.load(f)
     }
     /// a new one
     func bbDice() { setBbFormula(Bytebeat.random()) }
@@ -758,8 +757,8 @@ private struct MainScreen: View {
             let director = d
             FormulaPad(rig: rig, tag: "03", set: { director.setBbFormula($0) })
                 .frame(height: padHeight)
-        } else if rig.padSet == .byte && i == 3 {                   // BYTEBEAT: the automaton growing it
-            AutomatonPad(ca: rig.bbCA, tag: "04", rule: BytePad.rule(rig.bbAxes[1].x))
+        } else if rig.padSet == .byte && i == 3 {                   // BYTEBEAT: the rhythm
+            RhythmPad(ca: rig.bbCA, tag: "04", rule: BytePad.rule(rig.bbAxes[6].x))
                 .frame(height: padHeight)
         } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
@@ -1090,7 +1089,7 @@ private struct HudBar: View {
             switch n {
             case 0: key("dice") { d.bbDice() }                                      // a new formula
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
-            case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t loops the last beat
+            case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t round the last two steps
             default: textKey("SLOW", on: rig.bbSlow) { d.setBbSlow(!rig.bbSlow) }          // t at 1/32
             }
         case .wave:

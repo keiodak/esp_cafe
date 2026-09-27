@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.69"
+#define FW_VERSION "3.70"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -503,29 +503,31 @@ void sx_update() {
 // ---- BYTEBEAT parameters (k.odk). "J 9 <id> <0..1000>" ----
 //  0 RATE (1 .. 32 kHz)  1 MORPH  2 XOR  3 BEAT BIT (3 .. 14)  4 LOGIC (OR · XOR · AND · 2 OF 4)  5 CLICK pitch
 //  6 CLICK decay  7 LEVEL  8 PAIR (0 = formulas 1 & 2 · 1000 = 3 & 4)
-volatile int16_t bb_p[15] = {400, 0, 0, 450, 0, 400, 400, 700, 0, 0, 500, 300, 300, 0, 0};
-static const int16_t bb_rules[16] = {30, 90, 110, 45, 73, 54, 150, 18, 22, 60, 105, 126, 137, 169, 184, 57};
+volatile int16_t bb_p[15] = {400, 0, 0, 0, 0, 200, 0, 0, 0, 0, 500, 400, 400, 700, 0};
+static const int16_t bb_rules[15] = {30, 90, 110, 45, 73, 54, 150, 18, 22, 60, 105, 126, 137, 169, 57};
+// 0 rate · 1 window · 2 loop · 3 slice · 4 feedback · 5 delay · 6 input->t · 7 input->bits · 8 rule · 9 slow
+// 10 step · 11 click · 12 decay · 13 level · 14 freeze
 void bb_update() {
   float hz = clock_hz(), p[15];
   for (int i = 0; i < 15; i++) p[i] = bb_p[i] / 1000.0f;
   float r = 1000.0f * powf(32.0f, p[0]);
   bb_inc = (uint32_t)(r / hz * 65536.0f);
-  bb_morph = (int32_t)(p[1] * 256.0f);
-  bb_xor = (int32_t)(p[2] * 256.0f);
-  bb_bit = 3 + (int)(p[3] * 11.99f);                                   // BEAT: the bit of the grown formula
-  bb_rule = bb_rules[(int)(p[4] * 15.99f)];                             // RULE
-  float cf = 80.0f * powf(40.0f, p[5]);                               // CLICK 80 Hz .. 3.2 kHz
+  bb_win = (int32_t)(p[1] * 16.0f * 256.0f);                           // WINDOW: bits 0-7 .. 16-23
+  bb_loopb = p[2] < 0.03f ? 0 : 17 - (int)((p[2] - 0.03f) / 0.97f * 12.99f);   // LOOP: off, then 2^17 .. 2^5
+  bb_slice = (int)(p[3] * 15.99f);
+  bb_fb = (int32_t)(p[4] * p[4] * 256.0f);                             // FEEDBACK
+  bb_fbd = 1 + (int32_t)(p[5] * p[5] * 2046.0f);                        // DELAY: 1 .. 2047 steps
+  bb_int = (int32_t)(p[6] * p[6] * 512.0f);                             // INPUT -> t
+  bb_inx = (int)(p[7] * 8.99f);                                         // INPUT -> 0 .. 8 low bits
+  bb_rule = p[8] < 0.04f ? 0 : bb_rules[(int)((p[8] - 0.04f) / 0.96f * 14.99f)];   // RHYTHM: off, then a rule
+  bb_slow = bb_p[9] >= 500;
+  bb_stepb = 14 - (int)(p[10] * 8.99f);                                 // STEP: 2^14 .. 2^6
+  float cf = 80.0f * powf(40.0f, p[11]);                               // CLICK 80 Hz .. 3.2 kHz
   bb_cinc = (uint32_t)(cf / hz * 4294967295.0f);
-  float cs = 0.002f + p[6] * p[6] * 0.25f;                            // DECAY 2 .. 250 ms
+  float cs = 0.002f + p[12] * p[12] * 0.25f;                           // DECAY 2 .. 250 ms
   bb_cdec = (int32_t)(65536.0f * expf(-1.0f / (cs * hz)));
-  bb_level = (int32_t)(p[7] * 1.4f * 256.0f);
-  int sd = (int)(p[8] * 255.0f);                                       // SEED: one cell, or a random row this dense
-  if (sd != bb_seedd) { bb_seedd = sd; bb_reseed = true; }
-  bb_slow = bb_p[9] >= 500;                                            // SLOW: t at 1/32
-  bb_gsh = 15 - (int)(p[10] * 11.99f);                                 // STEP: a generation every 2^15 .. 2^4 steps
-  bb_depth = 1 + (int)(p[11] * 15.0f);                                 // DEPTH: 1 .. 16
-  bb_ops = (int)(p[12] * 256.0f);                                      // OPS
-  bb_frz = bb_p[14] >= 500;                                            // FREEZE: t loops the last beat
+  bb_level = (int32_t)(p[13] * 1.4f * 256.0f);
+  bb_frz = bb_p[14] >= 500;                                            // FREEZE
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -816,7 +818,7 @@ void pc_line(char *s) {
     case 'J': {                            // BYTEBEAT: "J 0..3 <hex bytes>" a formula · "J 9 <id> <0..1000>" a setting
                 char *q = s + 1;
                 long n = strtol(q, &q, 10);
-                if (n == 0 || n == 1) {
+                if (n == 0) {                                      // the formula: into the other buffer, then flip
                   uint8_t tmp[64] = {0};
                   int k = 0;
                   while (*q == ' ') q++;
@@ -827,17 +829,9 @@ void pc_line(char *s) {
                     tmp[k++] = (uint8_t)((hi << 4) | lo);
                     q += 2;
                   }
-                  if (n == 1) {                                    // the cells of the formula that comes next
-                    int c = k < BB_MAXC ? k : BB_MAXC;
-                    for (int i = 0; i < c; i++) bb_pend[i] = tmp[i];
-                    bb_npend = (uint8_t)c;
-                  } else {                                         // the formula: into the other buffer, then flip
-                    int nb = bb_cur ^ 1;
-                    for (int i = 0; i < 64; i++) bb_prog[nb][i] = tmp[i];
-                    for (int i = 0; i < BB_MAXC; i++) bb_cpos[nb][i] = bb_pend[i];
-                    bb_ncell[nb] = bb_npend;
-                    bb_cur = (uint8_t)nb;
-                  }
+                  int nb = bb_cur ^ 1;
+                  for (int i = 0; i < 64; i++) bb_prog[nb][i] = tmp[i];
+                  bb_cur = (uint8_t)nb;
                 } else if (n == 9) {
                   long id = strtol(q, &q, 10), v = strtol(q, &q, 10);
                   if (v < 0) v = 0; if (v > 1000) v = 1000;

@@ -1,9 +1,9 @@
 // Bytebeat.swift — coco duo (k.odk)
-// BYTEBEAT: mode 1 of the BLE preset (it replaced COCO there). ONE formula of t, grown by a cellular automaton: every
-// number and operator is a cell; where a cell lives, its number moves / its operator turns ("J 1" the cells, "J 0" the
-// program; the Cafe runs the automaton). Pad 3 = the formula (a die, a tap = the key board), pad 4 = the automaton.
-// XY: RATE · B RATIO, RULE · SEED, MORPH · XOR (the seed formula <-> the grown one), CLICK · DECAY, STEP · DEPTH,
-// OPS · BEAT. The two Cafes are a pair: the same t (SYNC), B at a ratio of A's rate, MORPH turned round.
+// BYTEBEAT: mode 1 of the BLE preset (it replaced COCO there). ONE formula of t ("J 0 <hex>"); pad 3 = the formula
+// (a die, a tap = the key board: t, y = the fed-back output, i = the input), pad 4 = the rhythm.
+// XY: RATE · WINDOW (which 8 bits are heard), LOOP · SLICE (t round one slice of the bar), FEEDBACK · DELAY (the output
+// pushes t), INPUT · BITS (the input jack pushes t / breaks the low bits: patch the other Cafe in), RULE · STEP (a
+// 16-step automaton gates the sound), CLICK · DECAY. B = A with the window two bits higher and the slice four on.
 
 import SwiftUI
 
@@ -15,7 +15,8 @@ enum Bytebeat {
         let shapes = ["t*(t>>A|t>>B)", "t*(t>>A&t>>B)&C", "(t>>A)*(t>>B&C)", "t*((t>>A|t>>B)&C&t>>D)",
                       "(t*E&t>>A)|(t*F&t>>B)", "(t>>A|t)*(t>>B&C)", "t*(t^t+(t>>A|E))", "t&t>>A",
                       "(t&t>>A)*(t>>B&C)", "t>>D^t*(t>>A&C)", "(t*E^t>>A)&(t>>B|C)", "t*(t>>A|t>>B)&(t>>D|C)",
-                      "(t*E&t>>A|t*F&t>>B)^t>>D", "t*((t>>A)%E+1)&C", "t*E&t>>A", "(t>>A)*E&t>>D"]
+                      "(t*E&t>>A|t*F&t>>B)^t>>D", "t*((t>>A)%E+1)&C", "t*E&t>>A", "(t>>A)*E&t>>D",
+                      "t*(t>>A|y>>D)", "(t>>A|t)*(y&C)", "t*(t>>A&t>>B)+y", "(t^y)*(t>>A&C)", "t*(i>>D|t>>A)", "(t*E^i)&t>>A"]
         var s = shapes.randomElement()!
         let cs = [3, 7, 15, 31, 63, 127]
         for (k, v) in [("A", Int.random(in: 3...12)), ("B", Int.random(in: 4...13)), ("D", Int.random(in: 3...11)),
@@ -64,6 +65,9 @@ enum Bytebeat {
             }
             if let k = ["t", "a", "b", "c", "d", "e"].firstIndex(of: String(c)) {
                 toks.append(.v(UInt8(k + 1))); words.append(String(c)); i += 1; continue
+            }
+            if c == "y" || c == "i" {                   // y = the fed-back output, i = the input jack
+                toks.append(.v(c == "y" ? 9 : 25)); words.append(String(c)); i += 1; continue
             }
             if i + 1 < ch.count, ["<<", ">>", "=="].contains(String([c, ch[i + 1]])) {
                 toks.append(.op(String([c, ch[i + 1]]))); words.append(String([c, ch[i + 1]])); i += 2; continue
@@ -134,126 +138,76 @@ enum Bytebeat {
 }
 
 enum BytePad {
-    static let titles = ["RATE · B RATIO", "RULE · SEED", "FORMULA", "AUTOMATON",
-                         "MORPH · XOR", "CLICK · DECAY", "STEP · DEPTH", "OPS · BEAT"]
-    static let starts: [(Double, Double)] = [(0.4, 0.5), (0.0, 0.0), (0, 0), (0, 0),
-                                             (1.0, 0.0), (0.4, 0.4), (0.5, 0.3), (0.3, 0.45)]
-    /// B's rate against A's
-    static let ratios: [Double] = [0.5, 2.0 / 3.0, 0.75, 1, 4.0 / 3.0, 1.5, 2]
-    static let ratioNames = ["×1/2", "×2/3", "×3/4", "×1", "×4/3", "×3/2", "×2"]
-    static let rules = [30, 90, 110, 45, 73, 54, 150, 18, 22, 60, 105, 126, 137, 169, 184, 57]
-    static func rule(_ x: Double) -> Int { rules[min(15, Int(x * 15.99))] }
-    static func seed(_ y: Double) -> Int { Int(y * 255) }
-    static func step(_ x: Double) -> Int { 15 - Int(x * 11.99) }
-    static func depth(_ y: Double) -> Int { 1 + Int(y * 15) }
-    /// pads 3 · 4 are not XY: the formula and the automaton
+    static let titles = ["RATE · WINDOW", "LOOP · SLICE", "FORMULA", "RHYTHM",
+                         "FEEDBACK · DELAY", "INPUT · BITS", "RULE · STEP", "CLICK · DECAY"]
+    static let starts: [(Double, Double)] = [(0.4, 0.0), (0.0, 0.0), (0, 0), (0, 0),
+                                             (0.0, 0.2), (0.0, 0.0), (0.0, 0.5), (0.4, 0.4)]
+    static let rules = [30, 90, 110, 45, 73, 54, 150, 18, 22, 60, 105, 126, 137, 169, 57]
+    /// RULE: 0 = no rhythm
+    static func rule(_ x: Double) -> Int { x < 0.04 ? 0 : rules[min(14, Int((x - 0.04) / 0.96 * 14.99))] }
+    static func step(_ y: Double) -> Int { 14 - Int(y * 8.99) }
+    static func loop(_ x: Double) -> Int { x < 0.03 ? 0 : 17 - Int((x - 0.03) / 0.97 * 12.99) }
+    /// pads 3 · 4 are not XY: the formula and the rhythm
     static func isView(_ i: Int) -> Bool { i == 2 || i == 3 }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 0: return String(format: "%.1f kHz · B %@", 1.0 * pow(32, x), ratioNames[min(6, Int(y * 6.99))])
-        case 1: return "RULE \(rule(x)) · " + (seed(y) == 0 ? "ONE" : "\(Int(y * 100))%")
-        case 4: return "MORPH \(Int(x * 100))% · XOR \(Int(y * 100))%"
-        case 5: return String(format: "%.0f Hz · %.0f ms", 80 * pow(40, x), (0.002 + y * y * 0.25) * 1000)
-        case 6: return "STEP 2^\(step(x)) · ±\(depth(y))"
-        case 7: return "OPS \(Int(x * 100))% · BIT \(3 + min(11, Int(y * 11.99)))"
+        case 0:
+            let b = Int(y * 16)
+            return String(format: "%.1f kHz · BITS %d–%d", 1.0 * pow(32, x), b, b + 7)
+        case 1: return loop(x) == 0 ? "LOOP OFF" : "LOOP 2^\(loop(x)) · SLICE \(1 + Int(y * 15.99))"
+        case 4: return "FB \(Int(x * x * 100))% · \(1 + Int(y * y * 2046))"
+        case 5: return "IN→t \(Int(x * x * 100))% · \(Int(y * 8.99)) BIT"
+        case 6: return (rule(x) == 0 ? "RULE OFF" : "RULE \(rule(x))") + " · STEP 2^\(step(y))"
+        case 7: return String(format: "%.0f Hz · %.0f ms", 80 * pow(40, x), (0.002 + y * y * 0.25) * 1000)
         default: return ""
         }
     }
 }
 
-/// the automaton the Cafe runs, run again here for the picture (the same rule, seed and cells; its clock is the
-/// phone's, so it only follows the Cafe loosely — SYNC and a new formula start both again)
-final class ByteCA: ObservableObject {
-    @Published private(set) var rows: [UInt32] = []      // the last generations, newest last
-    @Published private(set) var n = 0
-    private(set) var toks: [String] = []
-    private(set) var cellTok: [Int] = []
-    private var ca: UInt32 = 0
-    private var rule = 30, seedd = 0, depth = 5, ops = 77
-    private var period = 0.25, frozen = false
+/// the rhythm the Cafe plays (a 16-step automaton, a generation every bar), run again here for the picture — on the
+/// phone's clock, so it only follows the Cafe loosely; SYNC starts both again
+final class RhythmCA: ObservableObject {
+    @Published private(set) var rows: [UInt16] = [0x0100]   // the last generations, newest last
+    @Published private(set) var step = 0
+    private var ca: UInt16 = 0x0100
+    private var rule = 0, period = 0.1, frozen = false
     private var timer: Timer?
     private var acc = 0.0, last = Date()
-    static let depthRows = 22
+    static let depthRows = 14
 
-    func load(_ src: String) {
-        guard let p = Bytebeat.parse(src) else { return }
-        toks = p.toks; cellTok = p.cellTok; n = p.cells.count
-        reseed()
+    func configure(rule: Int, period: Double, frozen: Bool) {
+        self.rule = rule; self.period = max(0.002, period); self.frozen = frozen
     }
-    func configure(rule: Int, seed: Int, depth: Int, ops: Int, period: Double, frozen: Bool) {
-        self.rule = rule; self.depth = depth; self.ops = ops; self.period = max(0.0005, period); self.frozen = frozen
-        if seed != seedd { seedd = seed; reseed() }
-    }
-    func reseed() {
-        ca = seedRow()
-        rows = [ca]
-        acc = 0
-    }
+    func reseed() { ca = 0x0100; rows = [ca]; step = 0; acc = 0 }
+    var on: Bool { rule != 0 }
     func start() {
         guard timer == nil else { return }
         last = Date()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in self?.tick() }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
     }
     func stop() { timer?.invalidate(); timer = nil }
-
     private func tick() {
-        let now = Date()
-        let dt = now.timeIntervalSince(last)
+        let now = Date(), dt = now.timeIntervalSince(last)
         last = now
-        guard !frozen, n > 0 else { return }
+        guard !frozen else { return }
         acc += dt
-        var steps = 0
-        var r = rows
-        while acc >= period && steps < 400 {
-            acc -= period; steps += 1
-            stepRow()
-            r.append(ca)
+        var s = step, r = rows, moved = false
+        var n = 0
+        while acc >= period && n < 2000 {
+            acc -= period; n += 1; moved = true
+            s = (s + 1) & 15
+            if s == 0 && rule != 0 {
+                var nc: UInt16 = 0
+                for i in 0..<16 {
+                    let l = Int((ca >> UInt16((i + 15) & 15)) & 1), m = Int((ca >> UInt16(i)) & 1), rr = Int((ca >> UInt16((i + 1) & 15)) & 1)
+                    if (rule >> ((l << 2) | (m << 1) | rr)) & 1 == 1 { nc |= 1 << UInt16(i) }
+                }
+                ca = nc != 0 ? nc : 0x0100
+                r.append(ca)
+            }
         }
         if acc > period { acc = 0 }
-        if steps > 0 { rows = Array(r.suffix(Self.depthRows)) }
-    }
-    private func seedRow() -> UInt32 {
-        guard n > 0 else { return 0 }
-        var c: UInt32 = 0, st: UInt32 = 12345
-        if seedd > 0 {
-            for i in 0..<n {
-                st = st &* 1103515245 &+ 12345
-                if (st >> 16) & 255 < UInt32(seedd) { c |= 1 << UInt32(i) }
-            }
-        }
-        if c == 0 { c = 1 << UInt32(n / 2) }
-        return c
-    }
-    private func bit(_ c: UInt32, _ i: Int) -> Int { Int((c >> UInt32((i + n) % n)) & 1) }
-    private func stepRow() {
-        var nc: UInt32 = 0
-        for i in 0..<n {
-            let k = (bit(ca, i - 1) << 2) | (bit(ca, i) << 1) | bit(ca, i + 1)
-            if (rule >> k) & 1 == 1 { nc |= 1 << UInt32(i) }
-        }
-        ca = nc != 0 ? nc : seedRow()
-    }
-    /// is cell i alive now
-    func alive(_ i: Int) -> Bool { n > 0 && bit(rows.last ?? 0, i) == 1 }
-    /// the grown formula, word by word (and which words the automaton has changed)
-    func grown() -> [(String, Bool)] {
-        var w = toks.map { ($0, false) }
-        let c = rows.last ?? 0
-        for i in 0..<n where bit(c, i) == 1 {
-            let l = bit(c, i - 1), r = bit(c, i + 1)
-            let ti = cellTok[i]
-            if let v = Int(toks[ti]) {
-                var d = depth * (1 + l + r)
-                if r > l { d = -d }
-                var x = v + d
-                if x < 1 { x = v != 0 ? 1 : 0 }
-                x = min(x, v < 256 ? 255 : 65535)
-                w[ti] = (String(x), true)
-            } else if (i * 37 + 11) & 255 < ops, let k = Bytebeat.cellOps.firstIndex(of: toks[ti]) {
-                w[ti] = (Bytebeat.cellOps[(k + 1 + l + 2 * r) & 7], true)
-            }
-        }
-        return w
+        if moved { step = s; rows = Array(r.suffix(Self.depthRows)) }
     }
 }
 
@@ -304,9 +258,9 @@ struct FormulaPad: View {
     }
 }
 
-/// pad 4: the automaton — the grown formula (the changed words lit) over the last generations
-struct AutomatonPad: View {
-    @ObservedObject var ca: ByteCA
+/// pad 4: the rhythm — the 16 steps, generation under generation (the playing step marked)
+struct RhythmPad: View {
+    @ObservedObject var ca: RhythmCA
     let tag: String
     let rule: Int
 
@@ -320,28 +274,26 @@ struct AutomatonPad: View {
                     HudTag(text: tag, size: 7)
                     Text(BytePad.titles[3]).font(.hud(8, .semibold)).tracking(0.8).foregroundStyle(PastelTheme.hudOrange)
                     Spacer(minLength: 0)
-                    Text("R\(rule)").font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    Text(rule == 0 ? "OFF" : "R\(rule)").font(.system(size: 8, weight: .semibold, design: .monospaced))
                         .foregroundStyle(PastelTheme.hudBlack.opacity(0.7))
                         .frame(width: 30, alignment: .trailing)
                 }
-                ca.grown().reduce(Text("")) { acc, w in
-                    acc + Text(w.0).foregroundColor(w.1 ? PastelTheme.hudOrange : PastelTheme.hudBlack)
-                }
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .lineLimit(2)
-                .minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 Canvas { ctx, size in
-                    let n = max(ca.n, 1), rows = ca.rows
-                    let cw = size.width / CGFloat(n), ch = size.height / CGFloat(ByteCA.depthRows)
-                    let top = CGFloat(ByteCA.depthRows - rows.count) * ch
+                    let cw = size.width / 16, ch = size.height / CGFloat(RhythmCA.depthRows)
+                    let rows = rule == 0 ? [UInt16(0xFFFF)] : ca.rows
+                    let top = CGFloat(RhythmCA.depthRows - rows.count) * ch
                     for (ri, r) in rows.enumerated() {
-                        for i in 0..<ca.n where (r >> UInt32(i)) & 1 == 1 {
-                            let rect = CGRect(x: CGFloat(i) * cw + 0.5, y: top + CGFloat(ri) * ch + 0.5,
-                                              width: max(1, cw - 1), height: max(1, ch - 1))
-                            ctx.fill(Path(rect), with: .color(ri == rows.count - 1 ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.8)))
+                        let newest = ri == rows.count - 1
+                        for i in 0..<16 where (r >> UInt16(i)) & 1 == 1 {
+                            let rect = CGRect(x: CGFloat(i) * cw + 1, y: top + CGFloat(ri) * ch + 1,
+                                              width: max(1, cw - 2), height: max(1, ch - 2))
+                            let hot = newest && i == ca.step
+                            ctx.fill(Path(rect), with: .color(hot ? PastelTheme.hudOrange
+                                                              : PastelTheme.hudBlack.opacity(newest ? 0.85 : 0.35)))
                         }
                     }
+                    let x = CGFloat(ca.step) * cw
+                    ctx.fill(Path(CGRect(x: x, y: size.height - 2, width: cw, height: 2)), with: .color(PastelTheme.hudOrange))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -352,6 +304,7 @@ struct AutomatonPad: View {
         .onDisappear { ca.stop() }
     }
 }
+
 /// the key board: a formula built from keys (no typing)
 struct FormulaBoard: View {
     @State var text: String
@@ -366,7 +319,7 @@ struct FormulaBoard: View {
     }
 
     private let rows: [[String]] = [
-        ["t", "e", "(", ")", "⌫", "CLR"],
+        ["t", "y", "i", "e", "(", ")", "⌫", "CLR"],
         ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
         ["+", "-", "*", "/", "%", "&", "|", "^", "~", "<<", ">>"],
     ]
