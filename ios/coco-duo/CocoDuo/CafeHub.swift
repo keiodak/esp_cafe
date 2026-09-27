@@ -13,6 +13,8 @@ let NUS    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 let NUS_RX = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
 let NUS_TX = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
 let OTA_RX = CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA9E")
+let HB_TX  = CBUUID(string: "6E400005-B5A3-F393-E0A9-E50E24DCCA9E")   // HABIT: the Cafe's input, ADPCM (notify)
+let HB_RX  = CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA9E")   // HABIT: the phone's playing, onto the tape
 let TAPE = 131072
 let BINS = 512
 
@@ -83,6 +85,20 @@ final class CafeUnit: ObservableObject {
     @Published var loadNote = ""
     let scope = CafeScope()
     let outs = OutScope()
+    // HABIT: packets from the Cafe (its input) go to onHabit; the link's speed both ways, kB/s, and what was dropped
+    var onHabit: ((Data) -> Void)?
+    @Published var hbUp: Double = 0
+    @Published var hbDown: Double = 0
+    @Published var hbDrops = 0
+    fileprivate var hbRx: CBCharacteristic?
+    /// HABIT: one packet onto the tape (only when the text line has nothing waiting: commands go first)
+    func habitSend(_ d: Data) -> Bool {
+        guard let p = peri, let c = hbRx, out.isEmpty, p.canSendWriteWithoutResponse else { return false }
+        p.writeValue(d, for: c, type: .withoutResponse)
+        return true
+    }
+    /// the most a HABIT packet may be
+    var habitMaxLen: Int { peri.map { $0.maximumWriteValueLength(for: .withoutResponse) } ?? 20 }
 
     fileprivate var peri: CBPeripheral?
     fileprivate var rx: CBCharacteristic?
@@ -483,7 +499,7 @@ final class CafeUnit: ObservableObject {
     fileprivate func reset(_ why: String) {
         if loadBuf != nil { cancelLoad("connection lost while loading") }
         if otaData != nil { otaNote = "connection lost (the Cafe keeps its old firmware)"; otaData = nil; ota = nil; otaGo = false }
-        otaChar = nil
+        otaChar = nil; hbRx = nil
         rx = nil; peri = nil; name = nil
         out.removeAll(); inbuf.removeAll()
         waitingQ = false; lastSmp = nil; polls = 0
@@ -590,7 +606,7 @@ extension CafeHub: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         guard let s = p.services?.first(where: { $0.uuid == NUS }) else { unit(for: p)?.state = "not a coco-pc Cafe"; return }
-        p.discoverCharacteristics([NUS_RX, NUS_TX, OTA_RX], for: s)
+        p.discoverCharacteristics([NUS_RX, NUS_TX, OTA_RX, HB_TX, HB_RX], for: s)
     }
 
     func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
@@ -599,6 +615,8 @@ extension CafeHub: CBCentralManagerDelegate, CBPeripheralDelegate {
             if c.uuid == NUS_RX { u.rx = c }
             if c.uuid == NUS_TX { p.setNotifyValue(true, for: c) }
             if c.uuid == OTA_RX { u.otaChar = c }
+            if c.uuid == HB_TX { p.setNotifyValue(true, for: c) }
+            if c.uuid == HB_RX { u.hbRx = c }
         }
         guard u.rx != nil else { u.state = "Cafe service incomplete"; return }
         u.name = p.name ?? "Cafe"
@@ -608,7 +626,8 @@ extension CafeHub: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
-        if let v = c.value { unit(for: p)?.receive(v) }
+        guard let v = c.value, let u = unit(for: p) else { return }
+        if c.uuid == HB_TX { u.onHabit?(v) } else { u.receive(v) }
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse p: CBPeripheral) {

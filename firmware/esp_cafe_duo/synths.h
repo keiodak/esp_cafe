@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT ("M 25 <0..6>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -2233,6 +2233,120 @@ static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
   return y;
 }
 
+// ==========================================
+// HABIT --- mode 7 of the BLE preset (k.odk): after Chase Bliss's Habit, the memory on the phone
+// ==========================================
+// The Cafe sends what comes in to the phone all the time (IMA ADPCM, 4 bits, at 1/2 or 1/4 of its clock: ~16 or
+// ~8 kHz) as notifications on HB_TX; the phone keeps the last minutes and plays them back — pieces or the whole run,
+// as its pads say — by writing ADPCM onto this Cafe's tape (HB_RX) a little ahead of the read head, which goes round
+// the tape at the Cafe's clock. main = the input (DRY) + the tape (WET), ASH = the tape. "B <id> <v>": 0 rate
+// (0 = 1/2, 1000 = 1/4) · 1 dry · 2 wet (0..1000).
+// packet up (171 bytes): seq u16 · read head u32 (tape samples) · drops u16 · predictor i16 · index u8 · 160 bytes
+// packet down: position u32 (in rate samples on the tape) · predictor i16 · index u8 · bytes (low nibble first)
+#define HB_Q 32
+#define HB_PK 171
+#define HB_NIB 320
+DRAM_ATTR static const int16_t hb_steps[89] = {
+  7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+  130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060,
+  1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484,
+  7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767 };
+DRAM_ATTR static const int8_t hb_idx[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
+uint8_t hb_q[HB_Q][HB_PK];
+volatile uint32_t hb_qw = 0, hb_qr = 0;       // packets made / sent
+volatile uint16_t hb_drops = 0;               // packets the link could not take
+volatile int hb_div = 2;                      // RATE: every 2nd (or 4th) sample goes up
+volatile int32_t hb_dry = 256, hb_wet = 256;  // Q8
+volatile uint32_t hb_rp = 0;                  // the read head (tape samples)
+volatile bool hb_reset = true;
+
+static inline uint8_t IRAM_ATTR hb_enc(int32_t x, int32_t &pred, int &ix) {   // one 16-bit sample -> 4 bits
+  int32_t st = hb_steps[ix], d = x - pred;
+  uint8_t n = 0;
+  if (d < 0) { n = 8; d = -d; }
+  int32_t dq = st >> 3;
+  if (d >= st) { n |= 4; d -= st; dq += st; }
+  if (d >= (st >> 1)) { n |= 2; d -= st >> 1; dq += st >> 1; }
+  if (d >= (st >> 2)) { n |= 1; dq += st >> 2; }
+  pred += (n & 8) ? -dq : dq;
+  if (pred > 32767) pred = 32767; if (pred < -32768) pred = -32768;
+  ix += hb_idx[n]; if (ix < 0) ix = 0; if (ix > 88) ix = 88;
+  return n;
+}
+static inline int32_t hb_dec(uint8_t n, int32_t &pred, int &ix) {           // 4 bits -> one 16-bit sample
+  int32_t st = hb_steps[ix], dq = st >> 3;
+  if (n & 4) dq += st;
+  if (n & 2) dq += st >> 1;
+  if (n & 1) dq += st >> 2;
+  pred += (n & 8) ? -dq : dq;
+  if (pred > 32767) pred = 32767; if (pred < -32768) pred = -32768;
+  ix += hb_idx[n]; if (ix < 0) ix = 0; if (ix > 88) ix = 88;
+  return pred;
+}
+
+static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
+  static int32_t acc = 0, pred = 0;
+  static int accn = 0, ix = 0, pkn = 0;
+  static uint16_t seq = 0;
+  if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; }
+  // up: the input, averaged over RATE samples, into packets for the phone
+  acc += in;
+  if (++accn >= hb_div) {
+    int32_t x = (acc << 4) / accn;                           // 12 -> 16 bits
+    acc = 0; accn = 0;
+    uint8_t *pk = hb_q[hb_qw & (HB_Q - 1)];
+    if (pkn == 0) {
+      seq++;
+      uint32_t rp = hb_rp; uint16_t dr = hb_drops;
+      pk[0] = seq & 255; pk[1] = seq >> 8;
+      pk[2] = rp & 255; pk[3] = (rp >> 8) & 255; pk[4] = (rp >> 16) & 255; pk[5] = rp >> 24;
+      pk[6] = dr & 255; pk[7] = dr >> 8;
+      pk[8] = pred & 255; pk[9] = (pred >> 8) & 255; pk[10] = (uint8_t)ix;
+    }
+    uint8_t n = hb_enc(x, pred, ix);
+    uint8_t *b = &pk[11 + (pkn >> 1)];
+    if (pkn & 1) *b |= (uint8_t)(n << 4); else *b = n;
+    if (++pkn >= HB_NIB) {
+      pkn = 0;
+      if (hb_qw - hb_qr < HB_Q - 1) hb_qw++; else hb_drops++;   // (full: this one is made again)
+    }
+  }
+  // the tape, round and round: what the phone wrote ahead of this head
+  int32_t p = dread(hb_rp) - 2048;
+  hb_rp = (hb_rp + 1) & 0x1FFFF;
+  int32_t y = ((in * hb_dry) >> 8) + ((p * hb_wet) >> 8);
+  if (y > 2047) y = 2047; if (y < -2047) y = -2047;
+  int32_t r = (p * hb_wet) >> 8;
+  if (r > 2047) r = 2047; if (r < -2047) r = -2047;
+  *rout = r;
+  return y;
+}
+
+/// a packet from the phone: ADPCM onto the tape at its place (called on the BLE core; the audio only reads the tape here)
+void hb_write(const uint8_t *d, size_t n) {
+  if (n < 8) return;
+  uint32_t pos = d[0] | (d[1] << 8) | (d[2] << 16) | ((uint32_t)d[3] << 24);
+  int32_t pred = (int16_t)(d[4] | (d[5] << 8));
+  int ix = d[6] > 88 ? 88 : d[6];
+  int div = hb_div;
+  uint32_t len = 131072 / div;
+  int32_t prev = pred >> 4;
+  for (size_t i = 7; i < n; i++) {
+    for (int h = 0; h < 2; h++) {
+      uint8_t nb = h ? (d[i] >> 4) : (d[i] & 15);
+      int32_t v = hb_dec(nb, pred, ix) >> 4;                 // 16 -> 12 bits
+      uint32_t at = (pos % len) * div;
+      for (int j = 0; j < div; j++) {                        // back up to the Cafe's rate, in straight lines
+        int32_t w = prev + (((v - prev) * (j + 1)) / div);
+        dwrite((at + j) & 0x1FFFF, w + 2048);
+      }
+      prev = v;
+      pos++;
+    }
+  }
+  wv_valid = false;
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
@@ -2271,6 +2385,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
     else if (cur == 4 || cur == 5) sx_reset = true;
+    else if (cur == 6) hb_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2282,9 +2397,11 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
+      else if (cur == 6) hb_reset = true;
     }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
+  bool hmode = cur == 6;                                     // HABIT: the memory on the phone
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2332,6 +2449,8 @@ void IRAM_ATTR coco_pc() {
   } else if (smode) {
     l = sx_tick(&r);
     r >>= 1;                                                 // (ASH doubles its input and clips: keep it clean)
+  } else if (hmode) {
+    l = hb_tick(gyo - 2048, &r);                             // HABIT: main = input + tape, ASH = the tape
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2361,7 +2480,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = smode ? sx_gate : nz_gate;
+  } else y = hmode ? false : (smode ? sx_gate : nz_gate);
   if (y) {
     YELLOW_PULSE(4095);
   } else {

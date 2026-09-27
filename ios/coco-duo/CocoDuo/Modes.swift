@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -94,13 +94,14 @@ enum Preset {
         "a folding noise ring · LFO for a slow wander · DIST for fuzz",
         "four plates, one note each · press on one Cafe, it rings out on the other",
         "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
+        "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle"]
+    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -109,7 +110,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -368,6 +369,15 @@ final class Rig: ObservableObject {
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(Rig.freezeValue(sxFreeze))"] }
     /// FREEZE (COCO's): 0 off · 1 the last ~2 s of SIDRAX held as a loop under the plates ("S 24")
     @Published var sxFreeze = 0
+    /// HABIT (BLE mode 7): its pads (the phone's playing reads them), the rate, HOLD, the WAV to hand to Files
+    let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
+    @Published var habit8k = false
+    @Published var habitHold = false
+    @Published var habitWav: Data? = nil
+    func habitLevels() -> [String] {
+        let a = habitAxes[4]
+        return ["B 1 \(Int((a.x * 1000).rounded()))", "B 2 \(Int((a.y * 1000).rounded()))"]
+    }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 
@@ -424,7 +434,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave][min(max(ctxMode, 0), 5)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

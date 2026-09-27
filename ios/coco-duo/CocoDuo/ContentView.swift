@@ -29,6 +29,8 @@ final class Director: ObservableObject {
     let hub = CafeHub()
     let rig = Rig()
     let grain = GrainMode()
+    /// HABIT: one memory per Cafe
+    lazy var habits: [HabitEngine] = hub.units.map { HabitEngine(unit: $0, axes: rig.habitAxes) }
     let camera = CameraRig()
     let arp = ArpEngine()
     var units: [CafeUnit] { hub.units }
@@ -88,6 +90,7 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
+        case .habit: return rig.habitAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -107,6 +110,7 @@ final class Director: ObservableObject {
         u.send("G \(rig.preset[s])")
         u.send("K \(Int((rig.bpm * 10).rounded()))")
         let pr = rig.preset[s]
+        if !(pr == Preset.ble && rig.mode[s] == 6) { habits[s].stop() }          // (HABIT only while the Cafe is on it)
         if pr >= 0 && pr < Preset.count { u.send("X \(Int((rig.charV[s][pr] * 1000).rounded())) \(pr)") }
         switch rig.preset[s] {
         case Preset.ble:
@@ -117,6 +121,9 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
+            case 6:
+                u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
+                habits[s].div = rig.habit8k ? 4 : 2; habits[s].hold = rig.habitHold; habits[s].start()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -207,6 +214,8 @@ final class Director: ObservableObject {
             let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
             for u in ctxUnits() { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
             if resync { sync() }
+        case .habit:
+            if i == 4 { for u in ctxUnits() { rig.habitLevels().forEach(u.send) } }   // (the others: the phone reads them)
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -569,6 +578,18 @@ final class Director: ObservableObject {
     func bbDice() { setBbFormula(Bytebeat.random()) }
     /// SLOW: t at 1/32
     func setBbSlow(_ on: Bool) { rig.bbSlow = on; ctxUnits().forEach { $0.send("J 9 9 \(on ? 1000 : 0)") }; rig.bbCAUpdate() }
+    // MARK: HABIT
+    func setHabit8k(_ on: Bool) {
+        rig.habit8k = on
+        for u in ctxUnits() { u.send("B 0 \(on ? 1000 : 0)"); habits[u.slot].div = on ? 4 : 2; habits[u.slot].clear() }
+    }
+    func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
+    func habitClear() { for u in ctxUnits() { habits[u.slot].clear() } }
+    /// the memory of the first Cafe on HABIT, as a WAV
+    func habitSave() {
+        guard let u = ctxUnits().first else { return }
+        rig.habitWav = habits[u.slot].wav()
+    }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
@@ -672,6 +693,9 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
+        .fileExporter(isPresented: Binding(get: { rig.habitWav != nil }, set: { if !$0 { rig.habitWav = nil } }),
+                      document: WavDoc(data: rig.habitWav ?? Data()), contentType: .wav,
+                      defaultFilename: "habit") { _ in rig.habitWav = nil }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -712,6 +736,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
+        case .habit: return (rig.habitAxes[i], HabitPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -732,6 +757,8 @@ private struct MainScreen: View {
         case .speech:
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
+        case .habit:
+            return { x, y in HabitPad.caption(i, x, y) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1003,6 +1030,7 @@ private struct HudBar: View {
         // one line, every part on a fixed width: switching presets never pushes the slider or the keys about
         var info = ""
         if p == Preset.ble { info = Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)] }
+        if p == Preset.ble && m == 6 { info = String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown) }     // HABIT: kB/s
         if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
         if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
             info += (info.isEmpty ? "" : " ") + String(format: "%.0fBPM", unit.bpm > 0 ? unit.bpm : rig.bpm)
@@ -1094,6 +1122,13 @@ private struct HudBar: View {
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
             case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t round the last two steps
             default: textKey("SLOW", on: rig.bbSlow) { d.setBbSlow(!rig.bbSlow) }          // t at 1/32
+            }
+        case .habit:
+            switch n {
+            case 0: textKey(rig.habit8k ? "8K" : "16K", on: rig.habit8k) { d.setHabit8k(!rig.habit8k) }   // the rate up and down
+            case 1: key("pause.circle", on: rig.habitHold) { d.setHabitHold(!rig.habitHold) }            // HOLD: keep the memory
+            case 2: textKey("SAVE", on: rig.habitWav != nil) { d.habitSave() }                          // the memory -> Files
+            default: textKey("CLEAR", on: false) { d.habitClear() }
             }
         case .wave:
             switch n {
@@ -1276,7 +1311,8 @@ private struct CafeLine: View {
                 ChipButton(title: "DISC", filled: false) { hub.disconnect(unit.slot) }.frame(width: 36)
                 ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }.frame(width: 48)
             }
-            Text("\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))")
+            Text("\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))"
+                 + (unit.hbUp > 0 || unit.hbDown > 0 ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  drop %d", unit.hbUp, unit.hbDown, unit.hbDrops) : ""))
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .padding(.leading, 19)
