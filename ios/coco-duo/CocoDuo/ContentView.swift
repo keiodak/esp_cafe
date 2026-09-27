@@ -1097,16 +1097,16 @@ private struct HudBar: View {
             }
         case .wave:
             switch n {
-            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }
-            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            case 2: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
-            default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
+            case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+            case 1: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
+            case 2: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                 // an audio file -> the table
+            default: blank
             }
         case .sidrax:
             switch n {
-            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
-            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
-            case 2: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
+            case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
+            case 1: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
+            case 2: blank
             default: key("dice") { d.sxDice() }
             }
         case .noise:
@@ -1247,7 +1247,6 @@ struct CafesView: View {
                 CameraCard(camera: camera)
             } right: {
                 TempoCard(d: d, rig: d.rig)
-                MakeCards(hub: hub)                                    // MAKE: STRETCH / CHORDS onto a tape
                 UpdateCard(d: d, rig: d.rig, a: hub.units[0], b: hub.units[1])
             }
         }

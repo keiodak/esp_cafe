@@ -3,7 +3,7 @@
 //   PRESETS  the playlist, numbered in its order. A · B on each row: where each Cafe is, and a tap puts it there
 //            (that is also who the pads go to); the row itself = both. 12 = PRESET DESIGN: 11 slots, pick one then a
 //            preset from the right (3 across), the bin empties a slot; empty slots are skipped on the Cafe.
-//   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on
+//   BLE MODE GRAIN / COCO / DELAY / NOISE · MULTI · ARP cards when those presets are on · NOW (+ MAKE: STRETCH / CHORDS)
 //   (TEMPO and UPDATE live in the CAFES panel.)
 
 import SwiftUI
@@ -40,8 +40,6 @@ struct PresetManagerView: View {
                     }
                     if rig.padSet == .wave {
                         HStack(spacing: PanelMetrics.chipSpacing) {
-                            ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
-                            ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
                             ChipButton(title: "FREEZE", filled: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
                             ChipButton(title: "FILE", filled: false) { wvPick = true }
@@ -53,8 +51,6 @@ struct PresetManagerView: View {
                     }
                     if rig.padSet == .sidrax {
                         HStack(spacing: PanelMetrics.chipSpacing) {
-                            ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
-                            ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
                         }
                     }
@@ -128,7 +124,7 @@ struct PresetManagerView: View {
                     // to nothing). The box never changes size, whichever cards are shown: nothing moves.
                     VStack(spacing: 8) {
                         rightCards
-                        NowCard(rig: rig).frame(maxHeight: .infinity)
+                        NowCard(d: d, rig: rig).frame(maxHeight: .infinity)
                     }
                     .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                     .clipped()
@@ -550,6 +546,7 @@ private struct PresetsHeight: PreferenceKey {
 
 /// NOW: what the two Cafes are on and the tempo, big (fills the right column below the cards)
 private struct NowCard: View {
+    let d: Director
     @ObservedObject var rig: Rig
 
     var body: some View {
@@ -565,6 +562,8 @@ private struct NowCard: View {
                             .minimumScaleFactor(0.6)
                     }
                 }
+                Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5)
+                MakeRows(d: d)                                         // MAKE: STRETCH / CHORDS onto the tape
                 Spacer(minLength: 0)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Spacer(minLength: 0)

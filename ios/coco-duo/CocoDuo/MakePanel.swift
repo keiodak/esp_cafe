@@ -1,12 +1,11 @@
 // MakePanel.swift — coco duo (k.odk)
-// MAKE: sounds made on the phone and written onto a Cafe's tape (ToneMaker), in the CAFES panel.
+// MAKE: sounds made on the phone and written onto the tape of the Cafes the pads go to (ToneMaker), in the NOW card.
 // TO = which Cafe · STRETCH = a file stretched into a still, looping cloud · CHORDS = 16 slices, a chord in each.
 
 import SwiftUI
 
-struct MakeCards: View {
-    @ObservedObject var hub: CafeHub
-    @State private var target = 0          // 0 A · 1 B · 2 both
+struct MakeRows: View {
+    let d: Director
     @State private var stretchI = 1
     @State private var keyI = 0
     @State private var setI = 0
@@ -14,47 +13,32 @@ struct MakeCards: View {
     @State private var busy = false
 
     var body: some View {
-        VStack(spacing: PanelMetrics.chipSpacing * 2) {
-            PanelCard(title: "MAKE") {
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    ForEach(0..<3, id: \.self) { t in
-                        ChipButton(title: ["→ A", "→ B", "→ A + B"][t], filled: target == t) { target = t }
-                    }
+        VStack(alignment: .leading, spacing: PanelMetrics.chipSpacing) {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ForEach(ToneMaker.stretches.indices, id: \.self) { i in
+                    ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
                 }
-                ForEach(units, id: \.slot) { u in ProgressLine(unit: u) }
+                ChipButton(title: busy ? "…" : "STRETCH", filled: ready) { if ready { picking = true } }
             }
-            PanelCard(title: "STRETCH") {
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    ForEach(ToneMaker.stretches.indices, id: \.self) { i in
-                        ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
-                    }
+            HStack(spacing: 2) {
+                ForEach(0..<12, id: \.self) { k in
+                    ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
                 }
-                BigButton(title: "FILE → STRETCH", busy: busy, enabled: ready) { picking = true }
             }
-            PanelCard(title: "CHORDS") {
-                ForEach(0..<2, id: \.self) { r in
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<6, id: \.self) { c in
-                            let k = r * 6 + c
-                            ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
-                        }
-                    }
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ForEach(ToneMaker.sets.indices, id: \.self) { i in
+                    ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
                 }
-                HStack(spacing: PanelMetrics.chipSpacing) {
-                    ForEach(ToneMaker.sets.indices, id: \.self) { i in
-                        ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
-                    }
-                }
-                BigButton(title: "MAKE CHORDS", busy: busy, enabled: ready) { makeChords() }
+                ChipButton(title: busy ? "…" : "CHORDS", filled: ready) { if ready { makeChords() } }
             }
+            ForEach(units, id: \.slot) { u in ProgressLine(unit: u) }
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { stretchFile($0) }
     }
 
-    private var units: [CafeUnit] { target == 2 ? hub.units : [hub.units[target]] }
-    /// every target connected, and nothing on its way to them
-    private var ready: Bool { !busy && units.allSatisfy { $0.isConnected && $0.loadProgress == nil } }
-
+    /// the Cafes the pads go to
+    private var units: [CafeUnit] { d.ctxUnits() }
+    private var ready: Bool { !busy && !units.isEmpty && units.allSatisfy { $0.isConnected && $0.loadProgress == nil } }
     private func stretchFile(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
         let s = ToneMaker.stretches[stretchI]
