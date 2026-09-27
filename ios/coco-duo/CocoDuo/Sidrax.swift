@@ -100,6 +100,7 @@ struct PlatePad: View {
                 }
             }
         }
+        .clipped()                                   // (the finger's disc stays inside its own plate, under the pads around it)
         .overlay(alignment: .topLeading) {
             HStack(spacing: 4) {
                 HudTag(text: tag, size: 7)

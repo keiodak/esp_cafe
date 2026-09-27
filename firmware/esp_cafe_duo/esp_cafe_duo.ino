@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.62"
+#define FW_VERSION "3.63"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -226,7 +226,7 @@ static void pl_report() {
 //   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
 //   G <n>        switch to preset n (0-based, see the playlist)
-//   M <id> <v>   grain parameter (see mo_update); M 25 <0..5> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX / WAVE · S = SIDRAX / WAVE (see sx_update)
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..5> = BLE preset mode GRAIN / BYTEBEAT / DELAY / NOISE / SIDRAX / WAVE · S = SIDRAX / WAVE (see sx_update)
 //   C <id> <v>   coco parameter (see co_update)
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
@@ -427,7 +427,7 @@ void nz_update() {
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
 //  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
-// WAVE: "S 20..24": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size  24 DRONE (0 | 1000)
+// WAVE: "S 20..24": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size  24 FREEZE (0 | 1000)
 volatile int16_t wv_p[5] = {500, 500, 300, 0, 0};
 void sx_update() {
   float hz = clock_hz(), p[9];
@@ -450,7 +450,7 @@ void sx_update() {
     float orr = 0.02f * powf(400.0f, w[2]);                            // ORBIT 0.02 .. 8 Hz
     wv_orbinc = (uint32_t)(orr / hz * 4294967295.0f);
     wv_orb = (int32_t)(w[3] * 4096.0f);
-    wv_drone = wv_p[4] >= 500; }                              // up to the whole square
+    wv_frz = wv_p[4] >= 500; }                              // up to the whole square
   // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
   static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
                                     {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
@@ -470,6 +470,20 @@ void sx_update() {
     if (f > clk * 0.2f) f = clk * 0.2f;
     sx_inc[k] = (uint32_t)(f / clk * 4294967296.0f);
   }
+}
+
+// ---- BYTEBEAT parameters (k.odk). "J 9 <id> <0..1000>" ----
+//  0 RATE (1 .. 32 kHz)  1 MORPH (formula 1 -> 2)  2 XOR  3..6 a b c d  7 LEVEL
+volatile int16_t bb_p[8] = {400, 0, 0, 250, 500, 125, 60, 700};
+void bb_update() {
+  float hz = clock_hz(), p[8];
+  for (int i = 0; i < 8; i++) p[i] = bb_p[i] / 1000.0f;
+  float r = 1000.0f * powf(32.0f, p[0]);
+  bb_inc = (uint32_t)(r / hz * 65536.0f);
+  bb_morph = (int32_t)(p[1] * 256.0f);
+  bb_xor = (int32_t)(p[2] * 256.0f);
+  for (int i = 0; i < 4; i++) bb_v[i] = (int32_t)(p[3 + i] * 255.0f);
+  bb_level = (int32_t)(p[7] * 1.4f * 256.0f);
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -644,7 +658,7 @@ void fx_update(int e) {
 }
 void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); hd_update(); fx_update_all(); }
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bb_update(); hd_update(); fx_update_all(); }
 
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
@@ -704,7 +718,7 @@ void pc_line(char *s) {
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
                 if (k < 2) pr = preset;                                              // no preset given: the current one
                 if (pr >= 0 && pr < 11) ch_v[pr] = (int16_t)v; } break;
-    case 'Z': mo_sync = true; co_restart = true; dl_align = true; hd_align = true; fx_sync = true; break;
+    case 'Z': mo_sync = true; co_restart = true; bb_restart = true; dl_align = true; hd_align = true; fx_sync = true; break;
     case 'F': { long e = -1, id = -1, val = 0; int k = sscanf(s + 1, "%ld %ld %ld", &e, &id, &val);   // MULTI
                 if (k >= 3 && e >= 0 && e < FX_N && id >= 0 && id < 8) {
                   if (val < 0) val = 0; if (val > 1000) val = 1000;
@@ -756,6 +770,29 @@ void pc_line(char *s) {
                   hb[k++] = (char)(48 + (v >> 6)); hb[k++] = (char)(48 + (v & 63));
                 }
                 hb[k] = 0; pc_out(hb);
+              } break;
+    case 'J': {                            // BYTEBEAT: "J 0|1 <hex bytes>" a formula · "J 9 <id> <0..1000>" a setting
+                char *q = s + 1;
+                long n = strtol(q, &q, 10);
+                if (n == 0 || n == 1) {
+                  uint8_t tmp[64] = {0};
+                  int k = 0;
+                  while (*q == ' ') q++;
+                  auto hv = [](char c) -> int { return c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : (c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1)); };
+                  while (q[0] && q[1] && k < 60) {
+                    int hi = hv(q[0]), lo = hv(q[1]);
+                    if (hi < 0 || lo < 0) break;
+                    tmp[k++] = (uint8_t)((hi << 4) | lo);
+                    q += 2;
+                  }
+                  int nb = bb_cur[n] ^ 1;
+                  for (int i = 0; i < 64; i++) bb_prog[n][nb][i] = tmp[i];
+                  bb_cur[n] = (uint8_t)nb;
+                } else if (n == 9) {
+                  long id = strtol(q, &q, 10), v = strtol(q, &q, 10);
+                  if (v < 0) v = 0; if (v > 1000) v = 1000;
+                  if (id >= 0 && id < 8) { bb_p[id] = (int16_t)v; bb_update(); }
+                }
               } break;
     case 'W': {                            // write samples into the tape (file loading from the phone)
                 // W <start> <2 chars per sample: each char = 48 + 6 bits, high then low>  ->  "w <start>"

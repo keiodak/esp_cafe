@@ -85,22 +85,22 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX", "WAVE"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
-        "a looper with its own play head · EARTH bends the speed · FLIP runs it backwards",
+        "bytebeat · two formulas on each Cafe · MORPH passes the sound from one Cafe to the other · DICE for new ones",
         "a stereo tap delay · SKIP taps the tempo · the WET knob feeds it back",
         "a folding noise ring · LFO for a slow wander · DIST for fuzz",
         "four plates, one note each · press on one Cafe, it rings out on the other",
-        "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it",
+        "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle"]
+    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -109,7 +109,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, sidrax, wave, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -330,8 +330,29 @@ final class Rig: ObservableObject {
         }
     }
     /// DRONE: the four plates sound without a finger ("S 24")
-    @Published var wvDrone = false
-    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(wvDrone ? 1000 : 0)"] }
+    /// FREEZE (COCO's): the last ~2 s of WAVE held as a loop under the plates ("S 24")
+    @Published var wvFreeze = false
+    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(wvFreeze ? 1000 : 0)"] }
+
+    // BYTEBEAT (BLE mode 1): XY pads 1 2 5 6, formulas 3 4 7 8 (A's two, B's two)
+    let bbAxes: [PadAxis] = BytePad.starts.map { PadAxis($0) }
+    @Published var bbFormula: [String] = (Rig.d.stringArray(forKey: "rig.bbFormula")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
+        didSet { Self.d.set(bbFormula, forKey: "rig.bbFormula") }
+    }
+    /// the settings for one Cafe: B runs at a ratio of A's rate and with MORPH turned the other way (the link)
+    func bbParams(slot: Int) -> [String] {
+        let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5]
+        var rate = p0.x
+        if slot == 1 { rate = min(1, max(0, rate + log(BytePad.ratios[min(6, Int(p0.y * 6.99))]) / log(32))) }
+        let morph = slot == 1 ? 1 - p4.x : p4.x
+        let v = [rate, morph, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7]
+        return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
+    }
+    /// this Cafe's two formulas (slot 0 = A: 1 and 2, slot 1 = B: 3 and 4)
+    func bbFormulaLines(slot: Int) -> [String] {
+        (0..<2).compactMap { j in Bytebeat.compile(bbFormula[slot * 2 + j]).map { "J \(j) " + Bytebeat.hex($0) } }
+    }
+    func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
@@ -389,7 +410,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .coco, .delay, .noise, .sidrax, .wave][min(max(ctxMode, 0), 5)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave][min(max(ctxMode, 0), 5)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

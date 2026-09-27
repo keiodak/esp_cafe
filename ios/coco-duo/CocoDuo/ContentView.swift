@@ -83,6 +83,7 @@ final class Director: ObservableObject {
         switch rig.padSet {
         case .grain: return grain.axes
         case .coco: return rig.coAxes
+        case .byte: return rig.bbAxes
         case .delay: return rig.dlAxes
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
@@ -112,7 +113,7 @@ final class Director: ObservableObject {
             u.send("M 25 \(rig.mode[s])")
             switch rig.mode[s] {
             case 0: grain.allCommands(slot: s).forEach(u.send)
-            case 1: rig.coAll(slot: s).forEach(u.send)
+            case 1: rig.bbAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
@@ -205,6 +206,8 @@ final class Director: ObservableObject {
             if resync { sync() }
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
+        case .byte:
+            for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:
@@ -544,7 +547,13 @@ final class Director: ObservableObject {
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
     /// WAVE: DRONE on / off
-    func setWvDrone(_ on: Bool) { rig.wvDrone = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
+    func setWvFreeze(_ on: Bool) { rig.wvFreeze = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
+    /// BYTEBEAT: a formula changed (k 0, 1 = A's · 2, 3 = B's): to that Cafe
+    func setFormula(_ k: Int, _ f: String) {
+        var v = rig.bbFormula; v[k] = f; rig.bbFormula = v
+        for u in ctxUnits() where u.slot == k / 2 { rig.bbFormulaLines(slot: u.slot).forEach(u.send) }
+    }
+    func bbDiceAll() { for k in 0..<4 { setFormula(k, Bytebeat.random()) } }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
@@ -678,6 +687,7 @@ private struct MainScreen: View {
         switch rig.padSet {
         case .grain: return (grain.axes[i], GrainPad(rawValue: i)!.title)
         case .coco: return (rig.coAxes[i], CoPad(rawValue: i)!.title)
+        case .byte: return (rig.bbAxes[i], BytePad.titles[i])
         case .delay: return (rig.dlAxes[i], DlPad(rawValue: i % 4)!.title)
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
@@ -702,6 +712,8 @@ private struct MainScreen: View {
         case .speech:
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
+        case .byte:
+            return { x, y in BytePad.caption(i, x, y) }
         case .sidrax:
             if i >= 4 { return nil }
             let r = rig
@@ -717,7 +729,11 @@ private struct MainScreen: View {
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
+        if rig.padSet == .byte && BytePad.formula(i) >= 0 {             // BYTEBEAT: the four formula pads
+            let director = d, k = BytePad.formula(i)
+            FormulaPad(rig: rig, k: k, tag: String(format: "%02ld", i + 1), set: { director.setFormula(k, $0) })
+                .frame(height: padHeight)
+        } else if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
             let director = d
             PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
                 .frame(height: padHeight)
@@ -1047,11 +1063,17 @@ private struct HudBar: View {
                 else { key("arrow.triangle.2.circlepath") { d.sync() } }       // HARMONY: cycles start together
             default: key("hand.tap") { d.tapTempo() }
             }
+        case .byte:
+            switch n {
+            case 0: key("dice") { d.bbDiceAll() }                                   // four new formulas
+            case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
+            default: blank
+            }
         case .wave:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            case 2: textKey("DRONE", on: rig.wvDrone) { d.setWvDrone(!rig.wvDrone) }        // the plates sound by themselves
+            case 2: textKey("FREEZE", on: rig.wvFreeze) { d.setWvFreeze(!rig.wvFreeze) }    // the last ~2 s held as a loop
             default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
         case .sidrax:
@@ -1110,7 +1132,7 @@ private struct HudBar: View {
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
         "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
-        "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
+        "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]
 

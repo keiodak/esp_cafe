@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1388,6 +1388,10 @@ static int32_t __attribute__((noinline)) dl_tick(int32_t in, int32_t *rout, bool
   static uint32_t w = 0, fill = 0, bc = 0, pw = 0;
   static int32_t cl = 16000 << 8, cr = 16000 << 8;  // current times (they glide)
   static int32_t lpl = 0, lpr = 0;
+  // LOW CUT: what goes into the delay loses its bass (~220 Hz, 6 dB/oct): the repeats stay clear, the dry is untouched
+  static int32_t dlhp = 0;
+  dlhp += ((in << 8) - dlhp) >> 5;
+  int32_t hin = in - (dlhp >> 8);
   if (dl_reset) {
     dl_reset = false;
     w = 0;
@@ -1432,7 +1436,7 @@ static int32_t __attribute__((noinline)) dl_tick(int32_t in, int32_t *rout, bool
     lpl += ((vf - lpl) * dl_tone) >> 12;
     int32_t fb = hold ? 256 : dl_fb;
     int32_t x = hold ? vf : lpl;
-    dwrite(pw, soft_clip((hold ? 0 : in) + ((x * fb) >> 8)) + 2048);
+    dwrite(pw, soft_clip((hold ? 0 : hin) + ((x * fb) >> 8)) + 2048);
     dl_wpos = pw;
     pw = (pw + 1) & 0x1FFFF;
     if (++bc >= (uint32_t)dl_beat) {
@@ -1471,7 +1475,7 @@ static int32_t __attribute__((noinline)) dl_tick(int32_t in, int32_t *rout, bool
   lpr += ((vr - lpr) * dl_tone) >> 12;
   int32_t pp = dl_pp, fb = hold ? 256 : dl_fb;
   int32_t xl = hold ? vl : lpl, xr = hold ? vr : lpr;  // hold: no filter, no loss, no input
-  int32_t il = hold ? 0 : in, ir = hold ? 0 : ((in * (256 - pp)) >> 8);
+  int32_t il = hold ? 0 : hin, ir = hold ? 0 : ((hin * (256 - pp)) >> 8);
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);
   int32_t wr = ir + ((((xr * (256 - pp) + xl * pp) >> 8) * fb) >> 8);
   dwrite(w, soft_clip(wl) + 2048);
@@ -1780,7 +1784,7 @@ volatile bool sx_wave = false;
 volatile int32_t wv_vx = 2048, wv_vy = 2048;            // VECTOR, Q12 (0..4096)
 volatile uint32_t wv_orbinc = 0;                        // ORBIT rate (Q32 per sample)
 volatile int32_t wv_orb = 0;                            // ORBIT size, Q12
-volatile bool wv_drone = false;                         // DRONE: the four plates sound without a finger ("S 24")
+volatile bool wv_frz = false;                           // FREEZE (COCO's): the last ~2 s of WAVE held as a loop ("S 24")
 static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f of the table at phase ph (Q32)
   int i0 = ph >> 24, i1 = (i0 + 1) & 255; int32_t fi = (ph >> 16) & 255;
   int32_t a = dread(f * 256 + i0), b = dread(f * 256 + i1);
@@ -1840,7 +1844,6 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
   }
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
-    if (sx_wave && wv_drone && a < 550) a = 550;             // WAVE DRONE: every plate holds its note
     if (a > 0) touched = 1;
     // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
     // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
@@ -1890,6 +1893,30 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
     bool pressHere = sx_role == 2 || sx_role == side, relHere = sx_role == 2 || sx_role == 1 - side;
     if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
     if (relHere) l += (tri * eR[k]) >> 13;
+  }
+  // WAVE FREEZE (like COCO's): its own sound is always written to the tape behind the table (~2.2 s round);
+  // FREEZE stops the writing and the last round plays as a loop under the plates (a soft seam where it joins)
+  if (sx_wave) {
+    static uint32_t fw = 0, fp = 0;
+    static bool was = false;
+    static int32_t fg = 0;
+    const uint32_t FB = 16384, FL = 98304;
+    int32_t lc = l > 2047 ? 2047 : (l < -2047 ? -2047 : l);
+    int32_t fz = 0;
+    if (!wv_frz) {
+      dwrite(FB + fw, lc + 2048);
+      if (++fw >= FL) fw = 0;
+      was = false;
+    } else {
+      if (!was) { was = true; fp = fw; }                    // start at the oldest sound
+      int32_t v = dread(FB + fp) - 2048;
+      uint32_t dd = fp >= fw ? fp - fw : fp + FL - fw;       // how far from the seam
+      int32_t e = dd < 512 ? (int32_t)dd : (FL - dd < 512 ? (int32_t)(FL - dd) : 512);
+      fz = (v * e) >> 9;
+      if (++fp >= FL) fp = 0;
+    }
+    fg += ((wv_frz ? 4096 : 0) - fg) >> 9;
+    l += (fz * fg) >> 12;
   }
   r = l;                                                     // (one Cafe = one side: main and ASH the same)
   sx_gate = touched;
@@ -2027,6 +2054,87 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
   return ((v * co_gain) >> 8) + ((in * co_dry) >> 8);
 }
 
+// ==========================================
+// BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
+// ==========================================
+// Two formulas of t (the phone writes them, compiled to a little stack program: "J 0|1 <hex bytes>"). Each one is
+// run whenever t moves on; the two are mixed (MORPH) and XOR'ed together (XOR), the low 8 bits are the sound.
+// Variables in a formula: t, a b c d (the phone's pads, 0..255), e (EARTH, 0..255). RATE = how fast t runs.
+// Two Cafes are linked from the phone: the same t (Z), B's rate a ratio of A's, MORPH turned the other way on B.
+// SKIP = t back to 0. YELLOW = the top bit of the output. Parameters: "J 9 <id> <0..1000>" (bb_update).
+// ops: 0 end · 1 t · 2..5 a b c d · 6 e · 7 n8 · 8 n16 · 10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >>
+//      20 ~ 21 neg · 22 < 23 > 24 ==
+volatile uint8_t bb_prog[2][2][64] = {    // [formula][double buffer]: the phone fills the other one, then flips
+  { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } },   // t*(t>>5|t>>8)
+  { { 1, 1, 7, 8, 19, 15, 0 }, { 0 } } };                 // t&t>>8
+volatile uint8_t bb_cur[2] = { 0, 0 };
+volatile uint32_t bb_inc = 11889;          // t per sample, Q16 (8 kHz)
+volatile int32_t bb_morph = 0, bb_xor = 0; // Q8
+volatile int32_t bb_v[4] = { 64, 128, 32, 16 };
+volatile int32_t bb_level = 180;           // Q8
+volatile bool bb_restart = false, bb_reset = true;
+volatile int bb_gate = 0;
+
+static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
+  uint32_t st[16];
+  int sp = 0;
+  for (int pc = 0; pc < 61;) {
+    uint8_t op = pr[pc++];
+    if (op == 0) break;
+    if (op == 1) { if (sp < 16) st[sp++] = t; }
+    else if (op >= 2 && op <= 5) { if (sp < 16) st[sp++] = (uint32_t)bb_v[op - 2]; }
+    else if (op == 6) { if (sp < 16) st[sp++] = (uint32_t)(pc_emod + 128); }
+    else if (op == 7) { if (sp < 16) st[sp++] = pr[pc]; pc++; }
+    else if (op == 8) { if (sp < 16) st[sp++] = pr[pc] | (pr[pc + 1] << 8); pc += 2; }
+    else if (op == 20) { if (sp) st[sp - 1] = ~st[sp - 1]; }
+    else if (op == 21) { if (sp) st[sp - 1] = 0u - st[sp - 1]; }
+    else {
+      if (sp < 2) return 0;
+      uint32_t b = st[--sp], a = st[sp - 1];
+      switch (op) {
+        case 10: a = a + b; break;
+        case 11: a = a - b; break;
+        case 12: a = a * b; break;
+        case 13: a = b ? a / b : 0; break;
+        case 14: a = b ? a % b : 0; break;
+        case 15: a = a & b; break;
+        case 16: a = a | b; break;
+        case 17: a = a ^ b; break;
+        case 18: a = a << (b & 31); break;
+        case 19: a = a >> (b & 31); break;
+        case 22: a = a < b; break;
+        case 23: a = a > b; break;
+        case 24: a = a == b; break;
+        default: break;
+      }
+      st[sp - 1] = a;
+    }
+  }
+  return sp ? st[sp - 1] : 0;
+}
+
+static int32_t __attribute__((noinline)) bb_tick() {
+  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu;
+  static int32_t out = 0, dc = 0;
+  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; }
+  if (bb_restart) { bb_restart = false; frac = 0; t = 0; }
+  frac += bb_inc;
+  t += frac >> 16;
+  frac &= 0xFFFF;
+  if (t != lastt) {
+    lastt = t;
+    int32_t f1 = (int32_t)(bb_run(bb_prog[0][bb_cur[0]], t) & 255), f2 = (int32_t)(bb_run(bb_prog[1][bb_cur[1]], t) & 255);
+    int32_t m = (f1 * (256 - bb_morph) + f2 * bb_morph) >> 8;
+    m += (((f1 ^ f2) - m) * bb_xor) >> 8;
+    out = (m - 128) * 12;
+    bb_gate = (m & 0x80) != 0;
+  }
+  dc += (out - dc) >> 10;                   // (a formula sitting on one side does not push the output off centre)
+  int32_t y = ((out - dc) * bb_level) >> 8;
+  if (y > 2047) y = 2047; if (y < -2047) y = -2047;
+  return y;
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
@@ -2061,7 +2169,7 @@ void IRAM_ATTR coco_pc() {
   if (cur < 0) {
     cur = want;
     if (cur == 0) mo_reset = true;
-    else if (cur == 1) co_reset = true;
+    else if (cur == 1) bb_reset = true;
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
     else if (cur == 4 || cur == 5) sx_reset = true;
@@ -2072,7 +2180,7 @@ void IRAM_ATTR coco_pc() {
       cur = want;
       audio_frozen_state = false;
       if (cur == 0) mo_reset = true;
-      else if (cur == 1) co_reset = true;
+      else if (cur == 1) bb_reset = true;
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
@@ -2087,7 +2195,7 @@ void IRAM_ATTR coco_pc() {
   bool g_restart = false;
   if (press) {
     if (gmode) g_restart = true;
-    else if (bmode) co_restart = true;
+    else if (bmode) bb_restart = true;
     else if (dmode) {
       tap_note();
       dl_align = true;
@@ -2095,22 +2203,22 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode;                                          // SIDRAX / WAVE: CHAR's grit stays out
+  grit_off = smode || bmode;                                 // SIDRAX / WAVE / BYTEBEAT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
-  bool rec = (gmode || bmode) && pc_rec && !audio_frozen_state && !frz;
+  bool rec = gmode && pc_rec && !audio_frozen_state && !frz;
   if (rec) {
     if (rg < 256) rg++;
   } else {
     if (rg > 0) rg--;
   }
-  if (rg && (gmode || bmode)) {
+  if (rg && gmode) {
     int32_t old = dread(wpos);
-    int32_t g = bmode ? ((rg * co_dub) >> 8) : rg;  // COCO: overdub keeps some of the old sound
+    int32_t g = rg;
     dwrite(wpos, old + (((gyo - old) * g) >> 8));
   }
-  if (gmode || bmode) wpos = (wpos + 1) & 0x1FFFF;
+  if (gmode) wpos = (wpos + 1) & 0x1FFFF;
 
   // --- THE SOUND ---
   int32_t l = 0, r = 0;
@@ -2118,7 +2226,7 @@ void IRAM_ATTR coco_pc() {
     l = grain_tick(wpos, now, frz, g_restart);
     r = l;
   } else if (bmode) {
-    l = co_tick(wpos, gyo - 2048, rg, FLIPPERAT);
+    l = bb_tick();                                           // BYTEBEAT
     r = l;
   } else if (dmode) {
     bool hold = dl_hold || FLIPPERAT || audio_frozen_state;
@@ -2149,10 +2257,7 @@ void IRAM_ATTR coco_pc() {
       y = true;
     }
   } else if (bmode) {
-    if (co_pulse > 0) {
-      co_pulse--;
-      y = true;
-    }
+    y = bb_gate;
   } else if (dmode) {
     if (dl_click > 0) {
       dl_click--;
@@ -2182,8 +2287,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || smode) {
-    if (smode ? sx_gate : nz_gate) {
+  } else if (nmode || smode || bmode) {
+    if (smode ? sx_gate : (bmode ? bb_gate : nz_gate)) {
       LAMP_ON;
     } else {
       LAMP_OFF;
@@ -2202,10 +2307,6 @@ void IRAM_ATTR coco_pc() {
     t = wpos;
     pc_wpos = wpos;
     pc_ppos = gmode ? ((mo_v[0].pq >> 12) & 0x1FFFF) : co_ppos;
-  }
-  if (bmode) {
-    pc_ls = (co_ls + co_loff) & 0x1FFFF;
-    pc_le = pc_ls + co_len;
   }
   pc_flip = FLIPPERAT ? 1 : 0;
   pc_skip = SKIPPERAT ? 1 : 0;
