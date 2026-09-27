@@ -329,41 +329,40 @@ final class Rig: ObservableObject {
         default: return sxCommands(pad: i)
         }
     }
-    /// DRONE: the four plates sound without a finger ("S 24")
-    /// FREEZE (COCO's): the last ~2 s of WAVE held as a loop under the plates ("S 24")
-    @Published var wvFreeze = false
-    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(wvFreeze ? 1000 : 0)"] }
+    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of WAVE held as a loop under the plates · 2 CLOCK (FLIP plays it once)
+    @Published var wvFreeze = 0
+    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(Rig.freezeValue(wvFreeze))"] }
 
-    // BYTEBEAT (BLE mode 1): settings pads 1 2 5 6, formula pads 3 4 7 8 (their X · Y are the numbers A · B in them)
+    // BYTEBEAT (BLE mode 1): settings pads 1 2 5 6, the formulas on 3 · 4, CROSS · DRIFT and COLLIDE · CRASH on 7 · 8
     let bbAxes: [PadAxis] = BytePad.starts.map { PadAxis($0) }
-    @Published var bbShape: [String] = (Rig.d.stringArray(forKey: "rig.bbShape")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
-        didSet { Self.d.set(bbShape, forKey: "rig.bbShape") }
+    @Published var bbFormula: [String] = (Rig.d.stringArray(forKey: "rig.bbFormula")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
+        didSet { Self.d.set(bbFormula, forKey: "rig.bbFormula") }
     }
-    /// SAME: both Cafes play the same (no ratio, MORPH the same way, the same pair)
-    @Published var bbSame = false
-    /// formula k as it is now (its shape with its pad's numbers)
-    func bbFormula(_ k: Int) -> String {
-        let a = bbAxes[[2, 3, 6, 7][k]]
-        return Bytebeat.fill(bbShape[k], a.x, a.y)
-    }
-    /// the settings for one Cafe. Linked (not SAME): B runs at a ratio of A's rate, MORPH turned the other way, and
-    /// B sounds formulas 3 & 4 while A sounds 1 & 2 — both hear all four for the beat
+    /// SLOW: t at 1/32
+    @Published var bbSlow = false
+    /// FREEZE: 0 off · 1 the last ~2 s held (instead of the live sound) · 2 CLOCK (FLIP plays it once)
+    @Published var bbFreeze = 0
+    static func freezeValue(_ m: Int) -> Int { [0, 1000, 500][m] }
+    /// the settings for one Cafe. B runs at a ratio of A's rate, MORPH turned the other way, and sounds formulas
+    /// 3 & 4 while A sounds 1 & 2 — both hear all four for the beat and the collisions
     func bbParams(slot: Int) -> [String] {
-        let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5]
-        let b = slot == 1 && !bbSame
+        let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5], p6 = bbAxes[6], p7 = bbAxes[7]
+        let b = slot == 1
         var rate = p0.x
         if b { rate = min(1, max(0, rate + log(BytePad.ratios[min(6, Int(p0.y * 6.99))]) / log(32))) }
-        let v = [rate, b ? 1 - p4.x : p4.x, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7, b ? 1 : 0]
+        let v = [rate, b ? 1 - p4.x : p4.x, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7, b ? 1 : 0,
+                 bbSlow ? 1 : 0, p6.x, p6.y, p7.x, p7.y]
         return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
+            + ["J 9 14 \(Rig.freezeValue(bbFreeze))"]
     }
     /// all four formulas (every Cafe runs all four)
     func bbFormulaLines(slot: Int) -> [String] {
-        (0..<4).compactMap { k in Bytebeat.compile(bbFormula(k)).map { "J \(k) " + Bytebeat.hex($0) } }
+        (0..<4).compactMap { k in Bytebeat.compile(bbFormula[k]).map { "J \(k) " + Bytebeat.hex($0) } }
     }
     func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
-    func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(sxFreeze ? 1000 : 0)"] }
-    /// FREEZE (COCO's): the last ~2 s of SIDRAX held as a loop under the plates ("S 24")
-    @Published var sxFreeze = false
+    func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(Rig.freezeValue(sxFreeze))"] }
+    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of SIDRAX held as a loop under the plates · 2 CLOCK ("S 24")
+    @Published var sxFreeze = 0
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 

@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.66"
+#define FW_VERSION "3.67"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -450,7 +450,7 @@ void sx_update() {
     float orr = 0.02f * powf(400.0f, w[2]);                            // ORBIT 0.02 .. 8 Hz
     wv_orbinc = (uint32_t)(orr / hz * 4294967295.0f);
     wv_orb = (int32_t)(w[3] * 4096.0f);
-    wv_frz = wv_p[4] >= 500; }                              // up to the whole square
+    wv_frz = wv_p[4] >= 750 ? 1 : (wv_p[4] >= 250 ? 2 : 0); }   // FREEZE 1000 · CLOCK 500
   // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
   static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
                                     {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
@@ -475,10 +475,10 @@ void sx_update() {
 // ---- BYTEBEAT parameters (k.odk). "J 9 <id> <0..1000>" ----
 //  0 RATE (1 .. 32 kHz)  1 MORPH  2 XOR  3 BEAT BIT (3 .. 14)  4 LOGIC (OR · XOR · AND · 2 OF 4)  5 CLICK pitch
 //  6 CLICK decay  7 LEVEL  8 PAIR (0 = formulas 1 & 2 · 1000 = 3 & 4)
-volatile int16_t bb_p[9] = {400, 0, 0, 400, 0, 400, 400, 700, 0};
+volatile int16_t bb_p[15] = {400, 0, 0, 400, 0, 400, 400, 700, 0, 0, 0, 500, 0, 0, 0};
 void bb_update() {
-  float hz = clock_hz(), p[9];
-  for (int i = 0; i < 9; i++) p[i] = bb_p[i] / 1000.0f;
+  float hz = clock_hz(), p[15];
+  for (int i = 0; i < 15; i++) p[i] = bb_p[i] / 1000.0f;
   float r = 1000.0f * powf(32.0f, p[0]);
   bb_inc = (uint32_t)(r / hz * 65536.0f);
   bb_morph = (int32_t)(p[1] * 256.0f);
@@ -491,6 +491,12 @@ void bb_update() {
   bb_cdec = (int32_t)(65536.0f * expf(-1.0f / (cs * hz)));
   bb_level = (int32_t)(p[7] * 1.4f * 256.0f);
   bb_pair = bb_p[8] >= 500 ? 1 : 0;
+  bb_slow = bb_p[9] >= 500;                                            // SLOW: t at 1/32
+  bb_cross = (int32_t)(p[10] * p[10] * 512.0f);                        // CROSS: the numbers bent up to ±16
+  bb_drift = (int)((1.0f - p[11]) * 12.99f);                           // DRIFT: every step .. every 4096
+  bb_coll = (int32_t)(p[12] * p[12] * 64.0f);                          // COLLIDE: the kick
+  bb_crash = (int)(p[13] * 8.99f);                                     // CRASH: 0 .. 8 bits
+  bb_fz = bb_p[14] >= 750 ? 1 : (bb_p[14] >= 250 ? 2 : 0);             // FREEZE 1000 · CLOCK 500
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -798,7 +804,7 @@ void pc_line(char *s) {
                 } else if (n == 9) {
                   long id = strtol(q, &q, 10), v = strtol(q, &q, 10);
                   if (v < 0) v = 0; if (v > 1000) v = 1000;
-                  if (id >= 0 && id < 9) { bb_p[id] = (int16_t)v; bb_update(); }
+                  if (id >= 0 && id < 15) { bb_p[id] = (int16_t)v; bb_update(); }
                 }
               } break;
     case 'W': {                            // write samples into the tape (file loading from the phone)
