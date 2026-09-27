@@ -1,13 +1,12 @@
 // MakePanel.swift — coco duo (k.odk)
-// MAKE: sounds made on the phone and written onto a Cafe's tape (ToneMaker). Opened from the MAKE key on A's bar
-// (for A) or B's (for B); the target can be changed at the top. STRETCH = a file stretched into a still, looping
-// cloud · CHORDS = 16 slices, a chord in each.
+// MAKE: sounds made on the phone and written onto a Cafe's tape (ToneMaker), in the CAFES panel.
+// TO = which Cafe · STRETCH = a file stretched into a still, looping cloud · CHORDS = 16 slices, a chord in each.
 
 import SwiftUI
 
-struct MakeView: View {
+struct MakeCards: View {
     @ObservedObject var hub: CafeHub
-    @State var target: Int                 // 0 A · 1 B · 2 both
+    @State private var target = 0          // 0 A · 1 B · 2 both
     @State private var stretchI = 1
     @State private var keyI = 0
     @State private var setI = 0
@@ -15,45 +14,38 @@ struct MakeView: View {
     @State private var busy = false
 
     var body: some View {
-        PanelScaffold(title: "MAKE") {
-            PanelCard(title: "TO") {
+        VStack(spacing: PanelMetrics.chipSpacing * 2) {
+            PanelCard(title: "MAKE") {
                 HStack(spacing: PanelMetrics.chipSpacing) {
                     ForEach(0..<3, id: \.self) { t in
-                        ChipButton(title: ["CAFE A", "CAFE B", "A + B"][t], filled: target == t) { target = t }
+                        ChipButton(title: ["→ A", "→ B", "→ A + B"][t], filled: target == t) { target = t }
                     }
                 }
                 ForEach(units, id: \.slot) { u in ProgressLine(unit: u) }
             }
-            PanelColumns(equalHeight: true) {
-                PanelCard(title: "STRETCH", fill: true) {
-                    HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(ToneMaker.stretches.indices, id: \.self) { i in
-                            ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
-                        }
+            PanelCard(title: "STRETCH") {
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    ForEach(ToneMaker.stretches.indices, id: \.self) { i in
+                        ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
                     }
-                    Spacer(minLength: 0)
-                    BigButton(title: "FILE → STRETCH", busy: busy, enabled: ready) { picking = true }
                 }
-            } right: {
-                PanelCard(title: "CHORDS", fill: true) {
-                    VStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(0..<2, id: \.self) { r in
-                            HStack(spacing: PanelMetrics.chipSpacing) {
-                                ForEach(0..<6, id: \.self) { c in
-                                    let k = r * 6 + c
-                                    ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
-                                }
-                            }
-                        }
-                    }
+                BigButton(title: "FILE → STRETCH", busy: busy, enabled: ready) { picking = true }
+            }
+            PanelCard(title: "CHORDS") {
+                ForEach(0..<2, id: \.self) { r in
                     HStack(spacing: PanelMetrics.chipSpacing) {
-                        ForEach(ToneMaker.sets.indices, id: \.self) { i in
-                            ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
+                        ForEach(0..<6, id: \.self) { c in
+                            let k = r * 6 + c
+                            ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
                         }
                     }
-                    Spacer(minLength: 0)
-                    BigButton(title: "MAKE CHORDS", busy: busy, enabled: ready) { makeChords() }
                 }
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    ForEach(ToneMaker.sets.indices, id: \.self) { i in
+                        ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
+                    }
+                }
+                BigButton(title: "MAKE CHORDS", busy: busy, enabled: ready) { makeChords() }
             }
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { stretchFile($0) }
