@@ -630,6 +630,7 @@ private struct MainScreen: View {
     @State private var padHeight: CGFloat = 122
     @State private var showCafes = false
     @State private var showWave = false
+    @State private var makeSlot: Int? = nil          // MAKE: which Cafe's bar it was opened from
     @State private var showPresets = false
     @State private var safeLeading: CGFloat = 0
     @State private var safeTrailing: CGFloat = 0
@@ -638,12 +639,12 @@ private struct MainScreen: View {
     var body: some View {
         VStack(spacing: 7) {
             HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera,
-                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets, makeSlot: $makeSlot)
                 .frame(height: barHeight)
             pads
                 .zIndex(1)
             HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
-                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                   showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets, makeSlot: $makeSlot)
                 .frame(height: barHeight)
         }
         .fileImporter(isPresented: $rig.wvPicking, allowedContentTypes: [.audio]) { result in   // WAVE: FILE
@@ -669,6 +670,9 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
+        .sheet(isPresented: Binding(get: { makeSlot != nil }, set: { if !$0 { makeSlot = nil } })) {
+            MakeView(hub: hub, target: makeSlot ?? 0)
+        }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -955,6 +959,7 @@ private struct HudBar: View {
     @ObservedObject var camera: CameraRig
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
+    @Binding var makeSlot: Int?
     @Binding var showPresets: Bool
 
     private var top: Bool { unit.slot == 0 }
@@ -986,6 +991,7 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
+                key("wand.and.stars") { makeSlot = unit.slot }                   // MAKE: for this bar's Cafe
             }
         }
     }
@@ -1147,7 +1153,7 @@ private struct HudBar: View {
 
     /// every key says what it does (the icons alone were guesswork)
     private static let keyNames: [String: String] = [
-        "dot.radiowaves.left.and.right": "CAFES", "waveform": "WAVE", "camera.aperture": "CAM", "wind": "DRIFT",
+        "dot.radiowaves.left.and.right": "CAFES", "waveform": "WAVE", "wand.and.stars": "MAKE", "camera.aperture": "CAM", "wind": "DRIFT",
         "snowflake": "FREEZE", "metronome": "PERC", "waveform.path": "PITCH", "arrow.triangle.2.circlepath": "SYNC",
         "record.circle": "REC", "arrow.left.arrow.right": "REV", "backward.end": "START", "pause.circle": "HOLD",
         "link": "LINK", "squareshape.split.3x3": "GRID", "hand.tap": "TAP", "dice": "DICE", "forward.end": "NEXT",
