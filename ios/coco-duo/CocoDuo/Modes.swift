@@ -329,39 +329,47 @@ final class Rig: ObservableObject {
         default: return sxCommands(pad: i)
         }
     }
-    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of WAVE held as a loop under the plates · 2 CLOCK (FLIP plays it once)
+    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of WAVE held as a loop under the plates
     @Published var wvFreeze = 0
     func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(Rig.freezeValue(wvFreeze))"] }
 
-    // BYTEBEAT (BLE mode 1): settings pads 1 2 5 6, the formulas on 3 · 4, CROSS · DRIFT and COLLIDE · CRASH on 7 · 8
+    // BYTEBEAT (BLE mode 1): one formula grown by a cellular automaton. XY pads 1 2 5 6 7 8; 3 = the formula, 4 = the automaton
     let bbAxes: [PadAxis] = BytePad.starts.map { PadAxis($0) }
-    @Published var bbFormula: [String] = (Rig.d.stringArray(forKey: "rig.bbFormula")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
-        didSet { Self.d.set(bbFormula, forKey: "rig.bbFormula") }
+    @Published var bbCode: String = Rig.d.string(forKey: "rig.bbCode") ?? Bytebeat.seed {
+        didSet { Self.d.set(bbCode, forKey: "rig.bbCode") }
     }
+    let bbCA = ByteCA()
     /// SLOW: t at 1/32
     @Published var bbSlow = false
-    /// FREEZE: 0 off · 1 the last ~2 s held (instead of the live sound) · 2 CLOCK (FLIP plays it once)
-    @Published var bbFreeze = 0
-    static func freezeValue(_ m: Int) -> Int { [0, 1000, 500][m] }
-    /// the settings for one Cafe. B runs at a ratio of A's rate, MORPH turned the other way, and sounds formulas
-    /// 3 & 4 while A sounds 1 & 2 — both hear all four for the beat and the collisions
+    /// FREEZE: t stops moving on (it goes round the last beat) and the automaton waits
+    @Published var bbFreeze = false
+    static func freezeValue(_ m: Int) -> Int { m > 0 ? 1000 : 0 }
+    /// the settings for one Cafe. B runs at a ratio of A's rate and MORPH turned the other way
     func bbParams(slot: Int) -> [String] {
         let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5], p6 = bbAxes[6], p7 = bbAxes[7]
         let b = slot == 1
         var rate = p0.x
         if b { rate = min(1, max(0, rate + log(BytePad.ratios[min(6, Int(p0.y * 6.99))]) / log(32))) }
-        let v = [rate, b ? 1 - p4.x : p4.x, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7, b ? 1 : 0,
-                 bbSlow ? 1 : 0, p6.x, p6.y, p7.x, p7.y]
+        // 0 rate · 1 morph · 2 xor · 3 bit · 4 rule · 5 click · 6 decay · 7 level · 8 seed · 9 slow · 10 step · 11 depth · 12 ops · 14 freeze
+        let v = [rate, b ? 1 - p4.x : p4.x, p4.y, p7.y, p1.x, p5.x, p5.y, 0.7, p1.y, bbSlow ? 1 : 0, p6.x, p6.y, p7.x]
         return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
-            + ["J 9 14 \(Rig.freezeValue(bbFreeze))"]
+            + ["J 9 14 \(bbFreeze ? 1000 : 0)"]
     }
-    /// all four formulas (every Cafe runs all four)
+    /// the formula: its cells first, then the program (which starts it)
     func bbFormulaLines(slot: Int) -> [String] {
-        (0..<4).compactMap { k in Bytebeat.compile(bbFormula[k]).map { "J \(k) " + Bytebeat.hex($0) } }
+        guard let p = Bytebeat.parse(bbCode) else { return [] }
+        return ["J 1 " + Bytebeat.hex(p.cells), "J 0 " + Bytebeat.hex(p.bytes)]
+    }
+    /// the phone's automaton follows A's settings
+    func bbCAUpdate() {
+        let p0 = bbAxes[0], p1 = bbAxes[1], p6 = bbAxes[6], p7 = bbAxes[7]
+        let tHz = 1000 * pow(32, p0.x) / (bbSlow ? 32 : 1)
+        bbCA.configure(rule: BytePad.rule(p1.x), seed: BytePad.seed(p1.y), depth: BytePad.depth(p6.y),
+                       ops: Int(p7.x * 256), period: Double(1 << BytePad.step(p6.x)) / tHz, frozen: bbFreeze)
     }
     func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(Rig.freezeValue(sxFreeze))"] }
-    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of SIDRAX held as a loop under the plates · 2 CLOCK ("S 24")
+    /// FREEZE (COCO's): 0 off · 1 the last ~2 s of SIDRAX held as a loop under the plates ("S 24")
     @Published var sxFreeze = 0
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false

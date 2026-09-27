@@ -113,7 +113,7 @@ final class Director: ObservableObject {
             u.send("M 25 \(rig.mode[s])")
             switch rig.mode[s] {
             case 0: grain.allCommands(slot: s).forEach(u.send)
-            case 1: rig.bbAll(slot: s).forEach(u.send)
+            case 1: rig.bbAll(slot: s).forEach(u.send); rig.bbCA.load(rig.bbCode); rig.bbCAUpdate()
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
@@ -193,7 +193,10 @@ final class Director: ObservableObject {
         let u = ctxUnits()
         if u.count == 2 && rig.padSet != .knob && rig.padSet != .noise && rig.padSet != .sidrax { u.forEach { $0.send("Z") } }
     }
-    func sync() { ctxUnits().forEach { $0.send("Z") } }
+    func sync() {
+        ctxUnits().forEach { $0.send("Z") }
+        if rig.padSet == .byte { rig.bbCA.reseed() }        // (the Cafe's automaton starts again too)
+    }
 
     // MARK: pads
 
@@ -207,8 +210,9 @@ final class Director: ObservableObject {
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
-            if BytePad.formulas(i) != nil { return }            // (the formula pads are not XY)
+            if BytePad.isView(i) { return }                     // (the formula and the automaton are not XY)
             for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
+            rig.bbCAUpdate()
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:
@@ -547,25 +551,25 @@ final class Director: ObservableObject {
         let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] >= 4 && rig.mode[$0.slot] <= 5 }
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
-    /// SIDRAX / WAVE / BYTEBEAT FREEZE: off -> FREEZE -> CLOCK (FLIP plays the held round) -> off
+    /// SIDRAX / WAVE: FREEZE on / off · BYTEBEAT: FREEZE = t loops the last beat
     func setSxFreeze(_ m: Int) { rig.sxFreeze = m; ctxUnits().forEach { $0.send("S 24 \(Rig.freezeValue(m))") } }
     func setWvFreeze(_ m: Int) { rig.wvFreeze = m; ctxUnits().forEach { $0.send("S 24 \(Rig.freezeValue(m))") } }
-    func setBbFreeze(_ m: Int) { rig.bbFreeze = m; ctxUnits().forEach { $0.send("J 9 14 \(Rig.freezeValue(m))") } }
-    /// BYTEBEAT: one formula, sent when it reads
-    func setBbFormula(_ k: Int, _ f: String) {
-        var fs = rig.bbFormula
-        fs[k] = f
-        rig.bbFormula = fs
-        guard let code = Bytebeat.compile(f) else { return }
-        for u in ctxUnits() { u.send("J \(k) " + Bytebeat.hex(code)) }
+    func setBbFreeze(_ on: Bool) {
+        rig.bbFreeze = on
+        ctxUnits().forEach { $0.send("J 9 14 \(on ? 1000 : 0)") }
+        rig.bbCAUpdate()
     }
-    /// four new ones
-    func bbDiceAll() {
-        rig.bbFormula = (0..<4).map { _ in Bytebeat.random() }
+    /// BYTEBEAT: the formula, sent when it reads (the automaton starts again on it)
+    func setBbFormula(_ f: String) {
+        rig.bbCode = f
+        guard Bytebeat.parse(f) != nil else { return }
         for u in ctxUnits() { rig.bbFormulaLines(slot: u.slot).forEach(u.send) }
+        rig.bbCA.load(f)
     }
+    /// a new one
+    func bbDice() { setBbFormula(Bytebeat.random()) }
     /// SLOW: t at 1/32
-    func setBbSlow(_ on: Bool) { rig.bbSlow = on; ctxUnits().forEach { $0.send("J 9 9 \(on ? 1000 : 0)") } }
+    func setBbSlow(_ on: Bool) { rig.bbSlow = on; ctxUnits().forEach { $0.send("J 9 9 \(on ? 1000 : 0)") }; rig.bbCAUpdate() }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
@@ -727,7 +731,7 @@ private struct MainScreen: View {
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
         case .byte:
-            if BytePad.formulas(i) != nil { return nil }
+            if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
         case .sidrax:
             if i >= 4 { return nil }
@@ -750,10 +754,12 @@ private struct MainScreen: View {
                 .frame(height: padHeight)
                 .zIndex(rig.sxArea[i - 4] > 0 ? 2 : 1)                  // the finger's disc goes over the pads beside it
                 .id("sx\(i)")
-        } else if rig.padSet == .byte, let ks = BytePad.formulas(i) {   // BYTEBEAT: the formulas (pads 3 · 4)
+        } else if rig.padSet == .byte && i == 2 {                   // BYTEBEAT: the formula
             let director = d
-            FormulaPad(rig: rig, ks: ks, tag: String(format: "%02ld", i + 1), title: BytePad.titles[i],
-                       set: { k, f in director.setBbFormula(k, f) })
+            FormulaPad(rig: rig, tag: "03", set: { director.setBbFormula($0) })
+                .frame(height: padHeight)
+        } else if rig.padSet == .byte && i == 3 {                   // BYTEBEAT: the automaton growing it
+            AutomatonPad(ca: rig.bbCA, tag: "04", rule: BytePad.rule(rig.bbAxes[1].x))
                 .frame(height: padHeight)
         } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
@@ -1082,23 +1088,23 @@ private struct HudBar: View {
             }
         case .byte:
             switch n {
-            case 0: key("dice") { d.bbDiceAll() }                                   // four new formulas
+            case 0: key("dice") { d.bbDice() }                                      // a new formula
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
-            case 2: freezeKey(rig.bbFreeze) { d.setBbFreeze((rig.bbFreeze + 1) % 3) }
+            case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t loops the last beat
             default: textKey("SLOW", on: rig.bbSlow) { d.setBbSlow(!rig.bbSlow) }          // t at 1/32
             }
         case .wave:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            case 2: freezeKey(rig.wvFreeze) { d.setWvFreeze((rig.wvFreeze + 1) % 3) }
+            case 2: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
             default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
         case .sidrax:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
-            case 2: freezeKey(rig.sxFreeze) { d.setSxFreeze((rig.sxFreeze + 1) % 3) }
+            case 2: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
             default: key("dice") { d.sxDice() }
             }
         case .noise:
@@ -1167,10 +1173,6 @@ private struct HudBar: View {
                 .frame(width: Self.keyW, height: 21)
                 .background(IconSquare(filled: on))
         }
-    }
-    /// FREEZE (off -> FREEZE -> CLOCK): the last ~2 s held as a loop, or played once on every FLIP
-    private func freezeKey(_ m: Int, action: @escaping () -> Void) -> some View {
-        textKey(m == 2 ? "CLOCK" : "FREEZE", on: m > 0, action: action)
     }
     /// every key the same width, whatever its word: switching presets never moves anything
     static let keyW: CGFloat = 50

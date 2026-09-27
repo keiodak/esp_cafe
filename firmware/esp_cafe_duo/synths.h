@@ -1784,41 +1784,30 @@ volatile bool sx_wave = false;
 volatile int32_t wv_vx = 2048, wv_vy = 2048;            // VECTOR, Q12 (0..4096)
 volatile uint32_t wv_orbinc = 0;                        // ORBIT rate (Q32 per sample)
 volatile int32_t wv_orb = 0;                            // ORBIT size, Q12
-volatile int wv_frz = 0;                                // FREEZE (COCO's) for SIDRAX / WAVE: 0 off · 1 the last ~2 s as a loop · 2 CLOCK ("S 24")
+volatile int wv_frz = 0;                                // FREEZE (COCO's) for SIDRAX / WAVE: 0 off · 1 the last ~2 s as a loop ("S 24")
 
-// FREEZE (like COCO's), shared by SIDRAX / WAVE / BYTEBEAT: the sound is always written to the tape (~2.2 s round).
-// 1 = FREEZE: the writing stops and the last round plays as a loop (a soft seam where it joins).
-// 2 = CLOCK: the writing stops; every FLIP (either Cafe's own jack / switch) plays the held round once from its start.
-// replace = the held sound takes the place of the live one (else it plays under it)
-static int32_t __attribute__((noinline)) fz_tick(int32_t l, int m, bool replace) {
-  static uint32_t fw = 0, fp = 0, left = 0;
-  static bool was = false, fl = false;
+// FREEZE (like COCO's) for SIDRAX / WAVE: the sound is always written to the tape (~2.2 s round); FREEZE stops the
+// writing and the last round plays as a loop under the plates (a soft seam where it joins)
+static int32_t __attribute__((noinline)) fz_tick(int32_t l, int m) {
+  static uint32_t fw = 0, fp = 0;
+  static bool was = false;
   static int32_t fg = 0;
   const uint32_t FB = 16384, FL = 98304;
-  bool flip = (FLIPPERAT) != 0;
-  bool edge = flip && !fl;
-  fl = flip;
   int32_t lc = l > 2047 ? 2047 : (l < -2047 ? -2047 : l);
   int32_t fz = 0;
-  if (m == 0) {
+  if (!m) {
     dwrite(FB + fw, lc + 2048);
     if (++fw >= FL) fw = 0;
     was = false;
-    left = 0;
   } else {
-    if (!was) { was = true; fp = fw; left = 0; }            // start at the oldest sound
-    if (m == 2 && edge) { fp = fw; left = FL; }             // CLOCK: a FLIP -> the round from its start
-    if (m == 1 || left > 0) {
-      int32_t v = dread(FB + fp) - 2048;
-      uint32_t dd = fp >= fw ? fp - fw : fp + FL - fw;       // how far from the seam
-      int32_t e = dd < 512 ? (int32_t)dd : (FL - dd < 512 ? (int32_t)(FL - dd) : 512);
-      fz = (v * e) >> 9;
-      if (++fp >= FL) fp = 0;
-      if (left > 0) left--;
-    }
+    if (!was) { was = true; fp = fw; }                      // start at the oldest sound
+    int32_t v = dread(FB + fp) - 2048;
+    uint32_t dd = fp >= fw ? fp - fw : fp + FL - fw;         // how far from the seam
+    int32_t e = dd < 512 ? (int32_t)dd : (FL - dd < 512 ? (int32_t)(FL - dd) : 512);
+    fz = (v * e) >> 9;
+    if (++fp >= FL) fp = 0;
   }
   fg += ((m ? 4096 : 0) - fg) >> 9;
-  if (replace) return (int32_t)(((int64_t)l * (4096 - fg) + (int64_t)fz * fg) >> 12);
   return l + ((fz * fg) >> 12);
 }
 static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f of the table at phase ph (Q32)
@@ -1930,7 +1919,7 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
     if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
     if (relHere) l += (tri * eR[k]) >> 13;
   }
-  l = fz_tick(l, wv_frz, false);                            // FREEZE / CLOCK (COCO's)
+  l = fz_tick(l, wv_frz);                                   // FREEZE (COCO's)
   r = l;                                                     // (one Cafe = one side: main and ASH the same)
   sx_gate = touched;
   int32_t ol = l, orr = r;                                   // (no filter: the triangles as they are; a soft ceiling only near the top)
@@ -2070,41 +2059,44 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 // ==========================================
 // BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
 // ==========================================
-// Four formulas of t (the phone writes them, compiled to a little stack program: "J 0..3 <hex bytes>"); every Cafe
-// runs all four whenever t moves on. The SOUND is one pair of them (PAIR: 1 & 2, or 3 & 4), mixed by MORPH and
-// XOR'ed together by XOR, the low 8 bits. The BEAT, like Ciat-Lonbarde's Rollz: one bit of each of the four (BIT: the
-// higher, the slower) is a pulse, and the four pulses are collided (LOGIC: OR · XOR · AND · 2 OF 4); every rising
-// edge is a beat -> YELLOW clicks, and ASH plays a short click (CLICK = its pitch, DECAY = its length).
-// SKIP = t back to 0. Parameters: "J 9 <id> <0..1000>" (bb_update).
-// They break each other: CROSS bends every formula's numbers by the next one's output (DRIFT = how often), COLLIDE
-// knocks a formula's t away when a neighbour's pulse hits it, CRASH lets the other pair's bits into the sound.
-// SLOW = t at 1/32. FREEZE / CLOCK like SIDRAX's (fz_tick).
+// ONE formula of t (the phone compiles it to a little stack program: "J 0 <hex bytes>", and before it "J 1 <hex>" =
+// its cells: the byte positions of its numbers and operators, in the order they are written). A cellular automaton
+// (a Wolfram RULE, one cell per number / operator) grows the formula: every STEP a generation; where a cell is alive,
+// its number moves (DEPTH; up with the left neighbour, down with the right, further with both) and, if OPS lets that
+// cell, its operator turns into another one. The SOUND = the seed formula and the grown one, mixed by MORPH, XOR'ed
+// by XOR (low 8 bits). The BEAT = one BIT of the grown one: every rising edge -> YELLOW clicks, and ASH plays a short
+// click (CLICK = its pitch, DECAY = its length). SKIP / SYNC = t back to 0 and the automaton back to its seed.
+// SLOW = t at 1/32. FREEZE = t stops moving on: it loops the last beat (two periods of BIT), the automaton stops.
+// Parameters: "J 9 <id> <0..1000>" (bb_update).
 // ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >>
 //      20 ~ 21 neg · 22 < 23 > 24 ==
-volatile uint8_t bb_prog[4][2][64] = {     // [formula][double buffer]: the phone fills the other one, then flips
-  { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } },   // t*(t>>5|t>>8)
-  { { 1, 1, 7, 8, 19, 15, 0 }, { 0 } },                    // t&t>>8
-  { { 1, 7, 9, 19, 0 }, { 0 } },                           // t>>9
-  { { 1, 7, 11, 19, 0 }, { 0 } } };                        // t>>11
-volatile uint8_t bb_cur[4] = { 0, 0, 0, 0 };
+#define BB_MAXC 32
+volatile uint8_t bb_prog[2][64] = { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } };   // t*(t>>5|t>>8)
+volatile uint8_t bb_cpos[2][BB_MAXC] = { { 10, 4, 2, 9, 8, 6 }, { 0 } };                // * >> 5 | >> 8
+volatile uint8_t bb_ncell[2] = { 6, 0 };
+volatile uint8_t bb_pend[BB_MAXC];          // the cells of the formula on its way ("J 1", then "J 0" flips)
+volatile uint8_t bb_npend = 0;
+volatile uint8_t bb_cur = 0;
 volatile uint32_t bb_inc = 11889;          // t per sample, Q16 (8 kHz)
 volatile int32_t bb_morph = 0, bb_xor = 0; // Q8
 volatile int32_t bb_v[4] = { 64, 128, 32, 16 };
 volatile int32_t bb_level = 180;           // Q8
-volatile int bb_pair = 0;                  // which two this Cafe sounds: 0 = 1 & 2, 1 = 3 & 4
-volatile int bb_bit = 8, bb_logic = 0;     // BEAT: the bit of each formula, how they collide
+volatile int bb_bit = 8;                   // BEAT: the bit of the grown formula
 volatile uint32_t bb_cinc = 0;             // CLICK pitch (Q32 per sample)
 volatile int32_t bb_cdec = 65000;          // CLICK decay (Q16 per sample)
-volatile bool bb_restart = false, bb_reset = true;
+volatile bool bb_restart = false, bb_reset = true, bb_reseed = true;
 volatile int bb_gate = 0;
-volatile int32_t bb_cross = 0;             // CROSS: each formula's numbers bent by the next one's output (Q12: ±16 at the top)
-volatile int bb_drift = 6;                 // DRIFT: the bend is taken every 2^bb_drift steps of t (0 = every step)
-volatile int32_t bb_coll = 0;              // COLLIDE: a hit kicks the other formula's t this far (x its value)
-volatile int bb_crash = 0;                 // CRASH: this many low bits of the other pair break into the sound
+volatile int bb_rule = 30;                 // RULE (Wolfram)
+volatile int bb_seedd = 0;                 // SEED: 0 = one cell in the middle, else the density of a fixed random row
+volatile int bb_gsh = 10;                  // STEP: a generation every 2^bb_gsh steps of t
+volatile int bb_depth = 5;                 // DEPTH: how far a live number moves
+volatile int bb_ops = 77;                  // OPS: how many operator cells may turn (0..256)
 volatile bool bb_slow = false;             // SLOW: t at 1/32
-volatile int bb_fz = 0;                    // FREEZE: 0 off · 1 loop · 2 CLOCK (see fz_tick)
+volatile bool bb_frz = false;              // FREEZE: t loops the last beat
+static uint8_t bb_live[64];                // the grown formula
+static uint32_t bb_ca = 0;                 // the automaton's row (bit i = cell i)
 
-static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t, int32_t bend) {
+static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   uint32_t st[16];
   int sp = 0;
   for (int pc = 0; pc < 61;) {
@@ -2113,12 +2105,8 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t, int32_t bend) {
     if (op == 1) { if (sp < 16) st[sp++] = t; }
     else if (op >= 2 && op <= 5) { if (sp < 16) st[sp++] = (uint32_t)bb_v[op - 2]; }
     else if (op == 6) { if (sp < 16) st[sp++] = (uint32_t)(pc_emod + 128); }
-    else if (op == 7 || op == 8) {                           // a number: bent by CROSS (never to 0 if it was not 0)
-      int32_t n = op == 7 ? pr[pc] : (pr[pc] | (pr[pc + 1] << 8));
-      pc += op == 7 ? 1 : 2;
-      if (bend) { int32_t x = n + bend; if (x < 1) x = n ? 1 : 0; if (x > 65535) x = 65535; n = x; }
-      if (sp < 16) st[sp++] = (uint32_t)n;
-    }
+    else if (op == 7) { if (sp < 16) st[sp++] = pr[pc]; pc++; }
+    else if (op == 8) { if (sp < 16) st[sp++] = pr[pc] | (pr[pc + 1] << 8); pc += 2; }
     else if (op == 20) { if (sp) st[sp - 1] = ~st[sp - 1]; }
     else if (op == 21) { if (sp) st[sp - 1] = 0u - st[sp - 1]; }
     else {
@@ -2146,55 +2134,87 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t, int32_t bend) {
   return sp ? st[sp - 1] : 0;
 }
 
-static int32_t __attribute__((noinline)) bb_tick(int32_t *rout) {
-  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0, hc = 0;
-  static uint32_t toff[4] = { 0, 0, 0, 0 };   // COLLIDE: each formula's own t, kicked away by hits
-  static int32_t bend[4] = { 0, 0, 0, 0 };    // CROSS: how far its numbers are bent now
-  static int bprev[4] = { 0, 0, 0, 0 };
-  static int32_t out = 0, dc = 0, cenv = 0;
-  static int beat = 0, ylit = 0;
-  if (bb_reset) {
-    bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; beat = 0;
-    for (int k = 0; k < 4; k++) { toff[k] = 0; bend[k] = 0; bprev[k] = 0; }
+// the automaton (the phone runs the same one for its picture: keep the two alike)
+static void bb_seed_ca(int n) {
+  uint32_t c = 0, st = 12345;
+  if (n <= 0) { bb_ca = 0; return; }
+  if (bb_seedd > 0)
+    for (int i = 0; i < n; i++) { st = st * 1103515245u + 12345u; if (((st >> 16) & 255) < (uint32_t)bb_seedd) c |= 1u << i; }
+  if (!c) c = 1u << (n / 2);
+  bb_ca = c;
+}
+static void bb_step_ca(int n) {
+  if (n <= 0) return;
+  uint32_t c = bb_ca, nc = 0;
+  for (int i = 0; i < n; i++) {
+    int l = (c >> ((i + n - 1) % n)) & 1, m = (c >> i) & 1, r = (c >> ((i + 1) % n)) & 1;
+    nc |= (uint32_t)((bb_rule >> ((l << 2) | (m << 1) | r)) & 1) << i;
   }
-  if (bb_restart) { bb_restart = false; frac = 0; t = 0; for (int k = 0; k < 4; k++) toff[k] = 0; }
+  if (nc) bb_ca = nc; else bb_seed_ca(n);                  // (died out: back to the seed)
+}
+static void bb_grow(const volatile uint8_t *pr, const volatile uint8_t *cp, int n) {
+  static const uint8_t ops[8] = { 10, 11, 12, 15, 16, 17, 18, 19 };   // + - * & | ^ << >>
+  for (int i = 0; i < 64; i++) bb_live[i] = pr[i];
+  for (int i = 0; i < n; i++) {
+    if (!((bb_ca >> i) & 1)) continue;
+    int l = (bb_ca >> ((i + n - 1) % n)) & 1, r = (bb_ca >> ((i + 1) % n)) & 1;
+    int p = cp[i];
+    if (p > 60) continue;
+    uint8_t op = pr[p];
+    if (op == 7 || op == 8) {
+      int32_t v = op == 7 ? pr[p + 1] : (pr[p + 1] | (pr[p + 2] << 8));
+      int32_t d = bb_depth * (1 + l + r);
+      if (r > l) d = -d;
+      int32_t x = v + d;
+      if (x < 1) x = v ? 1 : 0;
+      if (op == 7) { if (x > 255) x = 255; bb_live[p + 1] = (uint8_t)x; }
+      else { if (x > 65535) x = 65535; bb_live[p + 1] = (uint8_t)(x & 255); bb_live[p + 2] = (uint8_t)(x >> 8); }
+    } else if (((i * 37 + 11) & 255) < bb_ops) {
+      int k = 0;
+      while (k < 8 && ops[k] != op) k++;
+      if (k < 8) bb_live[p] = ops[(k + 1 + l + 2 * r) & 7];
+    }
+  }
+}
+
+static int32_t __attribute__((noinline)) bb_tick(int32_t *rout) {
+  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0, gc = 0, tf = 0, fl = 0;
+  static int32_t out = 0, dc = 0, cenv = 0;
+  static int beat = 0, ylit = 0, seen = -1;
+  static bool was = false;
+  int cur = bb_cur, n = bb_ncell[cur];
+  bool regrow = false;
+  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; beat = 0; bb_reseed = true; }
+  if (bb_restart) { bb_restart = false; frac = 0; t = 0; bb_reseed = true; }
+  if (cur != seen || bb_reseed) { seen = cur; bb_reseed = false; bb_seed_ca(n); gc = 0; regrow = true; }
   frac += bb_slow ? (bb_inc >> 5) : bb_inc;
-  t += frac >> 16;
+  uint32_t adv = frac >> 16;
   frac &= 0xFFFF;
+  // FREEZE: t no longer moves on — it goes round the last beat (two periods of BIT) — and the automaton waits
+  if (bb_frz) {
+    if (!was) { was = true; fl = 2u << bb_bit; tf = t - fl; }
+    t += adv;
+    if (t - tf >= fl) t = tf + ((t - tf) % fl);
+  } else {
+    was = false;
+    t += adv;
+    if (adv && n > 0 && (gc += adv) >= (1u << bb_gsh)) { gc = 0; bb_step_ca(n); regrow = true; }
+  }
+  if (regrow) bb_grow(bb_prog[cur], bb_cpos[cur], n);
   if (t != lastt) {
     lastt = t;
-    uint32_t v[4];
-    for (int k = 0; k < 4; k++) v[k] = bb_run(bb_prog[k][bb_cur[k]], t + toff[k], bend[k]);
-    // CROSS: every formula's numbers are bent by the next one's output (a ring 1 <- 2 <- 3 <- 4 <- 1), so they
-    // push each other around; DRIFT = how often the bend is taken (every step = boiling, rarely = jumps)
-    if (bb_cross) {
-      if (((++hc) & ((1u << bb_drift) - 1)) == 0)
-        for (int k = 0; k < 4; k++) bend[k] = (((int32_t)(v[(k + 1) & 3] & 255) - 128) * bb_cross) >> 12;
-    } else for (int k = 0; k < 4; k++) bend[k] = 0;
-    // the beat: one bit of each of the four, collided (LOGIC)
-    int b[4], g = 0, n = 0;
-    for (int k = 0; k < 4; k++) { b[k] = (v[k] >> bb_bit) & 1; n += b[k]; g = k == 0 ? b[k] : (bb_logic == 0 ? (g | b[k]) : (bb_logic == 1 ? (g ^ b[k]) : (g & b[k]))); }
-    if (bb_logic == 3) g = n >= 2;
-    // COLLIDE (Rollz): a pulse rising while its neighbour's is up = a hit; the neighbour's t is knocked away
-    bool hit = false;
-    if (bb_coll)
-      for (int k = 0; k < 4; k++)
-        if (b[k] && !bprev[k] && b[(k + 1) & 3]) { toff[(k + 1) & 3] += ((v[k] & 255) + 1) * (uint32_t)bb_coll; hit = true; }
-    for (int k = 0; k < 4; k++) bprev[k] = b[k];
-    if ((g && !beat) || hit) { cenv = 4096 << 8; cph = 0; ylit = 220; }   // a rising edge or a hit: click
+    uint32_t v0 = bb_run(bb_prog[cur], t), v1 = bb_run(bb_live, t);
+    int g = (v1 >> bb_bit) & 1;
+    if (g && !beat) { cenv = 4096 << 8; cph = 0; ylit = 220; }   // a rising edge: click
     beat = g;
-    // the sound: one pair, MORPH / XOR; CRASH = the other pair's low bits break into it
-    int p = bb_pair ? 2 : 0;
-    int32_t f1 = (int32_t)(v[p] & 255), f2 = (int32_t)(v[p + 1] & 255);
+    int32_t f1 = (int32_t)(v0 & 255), f2 = (int32_t)(v1 & 255);
     int32_t m = (f1 * (256 - bb_morph) + f2 * bb_morph) >> 8;
     m += (((f1 ^ f2) - m) * bb_xor) >> 8;
-    if (bb_crash) m ^= (int32_t)((v[p ^ 2] ^ v[(p ^ 2) + 1]) & ((1u << bb_crash) - 1));
     out = ((m & 255) - 128) * 12;
   }
   dc += (out - dc) >> 10;
   int32_t y = ((out - dc) * bb_level) >> 8;
   if (y > 2047) y = 2047; if (y < -2047) y = -2047;
-  y = fz_tick(y, bb_fz, true);                               // FREEZE / CLOCK: the held round instead of the live one
   // the click (ASH): a short falling blip — a triangle whose pitch drops as it dies away
   int32_t ce = cenv >> 8;
   cph += bb_cinc + (uint32_t)(((uint64_t)bb_cinc * ce) >> 11);
@@ -2358,7 +2378,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (smode) {                          // SIDRAX / WAVE: ON while its sound is being recorded, OFF on FREEZE
+  } else if (smode) {                          // SIDRAX / WAVE: ON (its sound is being recorded), OFF on FREEZE
+    lamp = !wv_frz;
     if (!wv_frz) {
       LAMP_ON;
     } else {

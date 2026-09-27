@@ -43,7 +43,7 @@ struct PresetManagerView: View {
                             ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
                             ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-                            ChipButton(title: rig.wvFreeze == 2 ? "CLOCK" : "FREEZE", filled: rig.wvFreeze > 0) { d.setWvFreeze((rig.wvFreeze + 1) % 3) }
+                            ChipButton(title: "FREEZE", filled: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
                             ChipButton(title: "FILE", filled: false) { wvPick = true }
                             Text(rig.wvNote)
                                 .font(.hud(8, .semibold))
