@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.68"
+#define FW_VERSION "3.69"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -83,10 +83,11 @@ static char ble_name[16] = "Cafe";
 RTC_DATA_ATTR static char ble_rb[1024];            // bytes written by the BLE task (core 0), read in loop() (RTC memory: the heap is tight)
 static volatile uint16_t ble_wh = 0, ble_rh = 0;
 static volatile bool ota_active = false;         // a firmware update is running (see below)
+static volatile uint32_t ble_last_rx = 0;        // millis() of the last bytes from the phone (a silent link is dropped)
 
 class CafeServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *s, NimBLEConnInfo &ci) override {
-    ble_mtu = 23; ble_conn = true; pc_link = true; ble_itvl = ci.getConnInterval();
+    ble_mtu = 23; ble_conn = true; pc_link = true; ble_itvl = ci.getConnInterval(); ble_last_rx = millis();
     s->updateConnParams(ci.getConnHandle(), 12, 12, 0, 300);   // ask for 15 ms between radio exchanges (less lag)
     Serial.printf("[ble] connected, interval %u x1.25ms. heap %u largest %u\n", (unsigned)ble_itvl, (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
@@ -102,6 +103,7 @@ class CafeRxCB : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic *c, NimBLEConnInfo &ci) override {
     NimBLEAttValue v = c->getValue();
     const uint8_t *d = v.data();
+    ble_last_rx = millis();
     for (size_t i = 0; i < v.size(); i++) {
       uint16_t n = (ble_wh + 1) & 1023;
       if (n == ble_rh) break;                      // full: drop the rest
@@ -158,7 +160,33 @@ void ble_begin() {
   sr.setName(ble_name);                            // the name goes in the scan response (no room in the ad)
   adv->setAdvertisementData(ad);
   adv->setScanResponseData(sr);
+  adv->setMinInterval(32);                         // 20 .. 40 ms: found quickly when the phone scans
+  adv->setMaxInterval(64);
+  NimBLEDevice::setPower(9);                       // the strongest the radio has (+9 dBm)
   ble_ok = adv->start();
+}
+// keep the Cafe findable (k.odk): once a second, if nobody is connected and it stopped advertising (it can miss the
+// restart after a dropped link), advertise again; a link the phone no longer talks on (20 s silent — the app polls
+// every 0.3 s) is dropped, so a phone that lost it can find the Cafe again without a restart
+void ble_watch() {
+  static uint32_t last = 0;
+  uint32_t ms = millis();
+  if (!ble_ok || ota_active || ms - last < 1000) return;
+  last = ms;
+  NimBLEServer *srv = NimBLEDevice::getServer();
+  if (!srv) return;
+  int n = srv->getConnectedCount();
+  if (n == 0) {
+    if (ble_conn) { ble_conn = false; pc_link = false; }
+    if (!NimBLEDevice::getAdvertising()->isAdvertising()) {
+      bool ok = NimBLEDevice::startAdvertising();
+      Serial.printf("[ble] advertising again: %s\n", ok ? "ok" : "FAILED");
+    }
+  } else if (ms - ble_last_rx > 20000) {
+    Serial.println("[ble] the phone went silent: dropping the link");
+    ble_last_rx = ms;
+    srv->disconnect(srv->getPeerInfo(0));
+  }
 }
 void ble_line(const char *s) {                     // one text line -> notifications of (MTU-3) bytes
   RTC_DATA_ATTR static char tmp[320];                            // (the longest reply is ~130 characters)
@@ -832,6 +860,7 @@ void pc_line(char *s) {
 }
 void pc_service() {                       // called from loop(): lines that arrived over BLE
   RTC_DATA_ATTR static char bl[300]; static int bn = 0;            // long enough for a W line (128 samples)
+  ble_watch();
   while (ble_rh != ble_wh) {
     char c = ble_rb[ble_rh]; ble_rh = (ble_rh + 1) & 1023;
     if (c == '\n' || c == '\r') { if (bn) { bl[bn] = 0; pc_line(bl); bn = 0; } }
