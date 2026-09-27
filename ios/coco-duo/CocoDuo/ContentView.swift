@@ -962,8 +962,8 @@ private struct HudBar: View {
     @ObservedObject var camera: CameraRig
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
-    @Binding var makeSlot: Int?
     @Binding var showPresets: Bool
+    @Binding var makeSlot: Int?
 
     private var top: Bool { unit.slot == 0 }
 
