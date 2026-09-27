@@ -1105,9 +1105,9 @@ private struct HudBar: View {
             }
         case .sidrax:
             switch n {
-            case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
-            case 1: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
-            case 2: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape
+            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
+            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
+            case 2: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
             default: key("dice") { d.sxDice() }
             }
         case .noise:
