@@ -4,19 +4,18 @@
 
 import SwiftUI
 
-/// CLOUD's MAKE key: STRETCH / CHORDS onto the tape of the Cafes on CLOUD
+/// CLOUD's MAKE key: STRETCH (1 a file · 2 how far · 3 go) and CHORDS (key · set · go), onto the tape of the Cafes on CLOUD
 struct MakeSheet: View {
     let d: Director
     var body: some View {
-        PanelScaffold(title: "MAKE") {
-            PanelCard(title: "MAKE") { MakeRows(d: d) }
-        }
+        PanelScaffold(title: "MAKE") { MakeRows(d: d) }
     }
 }
 
 struct MakeRows: View {
     let d: Director
     var pick: Int? = nil                   // 0 A · 1 B · 2 both · nil = the Cafes the pads go to
+    @State private var file: URL? = nil    // STRETCH: the file chosen
     @State private var stretchI = 1
     @State private var keyI = 0
     @State private var setI = 0
@@ -24,36 +23,62 @@ struct MakeRows: View {
     @State private var busy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PanelMetrics.chipSpacing) {
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(ToneMaker.stretches.indices, id: \.self) { i in
-                    ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
+        VStack(alignment: .leading, spacing: PanelMetrics.chipSpacing * 2) {
+            PanelCard(title: "STRETCH") {
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    Step(n: 1)
+                    ChipButton(title: "FILE", filled: file == nil) { picking = true }
+                        .frame(width: 70)
+                    Text(file?.deletingPathExtension().lastPathComponent ?? "—")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(file == nil ? PastelTheme.textSecondary : PastelTheme.hudBlack)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ChipButton(title: busy ? "…" : "STRETCH", filled: ready) { if ready { picking = true } }
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    Step(n: 2)
+                    ForEach(ToneMaker.stretches.indices, id: \.self) { i in
+                        ChipButton(title: "×\(Int(ToneMaker.stretches[i]))", filled: stretchI == i) { stretchI = i }
+                    }
+                }
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    Step(n: 3)
+                    BigButton(title: "STRETCH → " + targetName, busy: busy, enabled: ready && file != nil) {
+                        if let f = file { stretchFile(f) }
+                    }
+                }
             }
-            HStack(spacing: 2) {
-                ForEach(0..<12, id: \.self) { k in
-                    ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
+            PanelCard(title: "CHORDS") {
+                HStack(spacing: 2) {
+                    ForEach(0..<12, id: \.self) { k in
+                        ChipButton(title: ToneMaker.keys[k], filled: keyI == k) { keyI = k }
+                    }
                 }
-            }
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(ToneMaker.sets.indices, id: \.self) { i in
-                    ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    ForEach(ToneMaker.sets.indices, id: \.self) { i in
+                        ChipButton(title: ToneMaker.sets[i], filled: setI == i) { setI = i }
+                    }
                 }
-                ChipButton(title: busy ? "…" : "CHORDS", filled: ready) { if ready { makeChords() } }
+                BigButton(title: "CHORDS → " + targetName, busy: busy, enabled: ready) { makeChords() }
             }
             ForEach(units, id: \.slot) { u in ProgressLine(unit: u) }
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { stretchFile($0) }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { r in
+            if case .success(let url) = r { file = url }
+        }
     }
 
+    /// "A", "B", "A + B" (or — when no Cafe is on CLOUD)
+    private var targetName: String {
+        let u = units.map { $0.slot == 0 ? "A" : "B" }
+        return u.isEmpty ? "—" : u.joined(separator: " + ")
+    }
     private var units: [CafeUnit] {
         guard let p = pick else { return d.ctxUnits() }
         return p == 2 ? d.units : [d.units[p]]
     }
     private var ready: Bool { !busy && !units.isEmpty && units.allSatisfy { $0.isConnected && $0.loadProgress == nil } }
-    private func stretchFile(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else { return }
+    private func stretchFile(_ url: URL) {
         let s = ToneMaker.stretches[stretchI]
         let targets = units
         busy = true
@@ -117,6 +142,14 @@ private struct ProgressLine: View {
                 .lineLimit(1)
                 .frame(width: 110, alignment: .trailing)
         }
+    }
+}
+
+/// 1 · 2 · 3: the order of STRETCH
+private struct Step: View {
+    let n: Int
+    var body: some View {
+        HudTag(text: "\(n)", size: 9).frame(width: 16)
     }
 }
 
