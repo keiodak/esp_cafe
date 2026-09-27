@@ -1097,10 +1097,10 @@ private struct HudBar: View {
             }
         case .wave:
             switch n {
-            case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            case 1: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
-            case 2: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                 // an audio file -> the table
-            default: blank
+            case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
+            case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+            case 2: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
+            default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
         case .sidrax:
             switch n {
