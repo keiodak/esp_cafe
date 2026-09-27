@@ -2373,7 +2373,7 @@ void IRAM_ATTR harmony() {
   // the voices: VOICE 1 plays the last cycle, VOICE 2 the one before
   int32_t v[2];
   int32_t gc = t < 64 ? t : (S - 1 - t < 64 ? S - 1 - t : 64);  // fade at the cycle's edges
-  static int32_t chs = 1000 << 8;                               // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
+  static int32_t chs = 0;                                       // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
   chs += (((int32_t)ch_v[6] << 8) - chs) >> 10;
   int32_t mixc = ((chs >> 8) * 256) / 1000;
   if (mixc < 0) mixc = 0;
@@ -3099,7 +3099,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   hpl += (lpl - hpl) >> 8;
   hpr += (lpr - hpr) >> 8;                                                      // ...but always the DC blocker: the input's offset
                                                                                 // must not pile up in the feedback (it did: noise)
-  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? (td_fb * 9) >> 4 : td_fb);  // ARP_DELAY: fewer repeats, each one clear
+  int32_t pp = td_pp, fb = hold ? 256 : (td_clean ? 0 : td_fb);  // ARP_DELAY: one repeat each side — the Cafe's WET knob does the feedback
   int32_t xl = hold ? vl : lpl - hpl, xr = hold ? vr : lpr - hpr;
   int32_t il = hold ? 0 : in, ir = hold ? 0 : (td_clean ? in : ((in * (256 - pp)) >> 8));  // ARP_DELAY: a mono input fills both sides
   int32_t wl = il + ((((xl * (256 - pp) + xr * pp) >> 8) * fb) >> 8);

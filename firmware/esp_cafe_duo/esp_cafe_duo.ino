@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.53"
+#define FW_VERSION "3.54"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -482,7 +482,7 @@ void sx_update() {
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
 //  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
 //  timing: 16 steps of the cycle
-static const int16_t hd_default[14] = {273, 0, 727, 267, 600, 150, 700, 1000, 0, 1000, 0, 300, 0, 0};
+static const int16_t hd_default[14] = {273, 0, 727, 267, 600, 0, 700, 1000, 0, 1000, 0, 0, 0, 0};   // (no feedback, no EARTH wobble: dry)
 static const float hd_cyc[6] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
 void hd_update() {
   float hz = clock_hz(), p[14];
@@ -495,7 +495,7 @@ void hd_update() {
   float S = beat * hd_cyc[(int)(p[4] * 5.0f + 0.5f)];
   while (S > HD_STRIDE - 2) S *= 0.5f;
   hd_S = (int32_t)S;
-  hd_fb = (int32_t)(p[5] * 200.0f);
+  hd_fb = 0;   // no feedback here: the Cafe's own WET knob already feeds back (two loops = a dense, reverb-like haze)
   hd_lvl = (int32_t)(p[6] * 1.5f * 256.0f);
   hd_dry = (int32_t)(p[7] * 256.0f);
   hd_keep = (int32_t)(p[8] * 230.0f);

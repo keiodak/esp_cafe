@@ -78,7 +78,7 @@ enum Preset {
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
-    static let charDefaults: [Double] = [0, 1, 0, 0, 0.714, 0, 1, 0, 0, 0, 0]
+    static let charDefaults: [Double] = [0, 1, 0, 0, 0.714, 0, 0, 0, 0, 0, 0]
     /// our own presets (0–10): the ones with CHAR values and phone pads
     static let count = 11
     static let ble = 2
@@ -105,7 +105,7 @@ enum PadSet { case grain, coco, delay, noise, sidrax, wave, harmony, multi, arp,
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
     static let titles = ["ROOT · CHORD", "PATTERN · OCTAVES", "RATE · SWING", "GATE · DECAY",
-                         "TIME · FEEDBACK", "PING-PONG · SPREAD", "—", "TAP"]      // (a clean digital delay: no tone / wow)
+                         "TIME · —", "PING-PONG · SPREAD", "—", "TAP"]      // (a clean digital delay: no tone / wow)
     static let starts: [(Double, Double)] = [(0.5, 0.0), (0.0, 0.3), (0.55, 0.0), (0.5, 0.35),
                                              (0.625, 0.55), (1.0, 0.5), (0.8, 0.3), (0.9, 1.0)]
     static func root(_ x: Double) -> Int { 36 + min(36, Int(x * 37)) }        // C2 … C5 (with OCTAVES up to C9)
@@ -204,15 +204,15 @@ enum DlPad: Int, CaseIterable {
 /// HARMONY (rpls-like replay): per Cafe, VOICE 1 / VOICE 2 = interval (X) and timing in the cycle (Y)
 enum HdPad: Int, CaseIterable {
     case voice1, voice2, cycle, tape
-    var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · FEEDBACK", "TAP"][rawValue] }
-    var start: (Double, Double) { [(0.273, 0.0), (0.727, 0.267), (0.6, 0.15), (0.0, 1.0)][rawValue] }
-    var ids: (Int, Int) { [(0, 1), (2, 3), (4, 5), (8, 9)][rawValue] }
+    var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · TONE", "TAP"][rawValue] }
+    var start: (Double, Double) { [(0.273, 0.0), (0.727, 0.267), (0.6, 1.0), (0.0, 1.0)][rawValue] }
+    var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (8, 9)][rawValue] }       // (no FEEDBACK: the Cafe's WET knob does it)
     static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
     static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]
     static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
         switch k {
         case 0, 1: return "\(intervals[min(11, Int(x * 11 + 0.5))]) · \(Int(y * 15 + 0.5))/16"
-        case 2: return "\(cycles[min(5, Int(x * 5 + 0.5))]) BEAT · FB \(Int(y * 100))%"
+        case 2: return "\(cycles[min(5, Int(x * 5 + 0.5))]) BEAT · " + (y >= 0.98 ? "OPEN" : "TONE \(Int(y * 100))%")
         default: return "KEEP \(Int(x * 90))%"
         }
     }

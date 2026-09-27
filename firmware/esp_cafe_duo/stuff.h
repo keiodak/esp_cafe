@@ -197,7 +197,7 @@ inline void write_ash_cleaner(int raw_val) {
 // 7 harmony CLEAN <-> GRAIN · 8 rungler GRIT · 9 selfread GRIT · 10 MULTI GRIT · 11 ARP_DELAY GRIT
 // GRIT = sample-and-hold + fewer bits on main out and ASH (0 = untouched)
 extern int preset;
-volatile int16_t ch_v[11] = {0, 1000, 0, 0, 714, 0, 1000, 0, 0, 0, 0};
+volatile int16_t ch_v[11] = {0, 1000, 0, 0, 714, 0, 0, 0, 0, 0, 0};   // (HARMONY starts CLEAN)
 static const uint8_t ch_grit[11] = {1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1};
 static inline int ch_now() { return (preset >= 0 && preset < 11) ? ch_v[preset] : 0; }
 static int __attribute__((noinline)) grit_do(int p, int *cnt, int *held) {
