@@ -672,6 +672,7 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
+        .sheet(isPresented: $rig.showMake) { MakeSheet(d: d) }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -1100,13 +1101,13 @@ private struct HudBar: View {
             case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
             case 1: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
             case 2: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                 // an audio file -> the table
-            default: blank
+            default: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape
             }
         case .sidrax:
             switch n {
             case 0: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
             case 1: textKey("FREEZE", on: rig.sxFreeze > 0) { d.setSxFreeze(rig.sxFreeze > 0 ? 0 : 1) }
-            case 2: blank
+            case 2: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape
             default: key("dice") { d.sxDice() }
             }
         case .noise:

@@ -4,6 +4,16 @@
 
 import SwiftUI
 
+/// the MAKE key's sheet
+struct MakeSheet: View {
+    let d: Director
+    var body: some View {
+        PanelScaffold(title: "MAKE") {
+            PanelCard(title: "MAKE") { MakeRows(d: d) }
+        }
+    }
+}
+
 struct MakeRows: View {
     let d: Director
     @State private var stretchI = 1
