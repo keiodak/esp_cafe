@@ -29,6 +29,7 @@ final class Director: ObservableObject {
     let hub = CafeHub()
     let rig = Rig()
     let grain = GrainMode()
+    let cloud = GrainMode(starts: CloudPad.starts)      // CLOUD: grains over what is on the tape
     let camera = CameraRig()
     let arp = ArpEngine()
     var units: [CafeUnit] { hub.units }
@@ -88,6 +89,7 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
+        case .cloud: return cloud.axes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -117,6 +119,7 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
+            case 6: cloud.allCommands(slot: s).forEach(u.send)
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -207,6 +210,8 @@ final class Director: ObservableObject {
             let resync = i == GrainPad.stereo.rawValue && grain.separationReturned()
             for u in ctxUnits() { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
             if resync { sync() }
+        case .cloud:
+            for u in ctxUnits() { cloud.commands(pad: i, slot: u.slot).forEach(u.send) }
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -637,12 +642,12 @@ private struct MainScreen: View {
 
     var body: some View {
         VStack(spacing: 7) {
-            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera,
+            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, cloud: d.cloud, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(height: barHeight)
             pads
                 .zIndex(1)
-            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
+            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, cloud: d.cloud, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(height: barHeight)
         }
@@ -672,6 +677,7 @@ private struct MainScreen: View {
         .defersSystemGestures(on: .all)
         .sheet(isPresented: $showCafes) { CafesView(d: d, hub: hub, camera: camera) }
         .sheet(isPresented: $showWave) { WaveView(hub: hub) }
+        .sheet(isPresented: $rig.showMake) { MakeSheet(d: d) }
         .sheet(isPresented: $showPresets) {
             PresetManagerView(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
         }
@@ -712,6 +718,7 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
+        case .cloud: return (cloud.axes[i], CloudPad.title(i))
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -955,6 +962,7 @@ private struct HudBar: View {
     @ObservedObject var unit: CafeUnit
     @ObservedObject var rig: Rig
     @ObservedObject var grain: GrainMode
+    @ObservedObject var cloud: GrainMode
     @ObservedObject var camera: CameraRig
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
@@ -1094,6 +1102,13 @@ private struct HudBar: View {
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
             case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t round the last two steps
             default: textKey("SLOW", on: rig.bbSlow) { d.setBbSlow(!rig.bbSlow) }          // t at 1/32
+            }
+        case .cloud:
+            switch n {
+            case 0: textKey("MAKE", on: rig.showMake) { rig.showMake = true }               // STRETCH / CHORDS onto the tape
+            case 1: key("snowflake", on: cloud.freeze) { cloud.setFreeze(!cloud.freeze, d.ctxUnits()) }
+            case 2: key("metronome", on: cloud.perc) { cloud.setPerc(!cloud.perc, d.ctxUnits()) }
+            default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .wave:
             switch n {
