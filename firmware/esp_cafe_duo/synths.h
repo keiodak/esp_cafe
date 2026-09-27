@@ -1835,6 +1835,11 @@ static inline int32_t wv_vec(uint32_t ph, int32_t vx, int32_t vy) {    // the fo
   return ab + (((cd - ab) * vy) >> 12);
 }
 volatile uint32_t sx_inc[4] = {0, 0, 0, 0};   // each plate's exact phase step (sx_update)
+// the pitch is counted on the CPU's crystal, not on the samples: the Cafe's sample clock is an RC oscillator (the SPEED
+// knob) that wanders — every sample the plates move on by the time that really passed (CPU cycles since the last)
+volatile uint32_t sx_incc[4] = {0, 0, 0, 0};  // phase per CPU cycle, Q8
+const double sx_cpu_hz = 240000000.0;
+volatile uint32_t sx_cyc = 7500;              // the cycles a sample should take (for the first one, and after a gap)
 volatile int sx_role = 2;   // SIDRAX across two Cafes: 0 = A, 1 = B, 2 = alone (both halves) — "S 9 <n>"
 volatile bool grit_off = false;   // SIDRAX: CHAR's grit is bypassed (pure) while this preset load lasts
 volatile int32_t sx_relk[4] = {5, 5, 5, 5};  // each plate's release: its Y (up = longer), set with the plate
@@ -1881,12 +1886,18 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
     vx += (s1 * wv_orb) >> 12; vy += (s2 * wv_orb) >> 12;
     if (vx < 0) vx = 0; if (vx > 4096) vx = 4096; if (vy < 0) vy = 0; if (vy > 4096) vy = 4096;
   }
+  // the time since the last sample, in CPU cycles (a gap — another mode, a stall — counts as one ordinary sample)
+  static uint32_t lastc = 0;
+  uint32_t cc; asm volatile("rsr %0, ccount" : "=a"(cc));
+  uint32_t dcy = cc - lastc;
+  lastc = cc;
+  if (dcy > sx_cyc * 4 || dcy < sx_cyc / 4) dcy = sx_cyc;
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
     if (a > 0) touched = 1;
     // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
     // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
-    uint32_t inc = sx_inc[k];
+    uint32_t inc = (uint32_t)(((uint64_t)sx_incc[k] * dcy) >> 8);   // (sx_inc[k] on an exact clock)
     // CHAOS: the one on the left modulates this one · SELF: this one modulates itself (triangle -> saw)
     int32_t left = out[(k + 3) & 3];                         // (its last sample, ±2048 · level)
     int32_t sf = sx_self;                                    // Q12 (the plates only tune and play: no modulation from them)
