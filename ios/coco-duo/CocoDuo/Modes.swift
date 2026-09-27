@@ -305,7 +305,10 @@ final class Rig: ObservableObject {
     /// WAVE: SCALE · KEY and CHORD · OCTAVE and the plates are SIDRAX's own; its two pads in between are its own
     let wvTop: [PadAxis] = [PadAxis((0.3, 0.4)), PadAxis((0.35, 0.55))]
     var wvAxes: [PadAxis] { [sxAxes[0], wvTop[0], wvTop[1], sxAxes[3]] + Array(sxAxes[4...7]) }
-    @Published var wvLock = 0.0, wvPitch = 0.0, wvBenjo = 0.0, wvChaos = 0.2
+    @Published var wvLock = 0.0
+    @Published var wvPitch = 0.0
+    @Published var wvBenjo = 0.0
+    @Published var wvChaos = 0.2
     @Published var wvPicking = false       // the file picker for the table
     @Published var wvNote = ""             // which file the table came from
     func wvCommands(pad i: Int) -> [String] {
