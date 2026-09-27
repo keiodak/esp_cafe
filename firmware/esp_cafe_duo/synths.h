@@ -1098,7 +1098,7 @@ volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by co
 
 /// One sample of the grain engine: returns the grains (centred on 0, filtered, level applied).
 /// wpos = the record head, frz = FREEZE (a stopped play head: all grains from the place playing when pressed), restart = back to grain 0.
-static int32_t grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
+static int32_t __attribute__((noinline)) grain_tick(uint32_t wpos, int64_t now, bool frz, bool restart) {
   static uint32_t gn = 0, anchor = 0;
   static int32_t fpos = 0;                   // FREEZE: the one place the grains are read from
   static int64_t next_t = 0, beat_t = 0;  // beat = the steady grid, next = beat + this grain's jitter
@@ -1384,7 +1384,7 @@ volatile int dl_click = 0;                   // YELLOW click length left
 volatile uint32_t dl_wpos = 0, dl_rpos = 0;  // for the status line
 
 /// one sample of the stereo delay. in = centred. Returns L, *rout = R.
-static int32_t dl_tick(int32_t in, int32_t *rout, bool hold) {
+static int32_t __attribute__((noinline)) dl_tick(int32_t in, int32_t *rout, bool hold) {
   static uint32_t w = 0, fill = 0, bc = 0, pw = 0;
   static int32_t cl = 16000 << 8, cr = 16000 << 8;  // current times (they glide)
   static int32_t lpl = 0, lpr = 0;
@@ -1631,7 +1631,7 @@ static int32_t nz_osc(int32_t ring, int32_t *side) {
   return (out * olvl) >> 8;
 }
 
-static int32_t nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
+static int32_t __attribute__((noinline)) nz_tick(int32_t in, int32_t *rout, bool onebit, bool freeze) {
   static uint32_t w = 0, sph = 0, gph = 0;
   static int32_t fx_x = 1234, tgt = 0;
   static int32_t steps = 0, val = 0, env = 0;
@@ -1818,7 +1818,7 @@ static inline int32_t IRAM_ATTR sx_snap(int32_t o) {           // o in 1/256 oct
   return oct * 256 + best;
 }
 
-static int32_t sx_tick(int32_t *rout) {
+static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
   static uint32_t ph[4] = {0, 0x40000000u, 0x80000000u, 0xC0000000u};
   static int32_t env[4] = {0, 0, 0, 0}, out[4] = {0, 0, 0, 0}, pit[4] = {0, 0, 0, 0}, pan[4] = {0, 0, 0, 0};
   static bool held[4] = {false, false, false, false};
@@ -1931,7 +1931,7 @@ volatile int32_t bn_relk = 300;                         // PLAY: release (Q16 pe
 volatile bool bn_reset = true;
 volatile int bn_gate = 0;
 
-static int32_t bn_tick(int32_t *rout, bool hold) {
+static int32_t __attribute__((noinline)) bn_tick(int32_t *rout, bool hold) {
   static uint32_t p1 = 0, p2 = 0x40000000u, rnd = 0x2545F491u;
   static uint8_t reg = 0xA5;
   static int32_t la = 0, ba = 0, t1 = 0, t2 = 0;
@@ -2037,7 +2037,7 @@ volatile int co_pulse = 0;
 volatile uint32_t co_ppos = 0;
 #define CO_XF 256
 
-static int32_t co_tick(uint32_t wpos, int32_t in, int32_t rg, bool back) {
+static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int32_t rg, bool back) {
   static int32_t rel = 0;            // position inside the loop, Q12
   static int32_t tail = -1, xf = 0;  // the old head (absolute Q12) while a crossfade runs
   static int32_t ef = 0;             // EARTH, smoothed, Q8
@@ -3158,7 +3158,7 @@ static inline int32_t IRAM_ATTR h_readq(uint32_t posq) {
 // ---- 1 ECHO: a clear stereo delay, L line + R line, the repeats ping-pong between them ----
 // td_clean (ARP_DELAY): a light digital stereo delay — no wow / EARTH on the time, no tone filters, gentler feedback
 volatile bool td_clean = false;
-static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
+static int32_t __attribute__((noinline)) td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, fill = 0;
   static int32_t ct = 16000 << 8, lpl = 0, lpr = 0, hpl = 0, hpr = 0;
   if (rs) {
@@ -3215,7 +3215,7 @@ static int32_t td_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
 }
 
 // ---- 2 SAMPLER: now and then a slice of the recent past comes back once, an octave up or an octave down ----
-static int32_t sm_tick(int32_t in, bool rs) {
+static int32_t __attribute__((noinline)) sm_tick(int32_t in, bool rs) {
   static int32_t cp = -1;
   static uint32_t csrc = 0;
   static int32_t pq[2] = { 0, 0 }, n[2] = { 0, 0 }, len[2] = { 1, 1 }, env[2] = { 0, 0 }, rate[2] = { 4096, 4096 };
@@ -3288,7 +3288,7 @@ static int32_t sm_tick(int32_t in, bool rs) {
 }
 
 // ---- 3 REVERSE: two heads read the past backwards, sin² windows half a length apart ----
-static int32_t rv_tick(int32_t in, bool rs) {
+static int32_t __attribute__((noinline)) rv_tick(int32_t in, bool rs) {
   static uint32_t anc[2] = { 0, 0 };
   static int32_t t[2] = { 0, 0 }, p[2] = { 0, 0 };
   static int32_t lp = 0;
@@ -3332,7 +3332,7 @@ static int32_t rv_tick(int32_t in, bool rs) {
 // when the next one comes (the grid gets skips and doubles), backwards / pitch on single repeats.
 // All the dice come from a score both Cafes share (the same after "Z").
 volatile bool gl_resync = false;
-static int32_t gl_tick(int32_t in, bool hold, bool rs) {
+static int32_t __attribute__((noinline)) gl_tick(int32_t in, bool hold, bool rs) {
   static uint32_t bc = 0, n = 0, sst = 0, next = 5000, tq = 0;
   static int32_t left = 0, total = 1, cur = 1, pq = 0, rate = 4096, mv = 0, held = 0, hn = 0, rr = 0;
   if (rs || gl_resync) {
@@ -3460,7 +3460,7 @@ static int32_t gl_tick(int32_t in, bool hold, bool rs) {
 }
 
 // ---- 5 FOLD + OCTAVER: an octave down (flip-flop), an octave up (rectifier), into a wave folder ----
-static int32_t fo_tick(int32_t in, bool rs) {
+static int32_t __attribute__((noinline)) fo_tick(int32_t in, bool rs) {
   static int32_t env = 0, lpd = 0, ff = 1, lp = 0;
   static bool pos = false;
   if (rs) {
@@ -3497,7 +3497,7 @@ static int32_t fo_tick(int32_t in, bool rs) {
 // ---- 6 REVERB: four combs (damped, wobbling) + two allpasses per side, on the tape (lo-fi, 12 bits) ----
 // HOWL pushes the combs' feedback past unity: they sing by themselves, held by the soft clip in the loop
 // (a DC blocker keeps them from drifting). MOD wobbles each comb's length (a slow triangle, each its own phase).
-static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
+static int32_t __attribute__((noinline)) rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t idx[8], lph = 0;
   static int32_t st[4], dc[4];
   static int32_t clr = 0, fade = 0;
@@ -3586,7 +3586,7 @@ static int32_t rb_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
 //      fed back through a damping low-pass (DECAY / DAMP) -> the input rings them like a string, and every attack in
 //      the input also plucks them with a short noise burst (PLUCK). R is detuned a little (SPREAD), a slow WOBBLE
 //      bends both. EARTH = pitch bend (up to ±50 % of the period).
-static int32_t sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
+static int32_t __attribute__((noinline)) sd_tick(int32_t in, int32_t *rout, bool hold, bool rs) {
   static uint32_t w = 0, ph = 0, fill = 0, ns = 0x1234567u;
   static int32_t lpl = 0, lpr = 0, ct = 1000 << 8, dcl = 0, dcr = 0;
   static int32_t ef = 0, es = 0, burst = 0, cool = 0;
