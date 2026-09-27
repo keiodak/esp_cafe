@@ -334,23 +334,31 @@ final class Rig: ObservableObject {
     @Published var wvFreeze = false
     func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(wvFreeze ? 1000 : 0)"] }
 
-    // BYTEBEAT (BLE mode 1): XY pads 1 2 5 6, formulas 3 4 7 8 (A's two, B's two)
+    // BYTEBEAT (BLE mode 1): settings pads 1 2 5 6, formula pads 3 4 7 8 (their X · Y are the numbers A · B in them)
     let bbAxes: [PadAxis] = BytePad.starts.map { PadAxis($0) }
-    @Published var bbFormula: [String] = (Rig.d.stringArray(forKey: "rig.bbFormula")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
-        didSet { Self.d.set(bbFormula, forKey: "rig.bbFormula") }
+    @Published var bbShape: [String] = (Rig.d.stringArray(forKey: "rig.bbShape")).flatMap { $0.count == 4 ? $0 : nil } ?? Bytebeat.defaults {
+        didSet { Self.d.set(bbShape, forKey: "rig.bbShape") }
     }
-    /// the settings for one Cafe: B runs at a ratio of A's rate and with MORPH turned the other way (the link)
+    /// SAME: both Cafes play the same (no ratio, MORPH the same way, the same pair)
+    @Published var bbSame = false
+    /// formula k as it is now (its shape with its pad's numbers)
+    func bbFormula(_ k: Int) -> String {
+        let a = bbAxes[[2, 3, 6, 7][k]]
+        return Bytebeat.fill(bbShape[k], a.x, a.y)
+    }
+    /// the settings for one Cafe. Linked (not SAME): B runs at a ratio of A's rate, MORPH turned the other way, and
+    /// B sounds formulas 3 & 4 while A sounds 1 & 2 — both hear all four for the beat
     func bbParams(slot: Int) -> [String] {
         let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5]
+        let b = slot == 1 && !bbSame
         var rate = p0.x
-        if slot == 1 { rate = min(1, max(0, rate + log(BytePad.ratios[min(6, Int(p0.y * 6.99))]) / log(32))) }
-        let morph = slot == 1 ? 1 - p4.x : p4.x
-        let v = [rate, morph, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7]
+        if b { rate = min(1, max(0, rate + log(BytePad.ratios[min(6, Int(p0.y * 6.99))]) / log(32))) }
+        let v = [rate, b ? 1 - p4.x : p4.x, p4.y, p1.x, p1.y, p5.x, p5.y, 0.7, b ? 1 : 0]
         return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
     }
-    /// this Cafe's two formulas (slot 0 = A: 1 and 2, slot 1 = B: 3 and 4)
+    /// all four formulas (every Cafe runs all four)
     func bbFormulaLines(slot: Int) -> [String] {
-        (0..<2).compactMap { j in Bytebeat.compile(bbFormula[slot * 2 + j]).map { "J \(j) " + Bytebeat.hex($0) } }
+        (0..<4).compactMap { k in Bytebeat.compile(bbFormula(k)).map { "J \(k) " + Bytebeat.hex($0) } }
     }
     func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }

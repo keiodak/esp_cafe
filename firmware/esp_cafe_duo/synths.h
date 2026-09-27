@@ -2057,21 +2057,28 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 // ==========================================
 // BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
 // ==========================================
-// Two formulas of t (the phone writes them, compiled to a little stack program: "J 0|1 <hex bytes>"). Each one is
-// run whenever t moves on; the two are mixed (MORPH) and XOR'ed together (XOR), the low 8 bits are the sound.
-// Variables in a formula: t, a b c d (the phone's pads, 0..255), e (EARTH, 0..255). RATE = how fast t runs.
-// Two Cafes are linked from the phone: the same t (Z), B's rate a ratio of A's, MORPH turned the other way on B.
-// SKIP = t back to 0. YELLOW = the top bit of the output. Parameters: "J 9 <id> <0..1000>" (bb_update).
-// ops: 0 end · 1 t · 2..5 a b c d · 6 e · 7 n8 · 8 n16 · 10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >>
+// Four formulas of t (the phone writes them, compiled to a little stack program: "J 0..3 <hex bytes>"); every Cafe
+// runs all four whenever t moves on. The SOUND is one pair of them (PAIR: 1 & 2, or 3 & 4), mixed by MORPH and
+// XOR'ed together by XOR, the low 8 bits. The BEAT, like Ciat-Lonbarde's Rollz: one bit of each of the four (BIT: the
+// higher, the slower) is a pulse, and the four pulses are collided (LOGIC: OR · XOR · AND · 2 OF 4); every rising
+// edge is a beat -> YELLOW clicks, and ASH plays a short click (CLICK = its pitch, DECAY = its length).
+// SKIP = t back to 0. Parameters: "J 9 <id> <0..1000>" (bb_update).
+// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >>
 //      20 ~ 21 neg · 22 < 23 > 24 ==
-volatile uint8_t bb_prog[2][2][64] = {    // [formula][double buffer]: the phone fills the other one, then flips
+volatile uint8_t bb_prog[4][2][64] = {     // [formula][double buffer]: the phone fills the other one, then flips
   { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } },   // t*(t>>5|t>>8)
-  { { 1, 1, 7, 8, 19, 15, 0 }, { 0 } } };                 // t&t>>8
-volatile uint8_t bb_cur[2] = { 0, 0 };
+  { { 1, 1, 7, 8, 19, 15, 0 }, { 0 } },                    // t&t>>8
+  { { 1, 7, 9, 19, 0 }, { 0 } },                           // t>>9
+  { { 1, 7, 11, 19, 0 }, { 0 } } };                        // t>>11
+volatile uint8_t bb_cur[4] = { 0, 0, 0, 0 };
 volatile uint32_t bb_inc = 11889;          // t per sample, Q16 (8 kHz)
 volatile int32_t bb_morph = 0, bb_xor = 0; // Q8
 volatile int32_t bb_v[4] = { 64, 128, 32, 16 };
 volatile int32_t bb_level = 180;           // Q8
+volatile int bb_pair = 0;                  // which two this Cafe sounds: 0 = 1 & 2, 1 = 3 & 4
+volatile int bb_bit = 8, bb_logic = 0;     // BEAT: the bit of each formula, how they collide
+volatile uint32_t bb_cinc = 0;             // CLICK pitch (Q32 per sample)
+volatile int32_t bb_cdec = 65000;          // CLICK decay (Q16 per sample)
 volatile bool bb_restart = false, bb_reset = true;
 volatile int bb_gate = 0;
 
@@ -2113,25 +2120,42 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   return sp ? st[sp - 1] : 0;
 }
 
-static int32_t __attribute__((noinline)) bb_tick() {
-  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu;
-  static int32_t out = 0, dc = 0;
-  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; }
+static int32_t __attribute__((noinline)) bb_tick(int32_t *rout) {
+  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0;
+  static int32_t out = 0, dc = 0, cenv = 0;
+  static int beat = 0, ylit = 0;
+  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; beat = 0; }
   if (bb_restart) { bb_restart = false; frac = 0; t = 0; }
   frac += bb_inc;
   t += frac >> 16;
   frac &= 0xFFFF;
   if (t != lastt) {
     lastt = t;
-    int32_t f1 = (int32_t)(bb_run(bb_prog[0][bb_cur[0]], t) & 255), f2 = (int32_t)(bb_run(bb_prog[1][bb_cur[1]], t) & 255);
+    uint32_t v[4];
+    for (int k = 0; k < 4; k++) v[k] = bb_run(bb_prog[k][bb_cur[k]], t);
+    int p = bb_pair ? 2 : 0;
+    int32_t f1 = (int32_t)(v[p] & 255), f2 = (int32_t)(v[p + 1] & 255);
     int32_t m = (f1 * (256 - bb_morph) + f2 * bb_morph) >> 8;
     m += (((f1 ^ f2) - m) * bb_xor) >> 8;
     out = (m - 128) * 12;
-    bb_gate = (m & 0x80) != 0;
+    // the beat: one bit of each of the four, collided
+    int g = 0, n = 0;
+    for (int k = 0; k < 4; k++) { int b = (v[k] >> bb_bit) & 1; n += b; g = k == 0 ? b : (bb_logic == 0 ? (g | b) : (bb_logic == 1 ? (g ^ b) : (g & b))); }
+    if (bb_logic == 3) g = n >= 2;
+    if (g && !beat) { cenv = 4096 << 8; cph = 0; ylit = 220; }   // a rising edge: click
+    beat = g;
   }
-  dc += (out - dc) >> 10;                   // (a formula sitting on one side does not push the output off centre)
+  dc += (out - dc) >> 10;
   int32_t y = ((out - dc) * bb_level) >> 8;
   if (y > 2047) y = 2047; if (y < -2047) y = -2047;
+  // the click (ASH): a short falling blip — a triangle whose pitch drops as it dies away
+  int32_t ce = cenv >> 8;
+  cph += bb_cinc + (uint32_t)(((uint64_t)bb_cinc * ce) >> 11);
+  int32_t tr = (int32_t)(cph >> 20); tr = tr < 2048 ? tr * 2 - 2048 : 6143 - tr * 2;
+  *rout = (tr * ce) >> 12;
+  cenv = (int32_t)(((int64_t)cenv * bb_cdec) >> 16);
+  if (ylit > 0) ylit--;
+  bb_gate = ylit > 0;
   return y;
 }
 
@@ -2226,8 +2250,7 @@ void IRAM_ATTR coco_pc() {
     l = grain_tick(wpos, now, frz, g_restart);
     r = l;
   } else if (bmode) {
-    l = bb_tick();                                           // BYTEBEAT
-    r = l;
+    l = bb_tick(&r);                                         // BYTEBEAT: main = the formulas, ASH = the click
   } else if (dmode) {
     bool hold = dl_hold || FLIPPERAT || audio_frozen_state;
     l = dl_tick(gyo - 2048, &r, hold);

@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.63"
+#define FW_VERSION "3.64"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -473,17 +473,24 @@ void sx_update() {
 }
 
 // ---- BYTEBEAT parameters (k.odk). "J 9 <id> <0..1000>" ----
-//  0 RATE (1 .. 32 kHz)  1 MORPH (formula 1 -> 2)  2 XOR  3..6 a b c d  7 LEVEL
-volatile int16_t bb_p[8] = {400, 0, 0, 250, 500, 125, 60, 700};
+//  0 RATE (1 .. 32 kHz)  1 MORPH  2 XOR  3 BEAT BIT (3 .. 14)  4 LOGIC (OR · XOR · AND · 2 OF 4)  5 CLICK pitch
+//  6 CLICK decay  7 LEVEL  8 PAIR (0 = formulas 1 & 2 · 1000 = 3 & 4)
+volatile int16_t bb_p[9] = {400, 0, 0, 400, 0, 400, 400, 700, 0};
 void bb_update() {
-  float hz = clock_hz(), p[8];
-  for (int i = 0; i < 8; i++) p[i] = bb_p[i] / 1000.0f;
+  float hz = clock_hz(), p[9];
+  for (int i = 0; i < 9; i++) p[i] = bb_p[i] / 1000.0f;
   float r = 1000.0f * powf(32.0f, p[0]);
   bb_inc = (uint32_t)(r / hz * 65536.0f);
   bb_morph = (int32_t)(p[1] * 256.0f);
   bb_xor = (int32_t)(p[2] * 256.0f);
-  for (int i = 0; i < 4; i++) bb_v[i] = (int32_t)(p[3 + i] * 255.0f);
+  bb_bit = 3 + (int)(p[3] * 11.99f);
+  bb_logic = (int)(p[4] * 3.99f);
+  float cf = 80.0f * powf(40.0f, p[5]);                               // CLICK 80 Hz .. 3.2 kHz
+  bb_cinc = (uint32_t)(cf / hz * 4294967295.0f);
+  float cs = 0.002f + p[6] * p[6] * 0.25f;                            // DECAY 2 .. 250 ms
+  bb_cdec = (int32_t)(65536.0f * expf(-1.0f / (cs * hz)));
   bb_level = (int32_t)(p[7] * 1.4f * 256.0f);
+  bb_pair = bb_p[8] >= 500 ? 1 : 0;
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -771,10 +778,10 @@ void pc_line(char *s) {
                 }
                 hb[k] = 0; pc_out(hb);
               } break;
-    case 'J': {                            // BYTEBEAT: "J 0|1 <hex bytes>" a formula · "J 9 <id> <0..1000>" a setting
+    case 'J': {                            // BYTEBEAT: "J 0..3 <hex bytes>" a formula · "J 9 <id> <0..1000>" a setting
                 char *q = s + 1;
                 long n = strtol(q, &q, 10);
-                if (n == 0 || n == 1) {
+                if (n >= 0 && n < 4) {
                   uint8_t tmp[64] = {0};
                   int k = 0;
                   while (*q == ' ') q++;
@@ -791,7 +798,7 @@ void pc_line(char *s) {
                 } else if (n == 9) {
                   long id = strtol(q, &q, 10), v = strtol(q, &q, 10);
                   if (v < 0) v = 0; if (v > 1000) v = 1000;
-                  if (id >= 0 && id < 8) { bb_p[id] = (int16_t)v; bb_update(); }
+                  if (id >= 0 && id < 9) { bb_p[id] = (int16_t)v; bb_update(); }
                 }
               } break;
     case 'W': {                            // write samples into the tape (file loading from the phone)

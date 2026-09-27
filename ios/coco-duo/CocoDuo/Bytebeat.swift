@@ -1,14 +1,34 @@
 // Bytebeat.swift — coco duo (k.odk)
-// BYTEBEAT: mode 1 of the BLE preset (it replaced COCO there). Each Cafe runs two formulas of t; the phone compiles
-// them to a little stack program ("J 0|1 <hex>") and moves the settings ("J 9 <id> <v>").
-// Pads: 1 · 2 · 5 · 6 are XY (RATE · B RATIO, a · b, MORPH · XOR, c · d), 3 · 4 · 7 · 8 are the four formulas
-// (A's two on top, B's two below). The two Cafes are linked: the same t (SYNC), B's rate a ratio of A's, and MORPH
-// turned the other way on B — moving it passes the sound from one Cafe to the other.
+// BYTEBEAT: mode 1 of the BLE preset (it replaced COCO there). Four formulas of t; every Cafe runs all four
+// (compiled here to a little stack program, "J 0..3 <hex>"). The formula pads are XY: X and Y are the numbers A and B
+// in the formula, so moving a pad rewrites it. The settings pads: RATE · B RATIO, BEAT · LOGIC (one bit of each of
+// the four collided like Rollz -> a beat: YELLOW clicks, ASH plays a click), MORPH · XOR, CLICK · DECAY.
+// Linked Cafes: the same t (SYNC), B at a ratio of A's rate, B sounds 3 & 4 while A sounds 1 & 2, MORPH turned the
+// other way on B. SAME: both play the same.
 
 import SwiftUI
 
 enum Bytebeat {
-    static let defaults = ["t*(t>>5|t>>8)", "t&t>>8", "t*(t>>9|t>>13)&a", "(t>>7|t|t>>6)*10+4*(t&t>>13|t>>6)"]
+    /// the four formulas' shapes: A and B are the numbers the formula pad's X and Y move (1 … 16)
+    static let defaults = ["t*(t>>A|t>>B)", "t&t>>A+B", "(t>>A)*(t>>B&7)", "t*(t>>A&t>>B)&63"]
+    static let shapes = ["t*(t>>A|t>>B)", "t*(t>>A&t>>B)&C", "(t>>A)*(t>>B&C)", "t*((t>>A|t>>B)&C&t>>D)",
+                         "(t*E&t>>A)|(t*F&t>>B)", "(t>>A|t)*(t>>B&C)", "t*(t^t+(t>>A|B))", "t&t>>A+B",
+                         "(t&t>>A)*(t>>B&C)", "t>>D^t*(t>>A&B)", "(t*E^t>>A)&(t>>B|C)", "t*(t>>A|t>>B)&(t>>D|C)",
+                         "(t*E&t>>A|t*F&t>>B)^t>>D", "t*((t>>A)%B+1)&C", "t*B&t>>A", "(t>>A)*B&t>>D"]
+    /// a new shape: fresh fixed numbers, A and B left for the pad
+    static func randomShape() -> String {
+        var s = shapes.randomElement()!
+        let cs = [3, 7, 15, 31, 63, 127]
+        for (k, v) in [("D", Int.random(in: 3...11)), ("C", cs.randomElement()!), ("E", Int.random(in: 1...9)), ("F", Int.random(in: 2...9))] {
+            s = s.replacingOccurrences(of: k, with: String(v))
+        }
+        return s
+    }
+    /// the shape with the pad's numbers in it
+    static func fill(_ shape: String, _ x: Double, _ y: Double) -> String {
+        let a = 1 + min(15, Int(x * 15.99)), b = 1 + min(15, Int(y * 15.99))
+        return shape.replacingOccurrences(of: "A", with: String(a)).replacingOccurrences(of: "B", with: String(b))
+    }
 
     private enum Tok { case num(UInt32), v(UInt8), op(String), lp, rp }
     private static let prec: [String: Int] = ["u-": 9, "~": 9, "*": 8, "/": 8, "%": 8, "+": 7, "-": 7,
@@ -89,100 +109,26 @@ enum Bytebeat {
     }
 
     static func hex(_ b: [UInt8]) -> String { b.map { String(format: "%02x", $0) }.joined() }
-
-    /// a new formula: one of the well-known shapes with fresh numbers (some use a · b · c · d, so the pads play it)
-    static func random() -> String {
-        let shapes = ["t*(t>>A|t>>B)", "t*(t>>A&t>>B)&C", "(t>>A)*(t>>B&C)", "t*((t>>A|t>>B)&C&t>>D)",
-                      "(t*E&t>>A)|(t*F&t>>B)", "t*(a&t>>A)", "(t>>A|t)*(t>>B&b)", "t*(t^t+(t>>A|E))",
-                      "(t&t>>A)*(t>>B&c)", "t>>D^t*(t>>A&C)", "(t*E^t>>A)&(t>>B|d)", "t*(t>>A|t>>B)&(t>>D|a)",
-                      "(t*E&t>>A|t*F&t>>B)^t>>D", "t*((t>>A)%E+1)&C"]
-        var s = shapes.randomElement()!
-        let cs = [3, 7, 15, 31, 63, 127]
-        for (k, v) in [("A", Int.random(in: 3...12)), ("B", Int.random(in: 4...13)), ("D", Int.random(in: 3...11)),
-                       ("C", cs.randomElement()!), ("E", Int.random(in: 1...9)), ("F", Int.random(in: 2...9))] {
-            s = s.replacingOccurrences(of: k, with: String(v))
-        }
-        return s
-    }
 }
 
 enum BytePad {
-    static let titles = ["RATE · B RATIO", "a · b", "A · FORMULA 1", "A · FORMULA 2",
-                         "MORPH · XOR", "c · d", "B · FORMULA 1", "B · FORMULA 2"]
-    static let starts: [(Double, Double)] = [(0.4, 0.5), (0.25, 0.5), (0, 0), (0, 0), (0.0, 0.0), (0.125, 0.06), (0, 0), (0, 0)]
+    static let titles = ["RATE · B RATIO", "BEAT · LOGIC", "FORMULA 1", "FORMULA 2",
+                         "MORPH · XOR", "CLICK · DECAY", "FORMULA 3", "FORMULA 4"]
+    static let starts: [(Double, Double)] = [(0.4, 0.5), (0.4, 0.0), (0.3, 0.45), (0.45, 0.3),
+                                             (0.0, 0.0), (0.4, 0.4), (0.5, 0.4), (0.6, 0.25)]
     /// B's rate against A's
     static let ratios: [Double] = [0.5, 2.0 / 3.0, 0.75, 1, 4.0 / 3.0, 1.5, 2]
     static let ratioNames = ["×1/2", "×2/3", "×3/4", "×1", "×4/3", "×3/2", "×2"]
-    /// which formula a pad is (-1 = an XY pad)
+    static let logics = ["OR", "XOR", "AND", "2 OF 4"]
+    /// which formula a pad is (-1 = one of the four settings pads)
     static func formula(_ i: Int) -> Int { [-1, -1, 0, 1, -1, -1, 2, 3][i] }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
         case 0: return String(format: "%.1f kHz · B %@", 1.0 * pow(32, x), ratioNames[min(6, Int(y * 6.99))])
-        case 1: return "a \(Int(x * 255)) · b \(Int(y * 255))"
+        case 1: return "BIT \(3 + min(11, Int(x * 11.99))) · \(logics[min(3, Int(y * 3.99))])"
         case 4: return "MORPH \(Int(x * 100))% · XOR \(Int(y * 100))%"
-        case 5: return "c \(Int(x * 255)) · d \(Int(y * 255))"
+        case 5: return String(format: "%.0f Hz · %.0f ms", 80 * pow(40, x), (0.002 + y * y * 0.25) * 1000)
         default: return ""
-        }
-    }
-}
-
-/// one formula pad: the formula on a small LCD, tap = edit it, the die = a new one
-struct FormulaPad: View {
-    @ObservedObject var rig: Rig
-    let k: Int                  // 0…3
-    let tag: String
-    let set: (String) -> Void
-    @State private var editing = false
-    @State private var draft = ""
-
-    var body: some View {
-        let f = rig.bbFormula[k]
-        let ok = Bytebeat.compile(f) != nil
-        ZStack(alignment: .topLeading) {
-            Rectangle().fill(PastelTheme.padScreen)
-            HudDots(step: 12)
-            Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
-            HudCorners(arm: 8).stroke(PastelTheme.hudBlack, lineWidth: 1.2).padding(3)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    HudTag(text: tag, size: 7)
-                    Text(BytePad.titles[[2, 3, 6, 7][k]])
-                        .font(.hud(8, .semibold)).tracking(0.8)
-                        .foregroundStyle(PastelTheme.hudOrange)
-                    Spacer(minLength: 0)
-                    Button { set(Bytebeat.random()) } label: {
-                        Image(systemName: "dice")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(PastelTheme.hudBlack)
-                            .frame(width: 24, height: 20)
-                            .background(IconSquare(filled: false))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Text(f.isEmpty ? "—" : f)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(ok ? PastelTheme.hudBlack : PastelTheme.hudOrange)
-                    .lineLimit(4)
-                    .minimumScaleFactor(0.5)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                Text(ok ? "TAP TO EDIT" : "CAN'T READ IT")
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundStyle(PastelTheme.textSecondary)
-            }
-            .padding(8)
-        }
-        .clipped()
-        .contentShape(Rectangle())
-        .onTapGesture { draft = f; editing = true }
-        .alert("FORMULA", isPresented: $editing) {
-            TextField("t*(t>>5|t>>8)", text: $draft)
-                .font(.system(.body, design: .monospaced))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            Button("OK") { set(draft) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("t a b c d e · + - * / % & | ^ ~ << >> < > ==")
         }
     }
 }

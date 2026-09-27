@@ -84,13 +84,6 @@ struct PlatePad: View {
                 HudDots(step: 12)
                 Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
                 HudCorners(arm: 8).stroke(PastelTheme.hudBlack, lineWidth: 1.2).padding(3)
-                // the finger: a disc as big as it presses
-                Circle()
-                    .fill(PastelTheme.hudOrange.opacity(a > 0 ? 0.25 + a * 0.55 : 0))
-                    .overlay(Circle().strokeBorder(PastelTheme.hudBlack, lineWidth: a > 0 ? 1 : 0.6))
-                    .frame(width: 10 + a * 64, height: 10 + a * 64)
-                    .position(x: axis.x * g.size.width, y: (1 - axis.y) * g.size.height)
-                    .animation(.easeOut(duration: 0.08), value: a)
                 TouchPlate { x, y, area in
                     axis.x = x; axis.y = y
                     var ar = rig.sxArea
@@ -100,7 +93,6 @@ struct PlatePad: View {
                 }
             }
         }
-        .clipped()                                   // (the finger's disc stays inside its own plate, under the pads around it)
         .overlay(alignment: .topLeading) {
             HStack(spacing: 4) {
                 HudTag(text: tag, size: 7)
@@ -118,6 +110,18 @@ struct PlatePad: View {
                 .foregroundStyle(PastelTheme.hudBlack.opacity(0.7))
                 .padding(.leading, 8).padding(.bottom, 6)
                 .allowsHitTesting(false)
+        }
+        .overlay {                                   // the finger: a disc as big as it presses — on top of everything
+            GeometryReader { g in
+                Circle()
+                    .fill(PastelTheme.hudOrange.opacity(a > 0 ? 0.25 + a * 0.55 : 0))
+                    .overlay(Circle().strokeBorder(PastelTheme.hudBlack, lineWidth: a > 0 ? 1 : 0.6))
+                    .frame(width: 10 + a * 64, height: 10 + a * 64)
+                    .position(x: axis.x * g.size.width, y: (1 - axis.y) * g.size.height)
+                    .animation(.easeOut(duration: 0.08), value: a)
+                    .allowsHitTesting(false)
+            }
+            .allowsHitTesting(false)
         }
     }
 }

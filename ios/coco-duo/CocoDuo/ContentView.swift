@@ -207,7 +207,15 @@ final class Director: ObservableObject {
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
-            for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
+            let k = BytePad.formula(i)
+            if k >= 0 {                                         // a formula pad: send it only when its numbers change
+                let f = rig.bbFormula(k)
+                guard f != bbSent[k], let code = Bytebeat.compile(f) else { return }
+                bbSent[k] = f
+                for u in ctxUnits() { u.send("J \(k) " + Bytebeat.hex(code)) }
+            } else {
+                for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
+            }
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:
@@ -548,12 +556,19 @@ final class Director: ObservableObject {
     }
     /// WAVE: DRONE on / off
     func setWvFreeze(_ on: Bool) { rig.wvFreeze = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
-    /// BYTEBEAT: a formula changed (k 0, 1 = A's · 2, 3 = B's): to that Cafe
-    func setFormula(_ k: Int, _ f: String) {
-        var v = rig.bbFormula; v[k] = f; rig.bbFormula = v
-        for u in ctxUnits() where u.slot == k / 2 { rig.bbFormulaLines(slot: u.slot).forEach(u.send) }
+    /// BYTEBEAT: the formula last sent for each of the four (moving a pad sends only when its numbers change)
+    var bbSent = ["", "", "", ""]
+    /// four new shapes
+    func bbDiceAll() {
+        rig.bbShape = (0..<4).map { _ in Bytebeat.randomShape() }
+        bbSent = ["", "", "", ""]
+        for u in ctxUnits() { rig.bbFormulaLines(slot: u.slot).forEach(u.send) }
     }
-    func bbDiceAll() { for k in 0..<4 { setFormula(k, Bytebeat.random()) } }
+    /// SAME: both Cafes the same
+    func setBbSame(_ on: Bool) {
+        rig.bbSame = on
+        for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
+    }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
@@ -626,6 +641,7 @@ private struct MainScreen: View {
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(height: barHeight)
             pads
+                .zIndex(1)
             HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(height: barHeight)
@@ -671,6 +687,7 @@ private struct MainScreen: View {
             VStack(spacing: 6) {
                 HStack(spacing: 6) { ForEach(0..<4, id: \.self) { pad($0) } }
                 HStack(spacing: 6) { ForEach(4..<8, id: \.self) { pad($0) } }
+                    .zIndex(1)
             }
             .frame(maxHeight: .infinity)
             .background(
@@ -713,6 +730,10 @@ private struct MainScreen: View {
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
         case .byte:
+            if let k = Optional(BytePad.formula(i)), k >= 0 {                     // a formula pad: the formula itself
+                let shape = rig.bbShape[k]
+                return { x, y in Bytebeat.fill(shape, x, y) }
+            }
             return { x, y in BytePad.caption(i, x, y) }
         case .sidrax:
             if i >= 4 { return nil }
@@ -729,14 +750,11 @@ private struct MainScreen: View {
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if rig.padSet == .byte && BytePad.formula(i) >= 0 {             // BYTEBEAT: the four formula pads
-            let director = d, k = BytePad.formula(i)
-            FormulaPad(rig: rig, k: k, tag: String(format: "%02ld", i + 1), set: { director.setFormula(k, $0) })
-                .frame(height: padHeight)
-        } else if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
+        if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
             let director = d
             PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
                 .frame(height: padHeight)
+                .zIndex(rig.sxArea[i - 4] > 0 ? 2 : 1)                  // the finger's disc goes over the pads beside it
                 .id("sx\(i)")
         } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
@@ -1065,8 +1083,9 @@ private struct HudBar: View {
             }
         case .byte:
             switch n {
-            case 0: key("dice") { d.bbDiceAll() }                                   // four new formulas
+            case 0: key("dice") { d.bbDiceAll() }                                   // four new formula shapes
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
+            case 2: textKey("SAME", on: rig.bbSame) { d.setBbSame(!rig.bbSame) }    // both Cafes play the same
             default: blank
             }
         case .wave:
