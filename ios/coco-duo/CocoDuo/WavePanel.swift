@@ -25,6 +25,10 @@ private struct CafeWaveCard: View {
     @ObservedObject var unit: CafeUnit
     @State private var picking = false
     @State private var decoding = false
+    @State private var stretchPick = false        // the file picked is for STRETCH, not LOAD
+    @State private var stretchI = 1
+    @State private var setI = 0
+    @State private var keyI = 0
 
 
     var body: some View {
@@ -40,8 +44,8 @@ private struct CafeWaveCard: View {
                     unit.send("R \(unit.recording ? 0 : 1)")
                 }
                 .frame(width: 40)
-                ChipButton(title: "LOAD", filled: decoding || unit.loadProgress != nil) {
-                    if unit.isConnected && !decoding && unit.loadProgress == nil { picking = true }
+                ChipButton(title: "LOAD", filled: (decoding && !stretchPick) || unit.loadProgress != nil) {
+                    if free { stretchPick = false; picking = true }
                 }
                 .frame(width: 44)
                 ChipButton(title: "SAVE", filled: unit.saveProgress != nil) {
@@ -49,6 +53,25 @@ private struct CafeWaveCard: View {
                 }
                 .frame(width: 44)
             }
+            // made here, written onto the tape: STRETCH (a file, ×4 … ×60, looping) · CHORDS (16 slices, a key, a set)
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: "STRETCH", filled: decoding && stretchPick) {
+                    if free { stretchPick = true; picking = true }
+                }
+                .frame(width: 64)
+                ChipButton(title: "×\(Int(ToneMaker.stretches[stretchI]))", filled: false) {
+                    stretchI = (stretchI + 1) % ToneMaker.stretches.count
+                }
+                .frame(width: 38)
+                Spacer(minLength: 0)
+                ChipButton(title: "CHORDS", filled: false) { makeChords() }
+                    .frame(width: 60)
+                ChipButton(title: ToneMaker.keys[keyI], filled: false) { keyI = (keyI + 1) % 12 }
+                    .frame(width: 34)
+                ChipButton(title: ToneMaker.sets[setI], filled: false) { setI = (setI + 1) % ToneMaker.sets.count }
+                    .frame(width: 62)
+            }
+            .opacity(unit.isConnected ? 1 : 0.4)
             HStack(spacing: PanelMetrics.chipSpacing) {
                 OutWindow(outs: unit.outs, title: "ASH", yellow: false)
                 OutWindow(outs: unit.outs, title: "YELLOW", yellow: true)
@@ -95,7 +118,7 @@ private struct CafeWaveCard: View {
                         }
                         .frame(height: 6)
                     } else {
-                        Text(decoding ? "reading the file…" : unit.loadNote)
+                        Text(decoding ? "making…" : unit.loadNote)
                             .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                             .foregroundStyle(PastelTheme.textSecondary)
                             .lineLimit(1)
@@ -131,7 +154,7 @@ private struct CafeWaveCard: View {
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { loadFile($0) }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { stretchPick ? stretchFile($0) : loadFile($0) }
         // SAVE: once the tape is in, hand the WAV to Files
         .fileExporter(isPresented: Binding(get: { unit.savedWav != nil }, set: { if !$0 { unit.savedWav = nil } }),
                       document: WavDoc(data: unit.savedWav ?? Data()),
@@ -154,6 +177,48 @@ private struct CafeWaveCard: View {
                 case .success(let samples): unit.load(samples)
                 case .failure(let e): unit.loadNote = e.localizedDescription
                 }
+            }
+        }
+    }
+
+    /// nothing on its way to this Cafe yet
+    private var free: Bool { unit.isConnected && !decoding && unit.loadProgress == nil }
+
+    /// STRETCH: the start of the file, stretched onto the whole tape (off the main thread)
+    private func stretchFile(_ result: Result<URL, Error>) {
+        guard case .success(let url) = result else { return }
+        let rate = unit.hz > 1000 ? unit.hz : 44100
+        let s = ToneMaker.stretches[stretchI]
+        decoding = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = url.startAccessingSecurityScopedResource()
+            defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            let outcome = Result { () -> [UInt16] in
+                let x = try ToneMaker.mono(url: url, rate: rate, maxCount: Int(Double(TAPE) / s) + 4096)
+                return ToneMaker.tape(ToneMaker.stretch(x, by: s))
+            }
+            DispatchQueue.main.async {
+                decoding = false
+                switch outcome {
+                case .success(let samples): unit.load(samples)
+                case .failure(let e): unit.loadNote = e.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// CHORDS: 16 slices in the key and set shown
+    private func makeChords() {
+        guard free else { return }
+        let rate = unit.hz > 1000 ? unit.hz : 44100
+        let set = setI, key = keyI
+        decoding = true
+        stretchPick = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let samples = ToneMaker.tape(ToneMaker.chords(set: set, key: key, rate: rate))
+            DispatchQueue.main.async {
+                decoding = false
+                unit.load(samples)
             }
         }
     }
