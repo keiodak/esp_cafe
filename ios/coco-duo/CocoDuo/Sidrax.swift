@@ -54,44 +54,15 @@ enum SxPad {
 
 /// WAVE: the two pads of its own (the rest are SIDRAX's)
 enum WvPad {
-    static let titles = ["SCALE · KEY", "FRAME · SPREAD", "SCAN · DEPTH", "CHORD · OCTAVE",
+    static let titles = ["SCALE · KEY", "VECTOR", "ORBIT · SIZE", "CHORD · OCTAVE",
                          "PLATE 1", "PLATE 2", "PLATE 3", "PLATE 4"]
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 1: return "FRAME \(Int(x * 63) + 1)/64 · SPREAD \(Int(y * 100))%"
-        case 2: return String(format: "%.2f Hz · %d%%", 0.02 * pow(400, x), Int(y * 100))
-        default: return ""
-        }
-    }
-}
-
-/// BENJO (BLE mode 6): an audio-rate Benjolin on the Cafe — two triangles (not files), the rungler, a resonant filter.
-/// FREE · CHORD (notes of KEY · SCALE, the rungler steps the degrees) · PLAY (the bottom row = four plates).
-/// ASH = the rungler's stepped voltage.
-enum BnPad {
-    static let titles = ["OSC 1 · RUN 1", "OSC 2 · RUN 2", "FILTER · RES", "X-MOD 2→1 · 1→2",
-                         "PWM TRI · DRIVE", "LOOP · GLIDE", "EARTH→OSC · →FILTER", "KEY · SCALE"]
-    static let starts: [(Double, Double)] = [(0.45, 0.3), (0.25, 0.35), (0.55, 0.35), (0.15, 0.0),
-                                             (0.0, 0.3), (0.0, 0.0), (0.0, 0.0), (0.0, 0.2)]
-    static let modeNames = ["FREE", "CHORD", "PLAY"]
-    static let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    static let scales = ["CHROM", "MAJOR", "MINOR", "PENTA", "M.PENTA", "WHOLE"]
-    static let intervals = ["UNI", "m3", "M3", "4TH", "5TH", "8VE", "8+5", "2 8VE"]
-    static func hz(_ v: Double) -> String {
-        let f = 0.05 * pow(100000, v)
-        return f < 10 ? String(format: "%.2f Hz", f) : String(format: "%.0f Hz", f)
-    }
-    static func caption(_ i: Int, _ x: Double, _ y: Double, mode: Int) -> String {
-        switch i {
-        case 0:
-            if mode == 2 { return "OCT C\(Int(x * 5.99) + 1) · STEP \(Int(y * 3.99))" }
-            if mode == 1 { return "NOTE \(Int(x * 100))% · STEP \(Int(y * 3.99))" }
-            return "\(hz(x)) · RUN \(Int(y * 100))%"
         case 1:
-            if mode >= 1 { return "\(intervals[min(7, Int(x * 7.99))]) · STEP \(Int(y * 3.99))" }
-            return "\(hz(x)) · RUN \(Int(y * 100))%"
-        case 2: return "CUT \(Int(x * 100))% · RES \(Int(y * 100))%"
-        case 7: return "\(notes[min(11, Int(x * 11.99))]) · \(scales[min(5, Int(y * 5.99))])"
+            // the four corners' shares (A bottom left · B bottom right · C top left · D top right)
+            let a = (1 - x) * (1 - y), b = x * (1 - y), c = (1 - x) * y, d = x * y
+            return String(format: "A%02d B%02d C%02d D%02d", Int(a * 99), Int(b * 99), Int(c * 99), Int(d * 99))
+        case 2: return String(format: "%.2f Hz · %d%%", 0.02 * pow(400, x), Int(y * 100))
         default: return ""
         }
     }

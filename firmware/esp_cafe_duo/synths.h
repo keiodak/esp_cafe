@@ -1091,7 +1091,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = BENJO ("M 25 <0..6>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = COCO, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE ("M 25 <0..5>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -1772,22 +1772,23 @@ static const int8_t sx_chdeg[7][4] = {{0, 1, 2, 3}, {0, 2, 4, 6}, {0, 2, 4, 100}
 static const int8_t sx_chsem[7][4] = {{0, 1, 2, 3}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, 10}, {0, 5, 10, 15}, {0, 7, 14, 21}, {0, 12, 19, 24}};
 volatile int32_t sx_tone = 4096;           // one-pole low-pass coefficient Q12 (4096 = open)
 volatile int32_t sx_rel = 40;              // release step Q16 per sample
-// WAVE (mode 5): the same plates, but each voice reads a WAVETABLE from the tape — 64 frames of 256 samples at
-// the start of the tape, made from an audio file on the phone ("W" lines). FRAME picks the timbre, SPREAD gives
-// each plate its own frame, SCAN moves the frame slowly back and forth (rate · depth). "S 20..23" (see sx_update).
-// (The Benjolin that used to live here has its own mode now: BENJO, mode 6.)
+// WAVE (mode 5): a VECTOR SYNTH on the same plates. The table at the start of the tape (64 frames of 256 samples,
+// made from an audio file on the phone, "W" lines) gives four waves in the corners — A, B, C, D = frames 0, 21, 42,
+// 63 — and the VECTOR (x, y) mixes them (A bottom left, B bottom right, C top left, D top right). ORBIT moves the
+// vector round in a circle by itself (rate · size), like the joystick of a Prophet VS left turning. "S 20..23".
 volatile bool sx_wave = false;
-volatile int32_t wv_frame = 0, wv_spread = 0;           // frame base (Q8 frames, 0..63·256) · per-plate frame step (Q8)
-volatile uint32_t wv_scaninc = 0;                       // SCAN rate (Q32 per sample)
-volatile int32_t wv_sdepth = 0;                         // SCAN depth (Q8 frames)
-static inline int32_t IRAM_ATTR wv_read(int32_t fq8, uint32_t ph) {   // the table at frame (Q8) and phase (Q32)
-  if (fq8 < 0) fq8 = 0; if (fq8 > 63 * 256) fq8 = 63 * 256;
-  int f0 = fq8 >> 8, f1 = f0 < 63 ? f0 + 1 : 63; int32_t ff = fq8 & 255;
+volatile int32_t wv_vx = 2048, wv_vy = 2048;            // VECTOR, Q12 (0..4096)
+volatile uint32_t wv_orbinc = 0;                        // ORBIT rate (Q32 per sample)
+volatile int32_t wv_orb = 0;                            // ORBIT size, Q12
+static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f of the table at phase ph (Q32)
   int i0 = ph >> 24, i1 = (i0 + 1) & 255; int32_t fi = (ph >> 16) & 255;
-  int32_t a = dread(f0 * 256 + i0), b = dread(f0 * 256 + i1);
-  int32_t c = dread(f1 * 256 + i0), d = dread(f1 * 256 + i1);
-  int32_t x0 = a + (((b - a) * fi) >> 8), x1 = c + (((d - c) * fi) >> 8);
-  return x0 + (((x1 - x0) * ff) >> 8) - 2048;
+  int32_t a = dread(f * 256 + i0), b = dread(f * 256 + i1);
+  return a + (((b - a) * fi) >> 8) - 2048;
+}
+static inline int32_t wv_vec(uint32_t ph, int32_t vx, int32_t vy) {    // the four corners mixed by the vector
+  int32_t a = wv_at(0, ph), b = wv_at(21, ph), c = wv_at(42, ph), d = wv_at(63, ph);
+  int32_t ab = a + (((b - a) * vx) >> 12), cd = c + (((d - c) * vx) >> 12);
+  return ab + (((cd - ab) * vy) >> 12);
 }
 volatile uint32_t sx_inc[4] = {0, 0, 0, 0};   // each plate's exact phase step (sx_update)
 volatile int sx_role = 2;   // SIDRAX across two Cafes: 0 = A, 1 = B, 2 = alone (both halves) — "S 9 <n>"
@@ -1826,12 +1827,15 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
   if (sx_reset) { sx_reset = false; for (int k = 0; k < 4; k++) { env[k] = out[k] = 0; } tl = tr = 0; }
   static int32_t env1[4] = {0, 0, 0, 0};                  // (no EARTH here: it wobbled the pitch — a chorus)
   int32_t touched = 0, l = 0, r = 0;
-  // WAVE: SCAN, a slow triangle moving the frame (the same for all four)
-  static uint32_t scph = 0; int32_t scan = 0;
+  // WAVE: the vector, and ORBIT turning it round (two triangles a quarter apart = a rounded square circle)
+  static uint32_t oph = 0; int32_t vx = wv_vx, vy = wv_vy;
   if (sx_wave) {
-    scph += wv_scaninc;
-    int32_t st = (int32_t)(scph >> 20); st = st < 2048 ? st * 2 - 2048 : 6143 - st * 2;   // ±2048
-    scan = (st * wv_sdepth) >> 11;
+    oph += wv_orbinc;
+    int32_t s1 = (int32_t)(oph >> 20); s1 = s1 < 2048 ? s1 * 2 - 2048 : 6143 - s1 * 2;          // ±2048
+    uint32_t q = oph + 0x40000000u;
+    int32_t s2 = (int32_t)(q >> 20); s2 = s2 < 2048 ? s2 * 2 - 2048 : 6143 - s2 * 2;
+    vx += (s1 * wv_orb) >> 12; vy += (s2 * wv_orb) >> 12;
+    if (vx < 0) vx = 0; if (vx > 4096) vx = 4096; if (vy < 0) vy = 0; if (vy > 4096) vy = 4096;
   }
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
@@ -1849,7 +1853,7 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
     ph[k] += inc;
     int32_t t = (int32_t)(ph[k] >> 20);
     int32_t tri = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;    // ±2048, a plain triangle
-    if (sx_wave) tri = wv_read(wv_frame + scan + k * wv_spread, ph[k]);   // WAVE: the table (FRAME + SCAN + SPREAD per plate)
+    if (sx_wave) tri = wv_vec(ph[k], vx, vy);                // WAVE: the four corner waves, mixed by the vector
     // GLITCH: when the left one crosses zero, this one may turn round (same value, the other direction)
     static int32_t lastLeft[4] = {0, 0, 0, 0};
     if (sx_glitch > 0 && ((left ^ lastLeft[k]) < 0)) {
@@ -1894,120 +1898,6 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
   if (orr > 2047) orr = 2047; if (orr < -2047) orr = -2047;
   *rout = orr;
   return ol;
-}
-
-// ==========================================
-// BENJO --- mode 6 of the BLE preset (k.odk): after Rob Hordijk's Benjolin
-// ==========================================
-// Two triangle oscillators (not files); an 8-step shift register (the RUNGLER) clocked by OSC 2 and fed by OSC 1's
-// pulse (XOR the bit falling out; LOOP keeps the pattern going round instead). The top three bits are a stepped
-// voltage that moves both oscillators (RUN 1 / RUN 2). The two FM each other (X-MOD). The voice is the comparator of
-// the two (PWM) or OSC 1's triangle, through a resonant low-pass. EARTH moves OSC 1 and / or the filter.
-// Three ways to play it ("S 46"):
-//   FREE  - the oscillators anywhere (0.05 Hz .. 5 kHz), the rungler bends them freely
-//   CHORD - OSC 1 on a note of the scale (KEY · SCALE), OSC 2 an interval above it, the rungler steps through the
-//           scale's degrees: a melody that stays in key
-//   PLAY  - the phone's bottom row is four plates: the touched one is the note (in the scale), its area the volume;
-//           OSC 1's pad chooses the octave. The rungler still plays around the note.
-// SKIP = LOOP while held. YELLOW = OSC 2's pulse. Out: main = the voice · ASH = the rungler's stepped voltage.
-// Parameters: "S 30..46" (see bn_update) · a plate: "S <50 + k> <x> <y> <area>".
-volatile uint32_t bn_r1 = 0, bn_r2 = 0;                 // FREE: OSC 1 / OSC 2, Q32 per sample
-volatile uint32_t bn_c1 = 0;                            // CHORD / PLAY: C1 (Q32 per sample)
-volatile int32_t bn_n1 = 0, bn_iv = 0;                  // CHORD: OSC 1's note (1/256 oct over C1) · OSC 2's interval (1/256 oct)
-volatile int32_t bn_st1 = 0, bn_st2 = 0;                // CHORD / PLAY: scale degrees per rungler step
-volatile int32_t bn_run1 = 0, bn_run2 = 0;              // FREE: rungler -> rate, 1/256 oct per step
-volatile int32_t bn_fm1 = 0, bn_fm2 = 0;                // X-MOD (Q12)
-volatile int32_t bn_fc = 1400, bn_q = 4096;             // filter cutoff (1/256 oct over bj_fk) · damping Q12
-volatile int32_t bn_lock = 0;                           // LOOP (Q12 chance)
-volatile int32_t bn_mix = 0;                            // 0 = PWM .. 4096 = OSC 1's triangle
-volatile int32_t bn_drive = 256;                        // Q8
-volatile int32_t bn_glide = 4096;                       // pitch glide (Q12 per sample step towards the target; 4096 = none)
-volatile int32_t bn_e1 = 0, bn_ef = 0;                  // EARTH -> OSC 1 · EARTH -> filter
-volatile int32_t bn_deg[48];                            // the scale's degrees, 1/256 oct (bn_update)
-volatile int bn_mode = 0;                               // 0 FREE · 1 CHORD · 2 PLAY
-volatile int32_t bn_oct = 2;                            // PLAY: the octave (0..5 over C1)
-volatile int16_t bn_px[4] = {100, 350, 600, 850}, bn_pa[4] = {0, 0, 0, 0};
-volatile int32_t bn_relk = 300;                         // PLAY: release (Q16 per sample)
-volatile bool bn_reset = true;
-volatile int bn_gate = 0;
-
-static int32_t __attribute__((noinline)) bn_tick(int32_t *rout, bool hold) {
-  static uint32_t p1 = 0, p2 = 0x40000000u, rnd = 0x2545F491u;
-  static uint8_t reg = 0xA5;
-  static int32_t la = 0, ba = 0, t1 = 0, t2 = 0;
-  static int32_t g1 = 0, g2 = 0;                           // the glided pitches (1/256 oct, 8 extra bits)
-  static int32_t env = 0, note = 0; static int last = -1;  // PLAY
-  if (bn_reset) { bn_reset = false; la = ba = 0; env = 0; last = -1; }
-  int rv = (reg >> 5) & 7;                                  // the rungler, 0..7
-  int32_t e = pc_emod;
-  int32_t xm1 = (t2 * bn_fm1) >> 14, xm2 = (t1 * bn_fm2) >> 14;
-  uint32_t i1, i2;
-  int32_t amp = 4096;
-  if (bn_mode == 0) {                                       // FREE
-    int32_t o1 = rv * bn_run1 + xm1 + ((e * bn_e1) >> 6);
-    int32_t o2 = rv * bn_run2 + xm2;
-    if (o1 > 3072) o1 = 3072; if (o1 < -3072) o1 = -3072;
-    if (o2 > 3072) o2 = 3072; if (o2 < -3072) o2 = -3072;
-    i1 = (uint32_t)(((uint64_t)bn_r1 * bj_exp2(o1)) >> 16); i2 = (uint32_t)(((uint64_t)bn_r2 * bj_exp2(o2)) >> 16);
-  } else {                                                  // CHORD / PLAY: notes of the scale
-    int32_t base;
-    if (bn_mode == 2) {                                     // PLAY: the most recently pressed plate is the note
-      static int16_t prev[4] = {0, 0, 0, 0};
-      int32_t area = 0;
-      for (int k = 0; k < 4; k++) {
-        if (bn_pa[k] > 0 && prev[k] <= 0) last = k;          // a new press takes the note
-        prev[k] = bn_pa[k];
-        if (bn_pa[k] > area) area = bn_pa[k];
-      }
-      if (last >= 0 && bn_pa[last] <= 0) for (int k = 0; k < 4; k++) if (bn_pa[k] > 0) last = k;   // lifted: another held one
-      if (last >= 0 && bn_pa[last] > 0) { int d = (bn_px[last] * 15) / 1001; note = bn_deg[d] + bn_oct * 256; }
-      int32_t tq = ((area * 4096) / 1000) << 8;
-      if (tq > env) env += ((tq - env) >> 9) + 1; else env -= (int32_t)(((int64_t)env * bn_relk) >> 16) + 1;
-      if (env < 0) env = 0;
-      amp = env >> 8;
-      base = note;
-    } else base = bn_n1;
-    int d1 = rv * bn_st1, d2 = rv * bn_st2;
-    if (d1 > 40) d1 = 40; if (d2 > 40) d2 = 40;
-    int32_t t1o = base + bn_deg[d1] + ((e * bn_e1) >> 6);
-    int32_t t2o = base + bn_iv + bn_deg[d2];
-    g1 += (int32_t)((((int64_t)(t1o << 8) - g1) * bn_glide) >> 12);
-    g2 += (int32_t)((((int64_t)(t2o << 8) - g2) * bn_glide) >> 12);
-    int32_t o1 = (g1 >> 8) + xm1, o2 = (g2 >> 8) + xm2;
-    if (o1 < 0) o1 = 0; if (o2 < 0) o2 = 0;
-    if (o1 > 2560) o1 = 2560; if (o2 > 2560) o2 = 2560;    // (C1 + 10 octaves)
-    i1 = (uint32_t)(((uint64_t)bn_c1 * bj_exp2(o1)) >> 16); i2 = (uint32_t)(((uint64_t)bn_c1 * bj_exp2(o2)) >> 16);
-  }
-  if (i1 > 0x20000000u) i1 = 0x20000000u; if (i2 > 0x20000000u) i2 = 0x20000000u;
-  uint32_t old2 = p2;
-  p1 += i1; p2 += i2;
-  int32_t a1 = (int32_t)(p1 >> 20); t1 = a1 < 2048 ? a1 * 2 - 2048 : 6143 - a1 * 2;   // ±2048
-  int32_t a2 = (int32_t)(p2 >> 20); t2 = a2 < 2048 ? a2 * 2 - 2048 : 6143 - a2 * 2;
-  if (p2 < old2) {                                          // OSC 2 wrapped: clock the register
-    rnd = rnd * 1664525u + 1013904223u;
-    int out = (reg >> 7) & 1;
-    bool loop = hold || (int32_t)(rnd >> 20) < bn_lock;
-    int nb = loop ? out : ((p1 < 0x80000000u ? 1 : 0) ^ out);
-    reg = (uint8_t)((reg << 1) | nb);
-  }
-  bn_gate = bn_mode == 2 ? (amp > 200) : (p2 < 0x80000000u);
-  int32_t pwm = t1 > t2 ? 1400 : -1400;
-  int32_t x = (int32_t)((((int64_t)pwm * (4096 - bn_mix)) + ((int64_t)((t1 * 700) >> 10) * bn_mix)) >> 12);
-  int32_t oc = bn_fc + ((e * bn_ef) >> 6);
-  if (oc < 0) oc = 0; if (oc > 2560) oc = 2560;
-  int32_t fq = (int32_t)(((int64_t)bj_fk * bj_exp2(oc)) >> 24);
-  if (fq > 4096) fq = 4096; if (fq < 1) fq = 1;
-  la += (fq * ba) >> 12;
-  int32_t hl = x - la - ((bn_q * ba) >> 12);
-  ba += (fq * hl) >> 12;
-  if (la > 32767) la = 32767; if (la < -32768) la = -32768;
-  if (ba > 32767) ba = 32767; if (ba < -32768) ba = -32768;
-  int32_t y = (la * bn_drive) >> 8;
-  if (y > 1500) y = 1500 + ((y - 1500) >> 3); if (y < -1500) y = -1500 + ((y + 1500) >> 3);
-  y = (y * amp) >> 12;
-  if (y > 2047) y = 2047; if (y < -2047) y = -2047;
-  *rout = rv * 580 - 2030;                                  // ASH: the rungler's stepped voltage
-  return y;
 }
 
 // ==========================================
@@ -2173,7 +2063,6 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 2) dl_reset = true;
     else if (cur == 3) nz_reset = true;
     else if (cur == 4 || cur == 5) sx_reset = true;
-    else if (cur == 6) bn_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2185,10 +2074,9 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 2) dl_reset = true;
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
-      else if (cur == 6) bn_reset = true;
     }
   } else if (mg < 4096) mg += 16;
-  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5, jmode = cur == 6;
+  bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2205,7 +2093,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || jmode;                                 // SIDRAX / BENJO: CHAR's grit stays out
+  grit_off = smode;                                          // SIDRAX / WAVE: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2236,9 +2124,6 @@ void IRAM_ATTR coco_pc() {
   } else if (smode) {
     l = sx_tick(&r);
     r >>= 1;                                                 // (ASH doubles its input and clips: keep it clean)
-  } else if (jmode) {
-    l = bn_tick(&r, SKIPPERAT);
-    r >>= 1;
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2271,7 +2156,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = smode ? sx_gate : (jmode ? bn_gate : nz_gate);
+  } else y = smode ? sx_gate : nz_gate;
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2295,8 +2180,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || smode || jmode) {
-    if (smode ? sx_gate : (jmode ? bn_gate : nz_gate)) {
+  } else if (nmode || smode) {
+    if (smode ? sx_gate : nz_gate) {
       LAMP_ON;
     } else {
       LAMP_OFF;

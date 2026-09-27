@@ -35,7 +35,7 @@ enum Preset {
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
-        "played from here · GRAIN / COCO / DELAY / NOISE",
+        "played from here · GRAIN / COCO / DELAY / NOISE / SIDRAX / WAVE",
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
@@ -85,13 +85,22 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX", "WAVE", "BENJO"]
+    static let modeNames = ["GRAIN", "COCO", "DELAY", "NOISE", "SIDRAX", "WAVE"]
+    /// the guide that runs along the status line, one per BLE mode
+    static let modeGuides = [
+        "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
+        "a looper with its own play head · EARTH bends the speed · FLIP runs it backwards",
+        "a stereo tap delay · SKIP taps the tempo · the WET knob feeds it back",
+        "a folding noise ring · LFO for a slow wander · DIST for fuzz",
+        "four plates, one note each · press on one Cafe, it rings out on the other",
+        "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it",
+    ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "dial.medium"]
+    static let modeIcons = ["circle.grid.3x3", "infinity", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -100,7 +109,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, delay, noise, sidrax, wave, benjo, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, delay, noise, sidrax, wave, harmony, multi, arp, speech, knob }
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -303,8 +312,8 @@ final class Rig: ObservableObject {
         return ["S \(10 + k) \(Int((a.x * 1000).rounded())) \(Int((a.y * 1000).rounded())) \(Int((sxArea[k] * 1000).rounded()))"]
     }
     /// WAVE: SCALE · KEY and CHORD · OCTAVE and the plates are SIDRAX's own; its two pads in between are its own
-    /// (FRAME · SPREAD, SCAN rate · depth)
-    let wvTop: [PadAxis] = [PadAxis((0.3, 0.0)), PadAxis((0.3, 0.0))]
+    /// (VECTOR: the mix of the four corner waves A B C D · ORBIT: the vector circling by itself, rate · size)
+    let wvTop: [PadAxis] = [PadAxis((0.5, 0.5)), PadAxis((0.3, 0.0))]
     var wvAxes: [PadAxis] { [sxAxes[0], wvTop[0], wvTop[1], sxAxes[3]] + Array(sxAxes[4...7]) }
     @Published var wvPicking = false       // the file picker for the table
     @Published var wvNote = ""             // which file the table came from
@@ -317,25 +326,6 @@ final class Rig: ObservableObject {
         }
     }
     func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) }
-    /// BENJO (mode 6): eight pads of its own ("S 30..45")
-    let bnAxes: [PadAxis] = BnPad.starts.map { PadAxis($0) }
-    /// 0 FREE · 1 CHORD (in the scale) · 2 PLAY (the bottom row = four plates, SIDRAX's)
-    @Published var bnMode = 0
-    var bnPlay: Bool { bnMode == 2 }
-    /// the 8 pads on screen: in PLAY the bottom row is the plates
-    var bnShown: [PadAxis] { bnPlay ? Array(bnAxes[0...3]) + Array(sxAxes[4...7]) : bnAxes }
-    func bnCommands(pad i: Int) -> [String] {
-        if bnPlay && i >= 4 {
-            let a = sxAxes[i], k = i - 4
-            return ["S \(50 + k) \(Int((a.x * 1000).rounded())) \(Int((a.y * 1000).rounded())) \(Int((sxArea[k] * 1000).rounded()))"]
-        }
-        let a = bnAxes[i]
-        return ["S \(30 + 2 * i) \(Int((a.x * 1000).rounded()))", "S \(31 + 2 * i) \(Int((a.y * 1000).rounded()))"]
-    }
-    func bnAll() -> [String] { (0..<8).flatMap { i in bnPlay && i >= 4 ? [] : bnCommands(pad: i) } + ["S 46 \(bnMode * 500)"] }
-    func bnDice() {
-        for i in [0, 1, 2, 3] { bnAxes[i].x = Double.random(in: 0.1...0.9); bnAxes[i].y = Double.random(in: 0.0...0.8) }
-    }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
@@ -393,7 +383,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .coco, .delay, .noise, .sidrax, .wave, .benjo][min(max(ctxMode, 0), 6)]
+        return [PadSet.grain, .coco, .delay, .noise, .sidrax, .wave][min(max(ctxMode, 0), 5)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

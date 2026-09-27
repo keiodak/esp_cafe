@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.57"
+#define FW_VERSION "3.58"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -226,7 +226,7 @@ static void pl_report() {
 //   R <0|1>      recording off/on (GRAIN / RUNGLER)
 //   W <start> <data>  write samples (2 chars each, 48 + 6 bits) -> "w <start>"
 //   G <n>        switch to preset n (0-based, see the playlist)
-//   M <id> <v>   grain parameter (see mo_update); M 25 <0..6> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX / WAVE / BENJO · S = SIDRAX / WAVE / BENJO (see sx_update, bn_update)
+//   M <id> <v>   grain parameter (see mo_update); M 25 <0..5> = BLE preset mode GRAIN / COCO / DELAY / NOISE / SIDRAX / WAVE · S = SIDRAX / WAVE (see sx_update)
 //   C <id> <v>   coco parameter (see co_update)
 //   Y <id> <v>   delay parameter (see dl_update)
 //   N <id> <v>   noise parameter (see nz_update)
@@ -427,8 +427,8 @@ void nz_update() {
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
 //  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
-// WAVE: "S 20..23": 20 frame  21 spread (each plate its own frame)  22 scan rate  23 scan depth
-volatile int16_t wv_p[4] = {300, 0, 300, 0};
+// WAVE: "S 20..23": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size
+volatile int16_t wv_p[4] = {500, 500, 300, 0};
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
@@ -446,11 +446,10 @@ void sx_update() {
   sx_pan = 2048;
   sx_aligned = sx_p[8] >= 500;
   { float w[4]; for (int i = 0; i < 4; i++) w[i] = wv_p[i] / 1000.0f;
-    wv_frame = (int32_t)(w[0] * 63.0f * 256.0f);
-    wv_spread = (int32_t)(w[1] * 20.0f * 256.0f);                     // up to 20 frames between plates
-    float sr = 0.02f * powf(400.0f, w[2]);                             // SCAN 0.02 .. 8 Hz
-    wv_scaninc = (uint32_t)(sr / hz * 4294967295.0f);
-    wv_sdepth = (int32_t)(w[3] * 32.0f * 256.0f); }                    // ± up to 32 frames
+    wv_vx = (int32_t)(w[0] * 4096.0f); wv_vy = (int32_t)(w[1] * 4096.0f);
+    float orr = 0.02f * powf(400.0f, w[2]);                            // ORBIT 0.02 .. 8 Hz
+    wv_orbinc = (uint32_t)(orr / hz * 4294967295.0f);
+    wv_orb = (int32_t)(w[3] * 4096.0f); }                              // up to the whole square
   // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
   static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
                                     {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
@@ -470,49 +469,6 @@ void sx_update() {
     if (f > clk * 0.2f) f = clk * 0.2f;
     sx_inc[k] = (uint32_t)(f / clk * 4294967296.0f);
   }
-}
-
-// ---- BENJO parameters (k.odk). "S 30..46" ----
-//  30 OSC 1 (FREE: rate · CHORD: the note · PLAY: the octave)  31 RUN 1  32 OSC 2 (FREE: rate · CHORD / PLAY: interval)
-//  33 RUN 2  34 FILTER  35 RES  36 X-MOD 2->1  37 X-MOD 1->2  38 PWM / TRI  39 DRIVE  40 LOOP  41 GLIDE
-//  42 EARTH -> OSC 1  43 EARTH -> FILTER  44 KEY  45 SCALE  46 mode (0 FREE · 500 CHORD · 1000 PLAY)
-volatile int16_t bn_p[17] = {450, 300, 250, 350, 550, 350, 150, 0, 0, 300, 0, 0, 0, 0, 0, 200, 0};
-void bn_update() {
-  float hz = clock_hz(), p[17];
-  float clk = sx_hz > 1000 ? sx_hz : hz;
-  for (int i = 0; i < 17; i++) p[i] = bn_p[i] / 1000.0f;
-  bn_mode = bn_p[16] < 250 ? 0 : (bn_p[16] < 750 ? 1 : 2);
-  float f1 = 0.05f * powf(100000.0f, p[0]), f2 = 0.05f * powf(100000.0f, p[2]);   // FREE: 0.05 Hz .. 5 kHz
-  if (f1 > hz * 0.25f) f1 = hz * 0.25f; if (f2 > hz * 0.25f) f2 = hz * 0.25f;
-  bn_r1 = (uint32_t)(f1 / hz * 4294967295.0f); bn_r2 = (uint32_t)(f2 / hz * 4294967295.0f);
-  bn_run1 = (int32_t)(p[1] * p[1] * 110.0f);                         // FREE: up to 7 steps · 110 = 3 oct
-  bn_run2 = (int32_t)(p[3] * p[3] * 110.0f);
-  bn_c1 = (uint32_t)(32.703f / clk * 4294967295.0f);
-  // the scale (KEY · SCALE): 0 chromatic · 1 major · 2 minor · 3 pentatonic · 4 minor pentatonic · 5 whole tone
-  static const int8_t sc[6][13] = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
-                                   {0, 2, 4, 7, 9, -1}, {0, 3, 5, 7, 10, -1}, {0, 2, 4, 6, 8, 10, -1}};
-  int s = (int)(p[15] * 5.99f), key = (int)(p[14] * 11.99f);
-  int n = 0; while (n < 12 && sc[s][n] >= 0) n++;
-  for (int d = 0; d < 48; d++) bn_deg[d] = ((d / n) * 12 + sc[s][d % n] + key) * 256 / 12;
-  int deg1 = (int)(p[0] * 5.0f * n);                                // CHORD: OSC 1 = a degree over C1 (5 octaves)
-  bn_n1 = bn_deg[deg1 > 47 ? 47 : deg1] + 256;                       // (from C2)
-  static const int8_t iv[8] = {0, 3, 4, 5, 7, 12, 19, 24};           // OSC 2 above OSC 1
-  bn_iv = iv[(int)(p[2] * 7.99f)] * 256 / 12;
-  bn_st1 = (int32_t)(p[1] * 3.99f);                                  // CHORD / PLAY: 0..3 degrees per rungler step
-  bn_st2 = (int32_t)(p[3] * 3.99f);
-  bn_oct = (int32_t)(p[0] * 5.99f);                                  // PLAY: the octave C1 .. C6
-  bn_fc = (int32_t)(p[4] * 2560.0f);
-  bn_q = (int32_t)(4096.0f * (1.0f - 0.94f * p[5]));
-  bn_fm1 = (int32_t)(p[6] * p[6] * 4096.0f);
-  bn_fm2 = (int32_t)(p[7] * p[7] * 4096.0f);
-  bn_mix = (int32_t)(p[8] * 4096.0f);
-  bn_drive = (int32_t)((0.6f + p[9] * 5.0f) * 256.0f);
-  bn_lock = (int32_t)(p[10] * 4096.0f);
-  bn_glide = p[11] < 0.01f ? 4096 : (int32_t)(4096.0f * (1.0f - expf(-1.0f / (0.001f + p[11] * p[11] * 0.8f) / hz)));
-  if (bn_glide < 1) bn_glide = 1;
-  bn_e1 = (int32_t)(p[12] * 256.0f);
-  bn_ef = (int32_t)(p[13] * 256.0f);
-  bn_relk = (int32_t)(65536.0f * (1.0f - expf(-1.0f / (0.25f * hz)))) + 1;
 }
 
 // ---- HARMONY parameters (k.odk). "V <id> <0..1000>" ----
@@ -691,7 +647,7 @@ void fx_update(int e) {
 }
 void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bn_update(); hd_update(); fx_update_all(); }
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); hd_update(); fx_update_all(); }
 
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
@@ -745,7 +701,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 6 ? 6 : (int)val); }
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 5 ? 5 : (int)val); }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -776,11 +732,6 @@ void pc_line(char *s) {
                 if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
                 else if (id >= 20 && id < 24 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
-                else if (id >= 30 && id < 47 && k >= 2) { bn_p[id - 30] = (int16_t)a1; bn_update(); }   // BENJO
-                else if (id >= 50 && id < 54 && k >= 4) {                          // BENJO: a plate (PLAY)
-                  if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
-                  bn_px[id - 50] = (int16_t)a1; bn_pa[id - 50] = (int16_t)a3;
-                }
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
@@ -1118,7 +1069,7 @@ void loop() {
     sxh_t = now; sxh_n = n;
     if (!first && hz > 1000) {
       sxh_avg = sxh_avg < 1000 ? hz : sxh_avg + (hz - sxh_avg) * 0.25f;
-      if (sx_hz < 1000 || fabsf(sxh_avg - sx_hz) > sx_hz * 0.0003f) { sx_hz = sxh_avg; sx_update(); bn_update(); }
+      if (sx_hz < 1000 || fabsf(sxh_avg - sx_hz) > sx_hz * 0.0003f) { sx_hz = sxh_avg; sx_update(); }
     }
   }
   // (no more fighting the radio for ADC2: EARTH is read on ADC1 alone now, see CTRLJING in setup.h)

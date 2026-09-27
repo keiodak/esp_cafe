@@ -87,7 +87,6 @@ final class Director: ObservableObject {
         case .noise: return rig.nzAxes
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
-        case .benjo: return rig.bnShown
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -117,7 +116,6 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
-            case 6: rig.bnAll().forEach(u.send); sxRoles()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -213,8 +211,6 @@ final class Director: ObservableObject {
             for u in ctxUnits() { rig.sxCommands(pad: i).forEach(u.send) }
         case .wave:
             for u in ctxUnits() { rig.wvCommands(pad: i).forEach(u.send) }
-        case .benjo:
-            for u in ctxUnits() { rig.bnCommands(pad: i).forEach(u.send) }
         case .delay, .harmony:
             let delay = rig.padSet == .delay
             let axes = delay ? rig.dlAxes : rig.hdAxes
@@ -544,7 +540,7 @@ final class Director: ObservableObject {
     // MARK: SIDRAX
     /// the seesaw needs to know which Cafe is which: two on SIDRAX = A (0) and B (1); one alone plays both halves (2)
     func sxRoles() {
-        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] >= 4 && rig.mode[$0.slot] <= 6 }
+        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] >= 4 && rig.mode[$0.slot] <= 5 }
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
@@ -574,19 +570,6 @@ final class Director: ObservableObject {
     func sxDice() {
         for i in 0..<4 { rig.sxAxes[i].x = Double.random(in: 0.05...0.95); rig.sxAxes[i].y = Double.random(in: 0.0...0.8) }
         for i in 0..<4 { padMoved(i) }
-    }
-
-    /// BENJO: new places for the oscillators, the filter and the cross-modulation
-    func bnDice() {
-        rig.bnDice()
-        for i in 0..<4 { padMoved(i) }
-    }
-    /// BENJO: FREE · CHORD · PLAY
-    func setBnMode(_ m: Int) {
-        rig.bnMode = m
-        if m != 2 { rig.sxArea = [0, 0, 0, 0] }
-        for u in ctxUnits() { rig.bnAll().forEach(u.send) }
-        refresh()
     }
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
@@ -697,7 +680,6 @@ private struct MainScreen: View {
         case .noise: return (rig.nzAxes[i], NzPad(rawValue: i)!.title)
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
-        case .benjo: return (rig.bnShown[i], BnPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -727,17 +709,13 @@ private struct MainScreen: View {
             let r = rig
             if i == 1 || i == 2 { return { x, y in WvPad.caption(i, x, y) } }
             return { x, y in SxPad.caption(i, x, y, rig: r) }
-        case .benjo:
-            if i == 3 || (i > 3 && i != 7) || (i == 7 && rig.bnPlay) { return nil }
-            let m = rig.bnMode
-            return { x, y in BnPad.caption(i, x, y, mode: m) }
         default:
             return nil
         }
     }
 
     @ViewBuilder private func pad(_ i: Int) -> some View {
-        if (rig.padSet == .sidrax || rig.padSet == .wave || (rig.padSet == .benjo && rig.bnPlay)) && i >= 4 {   // SIDRAX / WAVE / BENJO PLAY: the bottom row = four touch plates
+        if (rig.padSet == .sidrax || rig.padSet == .wave) && i >= 4 {   // SIDRAX / WAVE: the bottom row = four touch plates
             let director = d
             PlatePad(axis: rig.sxAxes[i], rig: rig, k: i - 4, tag: String(format: "%02ld", i + 1), send: { director.padMoved(i) })
                 .frame(height: padHeight)
@@ -979,41 +957,42 @@ private struct HudBar: View {
         let p = unit.isConnected && unit.preset >= 0 ? unit.preset : rig.preset[unit.slot]
         let m = unit.isConnected ? unit.mode : rig.mode[unit.slot]
         let inView = rig.inCtx(unit.slot)
-        // one line of type: every item sits on the same baseline, in one size (tags and words alike)
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+        // one line, every part on a fixed width: switching presets never pushes the slider or the keys about
+        var info = ""
+        if p == Preset.ble { info = Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)] }
+        if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
+        if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
+            info += (info.isEmpty ? "" : " ") + String(format: "%.0fBPM", unit.bpm > 0 ? unit.bpm : rig.bpm)
+        }
+        let guide = p == Preset.ble ? Preset.modeGuides[min(max(m, 0), Preset.modeGuides.count - 1)]
+                  : (p >= 0 && p < Preset.notes.count ? Preset.notes[p] : "")
+        return HStack(alignment: .center, spacing: 6) {
             HudTag(text: top ? "A" : "B", fill: unit.isConnected ? PastelTheme.hudBlack : PastelTheme.hudLine, size: 9)
             Text((unit.name ?? "NO_LINK").uppercased().replacingOccurrences(of: "-", with: "_"))
                 .font(.hud(9, .semibold))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
-            HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 9)
-            if p == Preset.ble {
-                Text(Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)])
-                    .font(.hud(9, .semibold))
-                    .tracking(1)
-                    .foregroundStyle(PastelTheme.hudOrange)
+                .frame(width: 56, alignment: .leading)
+            HStack(spacing: 0) {
+                HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 9)
+                Spacer(minLength: 0)
             }
-            if p == Preset.multi {
-                Text(Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)])
-                    .font(.hud(9, .semibold))
-                    .tracking(1)
-                    .foregroundStyle(PastelTheme.hudOrange)
-                if rig.fxLink { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 9) }
-            }
-            if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
-                Text(String(format: "%.1f", unit.bpm > 0 ? unit.bpm : rig.bpm))
-                    .font(.hud(9, .semibold).monospacedDigit())
-                    .foregroundStyle(PastelTheme.hudBlack)
-                Text("BPM").font(.hud(9, .semibold)).foregroundStyle(PastelTheme.textSecondary)
-                if rig.link && rig.padSet == .delay { HudTag(text: "LINK", fill: PastelTheme.hudOrange, size: 9) }
-            }
+            .frame(width: 92).clipped()
+            Text(info)
+                .font(.hud(9, .semibold).monospacedDigit())
+                .tracking(1)
+                .foregroundStyle(PastelTheme.hudOrange)
+                .lineLimit(1)
+                .frame(width: 70, alignment: .leading)
+            GuideTicker(text: guide)
             // the preset manager lives behind this box: say so
-            HudTag(text: "PRESETS ▾", size: 9)
+            HudTag(text: "▾", size: 9)
         }
         .frame(maxHeight: .infinity)
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(height: 20)
+        .fixedSize(horizontal: true, vertical: false)
         .background(Rectangle().fill(PastelTheme.padScreen))
         .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
         .contentShape(Rectangle())
@@ -1073,13 +1052,6 @@ private struct HudBar: View {
             case 2: key("dice") { d.sxDice() }
             default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
-        case .benjo:
-            switch n {
-            case 0: textKey(BnPad.modeNames[min(max(rig.bnMode, 0), 2)], on: rig.bnMode != 0) { d.setBnMode((rig.bnMode + 1) % 3) }
-            case 1: key("dice") { d.bnDice() }
-            case 2: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            default: blank
-            }
         case .sidrax:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
@@ -1137,7 +1109,7 @@ private struct HudBar: View {
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
         "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
-        "waveform.circle": "MODE", "dial.medium": "MODE",
+        "waveform.circle": "MODE",
     ]
 
     /// a key with a word only (no icon)
@@ -1363,5 +1335,25 @@ private struct CharControl: View {
         .fixedSize()
         .opacity(preset >= 0 && preset < Preset.count ? 1 : 0)
         .allowsHitTesting(preset >= 0 && preset < Preset.count)
+    }
+}
+
+
+/// the guide on the status line: the words step along one character at a time, like an old LCD ticker
+private struct GuideTicker: View {
+    let text: String
+    static let step = 0.14
+    var body: some View {
+        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: GuideTicker.step)) { tl in
+            let chars = Array("   " + text.uppercased() + "   ·")
+            let n = max(chars.count, 1)
+            let k = Int(tl.date.timeIntervalSinceReferenceDate / GuideTicker.step) % n
+            Text(String((chars[k...] + chars[..<k]).prefix(21)))
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(width: 100, alignment: .leading)
+        .clipped()
     }
 }
