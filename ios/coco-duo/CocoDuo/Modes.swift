@@ -361,7 +361,9 @@ final class Rig: ObservableObject {
         (0..<4).compactMap { k in Bytebeat.compile(bbFormula(k)).map { "J \(k) " + Bytebeat.hex($0) } }
     }
     func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
-    func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
+    func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(sxFreeze ? 1000 : 0)"] }
+    /// FREEZE (COCO's): the last ~2 s of SIDRAX held as a loop under the plates ("S 24")
+    @Published var sxFreeze = false
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 

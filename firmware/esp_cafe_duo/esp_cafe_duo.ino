@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.65"
+#define FW_VERSION "3.66"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -427,7 +427,7 @@ void nz_update() {
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
 //  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
-// WAVE: "S 20..24": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size  24 FREEZE (0 | 1000)
+// WAVE: "S 20..24": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size  24 FREEZE (0 | 1000, SIDRAX too)
 volatile int16_t wv_p[5] = {500, 500, 300, 0, 0};
 void sx_update() {
   float hz = clock_hz(), p[9];

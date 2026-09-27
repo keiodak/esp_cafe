@@ -555,6 +555,7 @@ final class Director: ObservableObject {
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
     /// WAVE: DRONE on / off
+    func setSxFreeze(_ on: Bool) { rig.sxFreeze = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
     func setWvFreeze(_ on: Bool) { rig.wvFreeze = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
     /// BYTEBEAT: the formula last sent for each of the four (moving a pad sends only when its numbers change)
     var bbSent = ["", "", "", ""]
@@ -1099,8 +1100,8 @@ private struct HudBar: View {
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }             // HOLD the plates
-            case 2: key("dice") { d.sxDice() }
-            default: blank
+            case 2: textKey("FREEZE", on: rig.sxFreeze) { d.setSxFreeze(!rig.sxFreeze) }    // the last ~2 s held as a loop
+            default: key("dice") { d.sxDice() }
             }
         case .noise:
             switch n {

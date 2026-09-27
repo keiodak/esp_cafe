@@ -1894,9 +1894,9 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
     if (pressHere) l += (tri * env[k]) >> 13;                // (half each: four at once stay under the ceiling)
     if (relHere) l += (tri * eR[k]) >> 13;
   }
-  // WAVE FREEZE (like COCO's): its own sound is always written to the tape behind the table (~2.2 s round);
+  // SIDRAX / WAVE FREEZE (like COCO's): its own sound is always written to the tape behind the table (~2.2 s round);
   // FREEZE stops the writing and the last round plays as a loop under the plates (a soft seam where it joins)
-  if (sx_wave) {
+  {
     static uint32_t fw = 0, fp = 0;
     static bool was = false;
     static int32_t fg = 0;
@@ -2297,7 +2297,8 @@ void IRAM_ATTR coco_pc() {
   //   phone not connected : slow blink (about once a second)
   //   GRAIN / COCO        : OFF while recording, ON while the tape is held
   //   DELAY               : ON while held, else a flash on every click
-  //   NOISE               : the gate
+  //   NOISE / BYTE        : the gate
+  //   SIDRAX / WAVE       : ON while recording (for FREEZE), OFF when frozen
   if (!pc_link) {
     if ((now >> 19) & 1) {
       LAMP_ON;
@@ -2310,8 +2311,14 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || smode || bmode) {
-    if (smode ? sx_gate : (bmode ? bb_gate : nz_gate)) {
+  } else if (smode) {                          // SIDRAX / WAVE: ON while its sound is being recorded, OFF on FREEZE
+    if (!wv_frz) {
+      LAMP_ON;
+    } else {
+      LAMP_OFF;
+    }
+  } else if (nmode || bmode) {
+    if (bmode ? bb_gate : nz_gate) {
       LAMP_ON;
     } else {
       LAMP_OFF;
