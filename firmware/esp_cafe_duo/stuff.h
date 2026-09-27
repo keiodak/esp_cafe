@@ -507,7 +507,7 @@ int dellius(int ptr, int val, bool but) {
 // dellius(p, 0, true) is NOT a pure read: while the freeze crossfade (xfado) runs it
 // writes a blend of 0 into the tape -> a single near-zero sample = a "bot" click later.
 // Use dread() whenever you only want to look.
-int dread(int ptr) {
+int IRAM_ATTR dread(int ptr) {        // (in IRAM: read every sample from the interrupt)
   uint8_t *dp = dchunk[(ptr >> DCHUNK_BITS) & (DCHUNKS - 1)];
   ptr = (ptr & ((1 << DCHUNK_BITS) - 1)) * 3;
   int biz = ptr & 1;
@@ -518,7 +518,7 @@ int dread(int ptr) {
 }
 
 // RAW tape write (k.odk): packs a 12-bit value, no crossfade logic, never touches xfado/yfado
-void dwrite(int ptr, int val) {
+void IRAM_ATTR dwrite(int ptr, int val) {
   if (val < 0) val = 0; if (val > 4095) val = 4095;
   uint8_t *dp = dchunk[(ptr >> DCHUNK_BITS) & (DCHUNKS - 1)];
   ptr = (ptr & ((1 << DCHUNK_BITS) - 1)) * 3;

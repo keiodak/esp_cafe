@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.70"
+#define FW_VERSION "3.71"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -162,7 +162,6 @@ void ble_begin() {
   adv->setScanResponseData(sr);
   adv->setMinInterval(32);                         // 20 .. 40 ms: found quickly when the phone scans
   adv->setMaxInterval(64);
-  NimBLEDevice::setPower(9);                       // the strongest the radio has (+9 dBm)
   ble_ok = adv->start();
 }
 // keep the Cafe findable (k.odk): once a second, if nobody is connected and it stopped advertising (it can miss the
