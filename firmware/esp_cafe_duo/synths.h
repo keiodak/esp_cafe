@@ -2361,7 +2361,9 @@ void IRAM_ATTR harmony() {
   int32_t v[2];
   int32_t gc = t < 64 ? t : (S - 1 - t < 64 ? S - 1 - t : 64);  // fade at the cycle's edges
   static int32_t chs = 0;                                       // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
-  chs += (((int32_t)ch_v[6] << 8) - chs) >> 10;
+  // CHAR is a switch here: below the middle = CLEAN only (before, any value above 0 mixed some of the chopped
+  // rpls cycles in, even while the app said CLEAN — the grainy, "not clean" sound)
+  chs += ((((int32_t)(ch_v[6] >= 500 ? 1000 : 0)) << 8) - chs) >> 10;
   int32_t mixc = ((chs >> 8) * 256) / 1000;
   if (mixc < 0) mixc = 0;
   if (mixc > 256) mixc = 256;
@@ -2385,6 +2387,10 @@ void IRAM_ATTR harmony() {
       lp[k] += ((x - lp[k]) * hd_tone) >> 12;
       x = lp[k];
     }
+    // a high-pass at ~110 Hz on the voices: the shifted copies stay above the input, no boom under it
+    static int32_t hpl[2] = { 0, 0 };
+    hpl[k] += ((x << 8) - hpl[k]) >> 6;
+    x -= hpl[k] >> 8;
     v[k] = x;
     q[k] += r;
     int32_t Sq = S << 12;
