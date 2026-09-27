@@ -43,6 +43,7 @@ struct PresetManagerView: View {
                             ChipButton(title: "ALIGNED", filled: rig.sxAligned) { d.setSxAligned(true) }
                             ChipButton(title: "FREE", filled: !rig.sxAligned) { d.setSxAligned(false) }
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
+                            ChipButton(title: "DRONE", filled: rig.wvDrone) { d.setWvDrone(!rig.wvDrone) }
                             ChipButton(title: "FILE", filled: false) { wvPick = true }
                             Text(rig.wvNote)
                                 .font(.hud(8, .semibold))
@@ -123,15 +124,14 @@ struct PresetManagerView: View {
                         if case .success(let url) = result { d.loadWaveTable(url) }
                     }
                 } else {
-                    // the same height as PRESETS: the cards, and NOW filling what is left (a scroll if they don't fit)
-                    ViewThatFits(in: .vertical) {
+                    // the same height as PRESETS: the cards and NOW, shrunk to fit if they are taller (no scrolling)
+                    FitToWindow {
                         VStack(spacing: 8) {
                             rightCards
-                            NowCard(rig: rig).frame(minHeight: 64, maxHeight: .infinity)
+                            NowCard(rig: rig).frame(minHeight: 64)
                         }
-                        ScrollView(showsIndicators: false) { VStack(spacing: 8) { rightCards } }
                     }
-                    .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
+                    .frame(height: presetsH > 0 ? presetsH : 300, alignment: .top)
                 }
             }
         }
@@ -175,7 +175,7 @@ private struct DesignCard: View {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
             grid([2, 9, 10])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
-            ScrollView {
+            FitToWindow {
                 grid(Self.appleOrder)
             }
             .frame(maxHeight: .infinity)

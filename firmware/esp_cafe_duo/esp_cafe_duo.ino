@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.60"
+#define FW_VERSION "3.61"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -427,8 +427,8 @@ void nz_update() {
 //  0 scale (free · pentatonic · major · minor · whole tone · chromatic · fifths)  1 key (C .. B)  2 mutual FM
 //  3 self FM (triangle -> saw)  4 chaos (the circle of FM)  5 glitch  6 chord (7 voicings)  7 octave (C1 .. C5)
 //  8 aligned (0 free, 1000 aligned). Release, tone and pan are fixed here.
-// WAVE: "S 20..23": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size
-volatile int16_t wv_p[4] = {500, 500, 300, 0};
+// WAVE: "S 20..24": 20 / 21 the VECTOR (x · y)  22 ORBIT rate  23 ORBIT size  24 DRONE (0 | 1000)
+volatile int16_t wv_p[5] = {500, 500, 300, 0, 0};
 void sx_update() {
   float hz = clock_hz(), p[9];
   for (int i = 0; i < 9; i++) p[i] = sx_p[i] / 1000.0f;
@@ -449,7 +449,8 @@ void sx_update() {
     wv_vx = (int32_t)(w[0] * 4096.0f); wv_vy = (int32_t)(w[1] * 4096.0f);
     float orr = 0.02f * powf(400.0f, w[2]);                            // ORBIT 0.02 .. 8 Hz
     wv_orbinc = (uint32_t)(orr / hz * 4294967295.0f);
-    wv_orb = (int32_t)(w[3] * 4096.0f); }                              // up to the whole square
+    wv_orb = (int32_t)(w[3] * 4096.0f);
+    wv_drone = wv_p[4] >= 500; }                              // up to the whole square
   // each plate's note, exactly (C1 = 32.703 Hz; on the clock measured over 4 s)
   static const int8_t sc[7][13] = {{0, -1}, {0, 2, 4, 7, 9, -1}, {0, 2, 4, 5, 7, 9, 11, -1}, {0, 2, 3, 5, 7, 8, 10, -1},
                                     {0, 2, 4, 6, 8, 10, -1}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1}, {0, 7, -1}};
@@ -476,24 +477,20 @@ void sx_update() {
 //  6 voices level  7 dry  8 overdub (old tape kept)  9 tone  11 EARTH wobble  13 hold
 //  intervals (12): backwards · backwards -oct · -2 oct · -oct · -5th · -4th · unison · +4th · +5th · +oct · +oct+5th · +2 oct
 //  timing: 16 steps of the cycle
-static const int16_t hd_default[14] = {727, 0, 545, 0, 600, 0, 500, 1000, 0, 1000, 0, 0, 0, 0};   // (VOICE 1 +5th, VOICE 2 at UNISON = off: one harmony)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
-static const float hd_cyc[6] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
+static const int16_t hd_default[14] = {727, 0, 545, 0, 300, 0, 600, 1000, 0, 1000, 0, 0, 0, 0};   // (VOICE 1 +5th, VOICE 2 at UNISON = off: one harmony)   // (both voices with the input: no echo)   // (no feedback, no EARTH wobble: dry)
 void hd_update() {
   float hz = clock_hz(), p[14];
-  for (int i = 0; i <= 256; i++) hd_win[i] = (int16_t)(4096.0f * (0.5f - 0.5f * cosf(6.2831853f * i / 256.0f)));
   for (int i = 0; i < 14; i++) p[i] = hd_p[i] / 1000.0f;
   float beat = hz * 60.0f / cafe_bpm;
   hd_rate[0] = hd_iv[(int)(p[0] * 11.0f + 0.5f)];
   hd_off[0] = (int32_t)(p[1] * 15.0f + 0.5f);
   hd_rate[1] = hd_iv[(int)(p[2] * 11.0f + 0.5f)];
   hd_off[1] = (int32_t)(p[3] * 15.0f + 0.5f);
-  float S = beat * hd_cyc[(int)(p[4] * 5.0f + 0.5f)];
-  while (S > HD_STRIDE - 2) S *= 0.5f;
-  hd_S = (int32_t)S;
-  hd_fb = 0;   // no feedback here: the Cafe's own WET knob already feeds back (two loops = a dense, reverb-like haze)
+  hd_S = HD_STRIDE - 2;                                           // the buffers turn at one fixed length (~1 s): no CYCLE
+  hd_fb = (int32_t)(p[5] * 0.6f * 256.0f);                        // OVERDUB: the voices back onto the tape (rpls' > page)
   hd_lvl = (int32_t)(p[6] * 1.5f * 256.0f);
   hd_dry = (int32_t)(p[7] * 256.0f);
-  hd_keep = (int32_t)(p[8] * 230.0f);
+  hd_keep = (int32_t)(p[4] * 0.85f * 256.0f);                    // ECHO: record-to-record feedback (the old tape kept)
   hd_tone = p[9] >= 0.98f ? 4096 : (int32_t)(300.0f + p[9] * p[9] * 3796.0f);
   hd_wob = (int32_t)(p[11] * 256.0f);
   hd_hold = hd_p[13] > 0;
@@ -731,7 +728,7 @@ void pc_line(char *s) {
                 long id = -1, a1 = 0, a2 = 0, a3 = 0; int k = sscanf(s + 1, "%ld %ld %ld %ld", &id, &a1, &a2, &a3);
                 if (a1 < 0) a1 = 0; if (a1 > 1000) a1 = 1000;
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
-                else if (id >= 20 && id < 24 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
+                else if (id >= 20 && id < 25 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;

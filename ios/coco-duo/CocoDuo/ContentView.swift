@@ -543,6 +543,8 @@ final class Director: ObservableObject {
         let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] >= 4 && rig.mode[$0.slot] <= 5 }
         for u in on { u.send("S 9 \(on.count == 2 ? u.slot : 2)") }
     }
+    /// WAVE: DRONE on / off
+    func setWvDrone(_ on: Bool) { rig.wvDrone = on; ctxUnits().forEach { $0.send("S 24 \(on ? 1000 : 0)") } }
     func setSxAligned(_ on: Bool) { rig.sxAligned = on; ctxUnits().forEach { $0.send("S 8 \(on ? 1000 : 0)") } }
     /// HOLD: a lifted finger leaves its plate sounding; off = every plate lifts
     func setSxHold(_ on: Bool) {
@@ -972,18 +974,18 @@ private struct HudBar: View {
                 .font(.hud(9, .semibold))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
-                .frame(width: 56, alignment: .leading)
+                .frame(width: 50, alignment: .leading)
             HStack(spacing: 0) {
                 HudTag(text: Preset.tag(p), fill: inView ? PastelTheme.hudBlack : PastelTheme.textSecondary, size: 9)
                 Spacer(minLength: 0)
             }
-            .frame(width: 92).clipped()
+            .frame(width: 88).clipped()
             Text(info)
                 .font(.hud(9, .semibold).monospacedDigit())
                 .tracking(1)
                 .foregroundStyle(PastelTheme.hudOrange)
                 .lineLimit(1)
-                .frame(width: 70, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
             GuideTicker(text: guide)
             // the preset manager lives behind this box: say so
             HudTag(text: "▾", size: 9)
@@ -1049,7 +1051,7 @@ private struct HudBar: View {
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
-            case 2: key("dice") { d.sxDice() }
+            case 2: textKey("DRONE", on: rig.wvDrone) { d.setWvDrone(!rig.wvDrone) }        // the plates sound by themselves
             default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
             }
         case .sidrax:
@@ -1095,7 +1097,7 @@ private struct HudBar: View {
     }
 
     private var blank: some View {
-        Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1).frame(width: 21, height: 21)
+        Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1).frame(width: Self.keyW, height: 21)
     }
 
     /// every key says what it does (the icons alone were guesswork)
@@ -1119,13 +1121,15 @@ private struct HudBar: View {
                 .font(.hud(8, .semibold))
                 .tracking(0.5)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
-                .padding(.horizontal, 5)
-                .frame(minWidth: 21)
-                .frame(height: 21)
+                .padding(.horizontal, 3)
+                .frame(width: Self.keyW, height: 21)
                 .background(IconSquare(filled: on))
         }
     }
+    /// every key the same width, whatever its word: switching presets never moves anything
+    static let keyW: CGFloat = 50
 
     private func key(_ name: String, on: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -1136,11 +1140,11 @@ private struct HudBar: View {
                     .font(.hud(8, .semibold))
                     .tracking(0.5)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 21)
-            .frame(height: 21)
+            .padding(.horizontal, 3)
+            .frame(width: Self.keyW, height: 21)
             .background(IconSquare(filled: on))
         }
         .disabled(!enabled)
@@ -1348,12 +1352,12 @@ private struct GuideTicker: View {
             let chars = Array("   " + text.uppercased() + "   ·")
             let n = max(chars.count, 1)
             let k = Int(tl.date.timeIntervalSinceReferenceDate / GuideTicker.step) % n
-            Text(String((chars[k...] + chars[..<k]).prefix(21)))
+            Text(String((chars[k...] + chars[..<k]).prefix(16)))
                 .font(.system(size: 8, weight: .medium, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
         }
-        .frame(width: 100, alignment: .leading)
+        .frame(width: 76, alignment: .leading)
         .clipped()
     }
 }

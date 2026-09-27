@@ -213,9 +213,11 @@ enum DlPad: Int, CaseIterable {
 /// HARMONY (rpls-like replay): per Cafe, VOICE 1 / VOICE 2 = interval (X) and timing in the cycle (Y)
 enum HdPad: Int, CaseIterable {
     case voice1, voice2, cycle, tape
-    var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "CYCLE · TONE", "TAP"][rawValue] }
-    var start: (Double, Double) { [(0.727, 0.0), (0.545, 0.0), (0.6, 1.0), (0.0, 1.0)][rawValue] }
-    var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (8, 9)][rawValue] }       // (no FEEDBACK: the Cafe's WET knob does it)
+    // after rpls: the tape turns once a second (no CYCLE); ECHO = record-to-record feedback, OVERDUB = the voices
+    // back onto the tape (transposed overdubs), TONE = a low-pass on the voices
+    var title: String { ["VOICE 1 · TIMING", "VOICE 2 · TIMING", "ECHO · TONE", "OVERDUB"][rawValue] }
+    var start: (Double, Double) { [(0.727, 0.0), (0.545, 0.0), (0.3, 1.0), (0.0, 0.0)][rawValue] }
+    var ids: (Int, Int) { [(0, 1), (2, 3), (4, 9), (5, 5)][rawValue] }
     static let intervals = ["REV", "REV -OCT", "-2 OCT", "-OCT", "-5TH", "-4TH", "UNISON", "+4TH", "+5TH", "+OCT", "+OCT+5TH", "+2 OCT"]
     static let cycles = ["1/4", "1/2", "1", "2", "4", "8"]
     static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
@@ -223,8 +225,8 @@ enum HdPad: Int, CaseIterable {
         case 0, 1:
             let iv = min(11, Int(x * 11 + 0.5)), tm = Int(y * 15 + 0.5)
             return iv == 6 && tm == 0 ? "OFF" : "\(intervals[iv]) · \(tm)/16"      // (UNISON, no TIMING = silent)
-        case 2: return "\(cycles[min(5, Int(x * 5 + 0.5))]) BEAT · " + (y >= 0.98 ? "OPEN" : "TONE \(Int(y * 100))%")
-        default: return "KEEP \(Int(x * 90))%"
+        case 2: return "ECHO \(Int(x * 100))% · " + (y >= 0.98 ? "OPEN" : "TONE \(Int(y * 100))%")
+        default: return "OVERDUB \(Int(x * 100))%"
         }
     }
 }
@@ -327,7 +329,9 @@ final class Rig: ObservableObject {
         default: return sxCommands(pad: i)
         }
     }
-    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) }
+    /// DRONE: the four plates sound without a finger ("S 24")
+    @Published var wvDrone = false
+    func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(wvDrone ? 1000 : 0)"] }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)"] }
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
@@ -392,7 +396,7 @@ final class Rig: ObservableObject {
     /// the TAP pad (tempo): the 4th pad of each row where there is a tempo (ARP: only the bottom row's)
     func isTapPad(_ i: Int) -> Bool {
         switch padSet {
-        case .delay, .harmony, .multi: return i % 4 == 3
+        case .delay, .multi: return i % 4 == 3
         case .arp: return i == 7
         default: return false
         }
@@ -426,10 +430,10 @@ final class Rig: ObservableObject {
         let a = hdAxes[i]
         let x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
         let ids = HdPad(rawValue: i % 4)!.ids
-        return ["V \(ids.0) \(x)", "V \(ids.1) \(y)"]
+        return ids.0 == ids.1 ? ["V \(ids.0) \(x)"] : ["V \(ids.0) \(x)", "V \(ids.1) \(y)"]
     }
     func hdAll(slot: Int) -> [String] {
-        (0..<3).flatMap { hdCommands(pad: slot * 4 + $0) } + ["V 13 \(hdHold ? 1000 : 0)"]
+        (0..<4).flatMap { hdCommands(pad: slot * 4 + $0) } + ["V 13 \(hdHold ? 1000 : 0)"]
     }
 
     // MARK: COCO

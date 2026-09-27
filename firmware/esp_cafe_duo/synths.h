@@ -1780,6 +1780,7 @@ volatile bool sx_wave = false;
 volatile int32_t wv_vx = 2048, wv_vy = 2048;            // VECTOR, Q12 (0..4096)
 volatile uint32_t wv_orbinc = 0;                        // ORBIT rate (Q32 per sample)
 volatile int32_t wv_orb = 0;                            // ORBIT size, Q12
+volatile bool wv_drone = false;                         // DRONE: the four plates sound without a finger ("S 24")
 static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f of the table at phase ph (Q32)
   int i0 = ph >> 24, i1 = (i0 + 1) & 255; int32_t fi = (ph >> 16) & 255;
   int32_t a = dread(f * 256 + i0), b = dread(f * 256 + i1);
@@ -1839,6 +1840,7 @@ static int32_t __attribute__((noinline)) sx_tick(int32_t *rout) {
   }
   for (int k = 0; k < 4; k++) {
     int32_t a = sx_burst ? 800 : sx_a[k];                    // 0..1000
+    if (sx_wave && wv_drone && a < 550) a = 550;             // WAVE DRONE: every plate holds its note
     if (a > 0) touched = 1;
     // pitch: each plate is ONE note (like a Sidrax bar). Its step is worked out exactly in sx_update (float, equal
     // temperament to the cent — the 1/256-octave steps used before were up to 2 cents off: chords beat, "murky").
@@ -2219,7 +2221,9 @@ void IRAM_ATTR coco_pc() {
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
 
 // ==========================================
-// HARMONY --- PRESET 7 (k.odk): replay in intervals, after norns' rpls (andr-ew)
+// HARMONY --- PRESET 7 (k.odk): after norns' rpls (andr-ew), a varispeed multitap echo
+// (the buffers turn once a second, fixed: no CYCLE; ECHO = record-to-record feedback, OVERDUB = the voices back
+//  onto the tape = transposed overdubs that keep climbing / falling)
 // ==========================================
 // Three buffers take turns (like rpls): the record head fills one with the input for one CYCLE (a number of beats),
 // then moves on; two voices play the two buffers behind it — VOICE 1 the last cycle, VOICE 2 the one before —
@@ -2249,51 +2253,8 @@ static inline int32_t hd_voice(int b, int32_t q, int32_t S) {  // one buffer, po
   int32_t base = b * HD_STRIDE;
   int32_t a = dread(base + i), c = dread(base + j);
   int32_t v = a + (((c - a) * f) >> 8) - 2048;
-  int32_t e = i < 64 ? i : (S - 1 - i < 64 ? S - 1 - i : 64);  // a dip where the buffer wraps
-  return (v * e) >> 6;
-}
-
-// CLEAN (CHAR toward 0): a straight harmonizer instead of rpls' chopped cycles. The three buffers are read as one
-// continuous history; each voice has two read heads half a window apart that slide at the voice's INTERVAL and
-// crossfade (three heads, Hann windows, an even level) -> no restarts, no dips, a smooth transposed copy.
-// TIMING = how far behind the input the voice sits (1/16 of a cycle per step).
-static int32_t hd_hist(int rb, int32_t t, int32_t S, int32_t d, int32_t lim) {  // the input d samples ago
-  if (d < 1) d = 1;
-  if (d > lim) return 0;
-  if (d <= t) return dread(rb * HD_STRIDE + t - d) - 2048;
-  d -= t;
-  if (d <= S) return dread(((rb + 2) % 3) * HD_STRIDE + S - d) - 2048;
-  d -= S;
-  if (d > S) d = S;
-  return dread(((rb + 1) % 3) * HD_STRIDE + S - d) - 2048;
-}
-volatile int16_t hd_win[257];   // a Hann window, Q12 (filled in hd_update: no floats in here)
-static int32_t __attribute__((noinline)) hd_clean(int k, int rb, int32_t t, int32_t S, int32_t r, uint32_t cycles) {
-  // three read heads a third of a window apart, Hann windows (they sum to exactly 1.5): the level stays even while
-  // the heads hand over — two heads with triangles dipped in loudness on every hand-over (a warble)
-  static int32_t ph[2] = { 0, 0 };  // window phase, Q12 samples
-  int32_t W = S >> 1;
-  if (W > 3072) W = 3072;
-  if (W < 96) W = 96;
-  int32_t Wq = W << 12;
-  ph[k] += 4096 - r;  // the delay grows by (1 - rate) a sample
-  while (ph[k] >= Wq) ph[k] -= Wq;
-  while (ph[k] < 0) ph[k] += Wq;
-  int32_t D = (int32_t)(((int64_t)S * hd_off[k]) >> 4) + 32;          // (a new TIMING jumps here: harmony() de-clicks it)
-  int32_t lim = cycles <= 1 ? t : (cycles == 2 ? t + S : t + 2 * S);  // only what has been recorded
-  int32_t out = 0, third = Wq / 3;
-  for (int h = 0; h < 3; h++) {
-    int32_t p = ph[k] + h * third;
-    if (p >= Wq) p -= Wq;
-    int32_t pi = p >> 12, f = (p >> 4) & 255;
-    int32_t xi = (int32_t)(((int64_t)p << 8) / Wq);                  // 0..255 across the window
-    int32_t g = hd_win[xi < 0 ? 0 : (xi > 256 ? 256 : xi)];
-    int32_t d = D + pi;
-    int32_t a = hd_hist(rb, t, S, d, lim), c = hd_hist(rb, t, S, d + 1, lim);
-    int32_t x = a + (((c - a) * f) >> 8);
-    out += (x * g) >> 12;
-  }
-  return (out * 2731) >> 12;                                           // (÷ 1.5)
+  int32_t e = i < 256 ? i : (S - 1 - i < 256 ? S - 1 - i : 256);  // a soft dip where the buffer wraps (~6 ms)
+  return (v * e) >> 8;
 }
 
 void IRAM_ATTR harmony() {
@@ -2359,23 +2320,15 @@ void IRAM_ATTR harmony() {
 
   // the voices: VOICE 1 plays the last cycle, VOICE 2 the one before
   int32_t v[2];
-  int32_t gc = t < 64 ? t : (S - 1 - t < 64 ? S - 1 - t : 64);  // fade at the cycle's edges
-  static int32_t chs = 0;                                       // CHAR: 0 = CLEAN .. 1000 = GRAIN (slewed)
-  // CHAR is a switch here: below the middle = CLEAN only (before, any value above 0 mixed some of the chopped
-  // rpls cycles in, even while the app said CLEAN — the grainy, "not clean" sound)
-  chs = 0;   // CLEAN only: the chopped rpls cycles (a granular sound) are not used any more
-  int32_t mixc = ((chs >> 8) * 256) / 1000;
-  if (mixc < 0) mixc = 0;
-  if (mixc > 256) mixc = 256;
+  int32_t gc = t < 256 ? t : (S - 1 - t < 256 ? S - 1 - t : 256);  // fade at the cycle's edges (~6 ms)
   for (int k = 0; k < 2; k++) {
     int b = (rb + 2 - k) % 3;                                                            // k 0 -> rb-1, k 1 -> rb-2
     bool ready = cycles > (uint32_t)(k + 1);                                             // those buffers hold this input yet
     int32_t r = hd_rate[k] + (int32_t)(((int64_t)hd_rate[k] * pc_emod * hd_wob) >> 15);  // EARTH = wobble
-    int32_t x = 0;
-    (void)b; (void)ready; (void)gc;
+    // rpls: the voice plays its buffer at its own speed (the buffer the record head left 1 or 2 turns ago)
+    int32_t x = ready ? (hd_voice(b, q[k], S) * gc) >> 8 : 0;
     // a voice at UNISON with no TIMING would only double the input: it stays silent (one harmony at a time)
     bool mute = hd_rate[k] == 4096 && hd_off[k] == 0;
-    if (mixc < 256) x += (hd_clean(k, rb, t, S, r, cycles) * (256 - mixc)) >> 8;     // CLEAN
     // de-click: at a jump, carry the difference and let it fade (~6 ms) -> a crossfade instead of a step
     static int32_t lasty[2] = { 0, 0 }, dk[2] = { 0, 0 }, lastoff[2] = { 0, 0 }, lastrate[2] = { 0, 0 };
     bool vj = jump || hd_off[k] != lastoff[k] || hd_rate[k] != lastrate[k];  // TIMING / INTERVAL moved: de-click too

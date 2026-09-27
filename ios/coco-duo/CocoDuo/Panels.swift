@@ -142,7 +142,8 @@ struct PanelScaffold<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        ScrollView {
+        // no scrolling: the whole panel is kept inside the window (shrunk to fit when it is taller)
+        FitToWindow {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Cafe BLE")
@@ -319,4 +320,30 @@ struct PanelColumns<L: View, R: View>: View {
                 }
             )
     }
+}
+
+
+/// Shows its content inside the space it is given, never scrolling: when the content is taller it is scaled down
+/// (from the top left) until it fits; otherwise it is left as it is.
+struct FitToWindow<Content: View>: View {
+    @ViewBuilder var content: Content
+    @State private var natural: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { g in
+            let s = natural > g.size.height + 0.5 && natural > 0 ? max(0.5, g.size.height / natural) : 1
+            content
+                .frame(width: g.size.width / s, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { c in Color.clear.preference(key: FitHeightKey.self, value: c.size.height) })
+                .scaleEffect(s, anchor: .topLeading)
+                .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        }
+        .onPreferenceChange(FitHeightKey.self) { natural = $0 }
+    }
+}
+
+private struct FitHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
