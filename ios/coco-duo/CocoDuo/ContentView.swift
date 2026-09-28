@@ -673,11 +673,14 @@ private struct MainScreen: View {
         VStack(spacing: 7) {
             HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
             pads
+                .frame(maxWidth: .infinity)
                 .zIndex(1)
             HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
+                .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
         }
         .overlayPreferenceValue(PlateAnchors.self) { a in                                   // SIDRAX / WAVE: the fingers, over everything
@@ -1079,7 +1082,6 @@ private struct HudBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(height: 20)
-        .fixedSize(horizontal: true, vertical: false)
         .background(Rectangle().fill(PastelTheme.padScreen))
         .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
         .contentShape(Rectangle())
@@ -1460,7 +1462,7 @@ private struct GuideTicker: View {
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
         }
-        .frame(width: 76, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: 76, alignment: .leading)     // (gives way first when the bar is tight)
         .clipped()
     }
 }
