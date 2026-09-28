@@ -143,17 +143,16 @@ final class HabitEngine {
     private let mem: UnsafeMutablePointer<Int16>    // (a plain block: the audio thread reads it while the link writes it)
     private var mw = 0                           // samples written, ever (the ring index is mw % cap)
     private let cap: Int
-    // the Cafe's read head, as its last packet said (tape samples), and when
-    private var rp: UInt32 = 0
+    // the Cafe's queue (the tape): how full it was (samples at the rate) and how many it had got, as its last packet
+    // said, and when that came — the phone sends to keep it about LEAD full; the Cafe plays it at its own pace
+    private var fillRep = 0, gotRep: UInt16 = 0
     private var rpAt = Date.distantPast
-    // the Cafe's read head, unwrapped, against the phone's clock: the packet that came quickest tells it best (the
-    // others waited in the radio's queue), so the estimate takes the highest, slowly letting go of it
-    private var rpUn: Double = 0, rpLast: UInt32 = 0, rpOff: Double = -.infinity
-    private let t0 = Date()
+    private var sent: UInt16 = 0                 // samples sent, in all (wraps as the Cafe's count does)
+    private static let lead = 1.2                // seconds kept in the Cafe's queue (the link comes in bursts)
     private var lastSeq: UInt16? = nil
     // the playing
-    private var wh = 0                           // the next tape place (in rate samples) the phone writes
     private var synced = false
+    private var pending: (pk: Data, pred: Int32, ix: Int, n: Int)? = nil   // (a packet the link could not take yet)
     private var pred: Int32 = 0, ix = 0
     private struct Voice { var pos: Double; var step: Double; var left: Int; var len: Int; var fade: Int }
     private var voices: [Voice] = []
@@ -208,14 +207,9 @@ final class HabitEngine {
         upBytes += b.count
         guard active, b.count > 11 else { return }
         let seq = UInt16(b[0]) | UInt16(b[1]) << 8
-        rp = UInt32(b[2]) | UInt32(b[3]) << 8 | UInt32(b[4]) << 16 | UInt32(b[5]) << 24
+        fillRep = Int(b[2]) | Int(b[3]) << 8
+        gotRep = UInt16(b[4]) | UInt16(b[5]) << 8
         rpAt = Date()
-        if unit.hz > 1000 {
-            let d = Int((rp &- rpLast) & 0x1FFFF)                // (the head goes round 131072)
-            rpUn += Double(d); rpLast = rp
-            let off = rpUn - rpAt.timeIntervalSince(t0) * unit.hz
-            rpOff = off > rpOff ? off : rpOff - unit.hz * 0.002   // (lets go by 2 ms a packet)
-        }
         unit.hbDrops = Int(UInt16(b[6]) | UInt16(b[7]) << 8)
         lastSeq = seq
         guard !hold else { return }
@@ -248,30 +242,24 @@ final class HabitEngine {
         if auto && !hold && filled >= Int(seconds * rate) - 1 { hold = true; onAutoHold?() }
         if now.timeIntervalSince(scopeT) >= 0.2 { scopeT = now; drawScope() }
         guard toCafe else { return }                            // (the phone plays it itself: nothing goes back)
-        let tapeLen = TAPE / div
         let r = rate
-        // where the Cafe reads now (rate samples on the tape)
-        guard rpOff.isFinite else { return }                    // (no packet timed yet: nothing to aim at)
-        let unEst = rpOff + now.timeIntervalSince(t0) * unit.hz
-        let est = (Double(rp) + (unEst - rpUn)) / Double(div)
-        guard est.isFinite else { return }
-        let head = ((Int(est) % tapeLen) + tapeLen) % tapeLen
-        let lead = Int(1.2 * r), window = Int(0.5 * r)                // (over a second ahead: the link comes in bursts)
-        var ahead = (wh - head) % tapeLen; if ahead < 0 { ahead += tapeLen }
-        if !synced || ahead > tapeLen * 3 / 4 || ahead < lead / 5 {   // lost the thread: start again, ahead
-            wh = (head + lead) % tapeLen
-            ahead = lead
-            synced = true
-            pred = 0; ix = 0
+        if !synced { sent = gotRep; pred = 0; ix = 0; pending = nil; synced = true }
+        var inFlight = Int(sent &- gotRep)                       // sent, not yet come
+        if inFlight > 30000 { sent = gotRep; inFlight = 0 }      // (the Cafe started again: count from its count)
+        let fillNow = Double(fillRep) - now.timeIntervalSince(rpAt) * r + Double(inFlight)
+        var want = min(Int(Self.lead * r - fillNow), Int(0.5 * r))
+        if let q = pending {                                     // (first the one that waited: no sound is lost)
+            guard unit.habitSend(q.pk) else { return }
+            pred = q.pred; ix = q.ix; downBytes += q.pk.count; sent = sent &+ UInt16(q.n); want -= q.n
+            pending = nil
         }
-        var want = lead + window - ahead
         let maxLen = min(240, unit.habitMaxLen)
         let perPacket = max(16, (maxLen - 7) * 2)
         while want > 0 {
             let n = min(perPacket, want) & ~1
             if n < 2 { break }
             var pk = [UInt8](repeating: 0, count: 7 + n / 2)
-            let pos = UInt32(wh)
+            let pos = UInt32(sent)
             pk[0] = UInt8(pos & 255); pk[1] = UInt8((pos >> 8) & 255); pk[2] = UInt8((pos >> 16) & 255); pk[3] = UInt8(pos >> 24)
             let p16 = UInt16(bitPattern: Int16(pred))
             pk[4] = UInt8(p16 & 255); pk[5] = UInt8(p16 >> 8); pk[6] = UInt8(ix)
@@ -281,10 +269,10 @@ final class HabitEngine {
                 let nb = Adpcm.enc(x, &sp, &si)
                 if k & 1 == 0 { pk[7 + k / 2] = nb } else { pk[7 + k / 2] |= nb << 4 }
             }
-            guard unit.habitSend(Data(pk)) else { break }         // (the link is full: next tick)
+            guard unit.habitSend(Data(pk)) else { pending = (Data(pk), sp, si, n); break }   // (the link is full: next tick)
             pred = sp; ix = si
             downBytes += pk.count
-            wh = (wh + n) % tapeLen
+            sent = sent &+ UInt16(n)
             want -= n
         }
     }
@@ -297,7 +285,7 @@ final class HabitEngine {
     var useEarth = false
     /// where the playing goes: false = the phone's own output (L = Cafe A, R = Cafe B: smooth, nothing over the
     /// link but the recording); true = back onto the Cafe's tape (the old way)
-    var toCafe = false
+    var toCafe = true
     // the phone's output: the memory's rate brought up to the output's, in straight lines
     private var ph: Double = 1, pv: Double = 0, cv: Double = 0
     /// one sample at the output's rate (called on the audio thread)

@@ -2263,9 +2263,12 @@ volatile uint32_t hb_qw = 0, hb_qr = 0;       // packets made / sent
 volatile uint16_t hb_drops = 0;               // packets the link could not take
 volatile int hb_div = 4;                      // RATE: every 4th (~8K) or 8th (~4K) sample goes up
 volatile int32_t hb_dry = 256, hb_wet = 256;  // Q8
+// down: the tape is a queue — the phone's packets go on at hb_wp one after another, the head takes them off at the
+// Cafe's own pace (it never guesses where the head is); the fill goes up in every packet so the phone keeps it ~1 s
 volatile uint32_t hb_rp = 0;                  // the read head (tape samples)
+volatile uint32_t hb_wp = 0;                  // the end of what the phone has sent (tape samples)
+volatile uint32_t hb_got = 0;                 // down samples received, in all (the phone counts what it sent)
 volatile bool hb_reset = true;
-volatile uint32_t hb_wend = 0;                // where the phone's writing has got to (tape samples): past it = stale
 
 static inline uint8_t IRAM_ATTR hb_enc(int32_t x, int32_t &pred, int &ix) {   // one 16-bit sample -> 4 bits
   int32_t st = hb_steps[ix], d = x - pred;
@@ -2295,7 +2298,7 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   static int32_t acc = 0, pred = 0;
   static int accn = 0, ix = 0, pkn = 0;
   static uint16_t seq = 0;
-  if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; }
+  if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; hb_rp = hb_wp; }
   // up: the input, averaged over RATE samples, into packets for the phone
   acc += in;
   if (++accn >= hb_div) {
@@ -2304,10 +2307,9 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
     uint8_t *pk = hb_q[hb_qw & (HB_Q - 1)];
     if (pkn == 0) {
       seq++;
-      uint32_t rp = hb_rp; uint16_t dr = hb_drops;
+      uint16_t dr = hb_drops;
       pk[0] = 0xFF;
       pk[1] = seq & 255; pk[2] = seq >> 8;
-      pk[3] = rp & 255; pk[4] = (rp >> 8) & 255; pk[5] = (rp >> 16) & 255; pk[6] = rp >> 24;
       pk[7] = dr & 255; pk[8] = dr >> 8;
       pk[9] = pred & 255; pk[10] = (pred >> 8) & 255; pk[11] = (uint8_t)ix;
     }
@@ -2316,17 +2318,20 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
     if (pkn & 1) *b |= (uint8_t)(n << 4); else *b = n;
     if (++pkn >= HB_NIB) {
       pkn = 0;
+      uint32_t f = ((hb_wp - hb_rp) & 0x1FFFF) / hb_div, g = hb_got;   // (as it goes: the queue's fill, what has come)
+      pk[3] = f & 255; pk[4] = (f >> 8) & 255; pk[5] = g & 255; pk[6] = (g >> 8) & 255;
       if (hb_qw - hb_qr < HB_Q - 1) hb_qw++; else hb_drops++;   // (full: this one is made again)
     }
   }
   // the tape, round and round: what the phone wrote ahead of this head
   // (only what the phone wrote ahead of this head: once the head passes the end of its writing — the link fell
   //  behind — the tape holds the last round's sound, which would come out as noise: then it fades to silence)
-  static int32_t hg = 0;
-  bool fresh = ((hb_wend - hb_rp) & 0x1FFFF) < 65536;
-  hg += ((fresh ? 4096 : 0) - hg) >> 6;
-  int32_t p = ((dread(hb_rp) - 2048) * hg) >> 12;
-  hb_rp = (hb_rp + 1) & 0x1FFFF;
+  // (the queue ran dry — the link fell behind: the head waits, fading, and goes on when sound comes again)
+  static int32_t hg = 0, last = 0;
+  bool have = hb_wp != hb_rp;
+  hg += ((have ? 4096 : 0) - hg) >> 6;
+  if (have) { last = dread(hb_rp) - 2048; hb_rp = (hb_rp + 1) & 0x1FFFF; }
+  int32_t p = (last * hg) >> 12;
   // smooth: the tape holds 4K / 8K brought up to the Cafe's rate in straight lines — two gentle low-passes at about
   // half that rate take the steps' edges (the grit and the whistle above) off
   static int32_t s1 = 0, s2 = 0;
@@ -2346,26 +2351,26 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
 volatile bool hb_off = false;                 // a firmware update is running: the tape's memory is gone, touch nothing
 void hb_write(const uint8_t *d, size_t n) {
   if (hb_off || pc_mode != 6 || n < 8) return;
-  uint32_t pos = d[0] | (d[1] << 8) | (d[2] << 16) | ((uint32_t)d[3] << 24);
+  static int32_t prev = 0;                                   // (one stream: the lines join across packets)
   int32_t pred = (int16_t)(d[4] | (d[5] << 8));
   int ix = d[6] > 88 ? 88 : d[6];
   int div = hb_div;
-  uint32_t len = 131072 / div;
-  int32_t prev = pred >> 4;
+  uint32_t w = hb_wp;
   for (size_t i = 7; i < n; i++) {
     for (int h = 0; h < 2; h++) {
       uint8_t nb = h ? (d[i] >> 4) : (d[i] & 15);
       int32_t v = hb_dec(nb, pred, ix) >> 4;                 // 16 -> 12 bits
-      uint32_t at = (pos % len) * div;
+      if (((w - hb_rp) & 0x1FFFF) >= 0x1FFFF - div) return;  // (full: the phone sent too much — never overrun the head)
       for (int j = 0; j < div; j++) {                        // back up to the Cafe's rate, in straight lines
-        int32_t w = prev + (((v - prev) * (j + 1)) / div);
-        dwrite((at + j) & 0x1FFFF, w + 2048);
+        int32_t y = prev + (((v - prev) * (j + 1)) / div);
+        dwrite(w, y + 2048);
+        w = (w + 1) & 0x1FFFF;
       }
       prev = v;
-      pos++;
+      hb_got++;
     }
+    hb_wp = w;                                               // (a byte at a time: the head may take it at once)
   }
-  hb_wend = ((pos % len) * div) & 0x1FFFF;                   // (the head may play up to here)
   wv_valid = false;
 }
 
