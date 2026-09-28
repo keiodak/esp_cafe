@@ -151,6 +151,7 @@ final class Director: ObservableObject {
         case Preset.arp:
             u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")               // ARP: the tap delay · PHONE_COCO: the Cafe is COCO
             if rig.arpMode == 1 {
+                u.send("F 98 \(rig.pcCafeStop[s] ? 1 : 0)")
                 rig.coAll(slot: s).forEach(u.send)
                 if rig.pcMode == 0 { applyPc(); pcoco.start() } else { arp.speechOn = true; arp.startAudio() }
             } else { rig.arpDelayAll().forEach(u.send) }
@@ -340,9 +341,15 @@ final class Director: ObservableObject {
         }
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
             u.send("F 97 \(rig.arpMode)")
+            if rig.arpMode == 1 { u.send("F 98 \(rig.pcCafeStop[u.slot] ? 1 : 0)") }
             if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
         }
         if rig.arpMode == 1 { setPcMode(rig.pcMode) } else { refresh() }
+    }
+    /// the Cafe's COCO recording on / off (on PHONE_COCO, EARTH no longer switches it)
+    func setPcCafeRec(_ s: Int) {
+        var v = rig.pcCafeStop; v[s].toggle(); rig.pcCafeStop = v
+        if units[s].isConnected { units[s].send("F 98 \(v[s] ? 1 : 0)") }
     }
     func setPcMode(_ m: Int) {
         rig.pcMode = m == 1 ? 1 : 0
@@ -1247,8 +1254,8 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(pc.loading[0] ? "LOAD…" : "FILE A", on: rig.pcPicking == 0 || pc.loading[0]) { rig.pcSlot = 0; rig.pcPicking = 0 }
             case 1: textKey(pc.loading[1] ? "LOAD…" : "FILE B", on: rig.pcPicking == 1 || pc.loading[1]) { rig.pcSlot = 1; rig.pcPicking = 1 }
-            case 2: textKey("REC A", on: pc.recording == 0) { d.pcoco.toggleRec(0) }                // the mic into A
-            default: textKey("REC B", on: pc.recording == 1) { d.pcoco.toggleRec(1) }
+            case 2: textKey("REC", on: !rig.pcCafeStop[0]) { d.setPcCafeRec(0) }     // the Cafe's COCO recording on / off
+            default: textKey("REC", on: !rig.pcCafeStop[1]) { d.setPcCafeRec(1) }
             }
         case .speech:
             switch n {

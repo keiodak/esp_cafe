@@ -424,6 +424,8 @@ final class Rig: ObservableObject {
     /// COCO's FILE: which sampler the file picker is for (-1 = closed)
     @Published var pcPicking = -1
     var pcSlot = 0
+    /// PHONE_COCO: each Cafe's COCO recording off (its REC key; EARTH bends the phone's pitch instead)
+    @Published var pcCafeStop = [false, false]
     /// ARP_DELAY's layer: 0 = ARP (arpeggio -> tap delay) · 1 = SPEECH (voice -> COCO)
     @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
     @Published var speechText: String = Rig.d.string(forKey: "rig.speechText") ?? "" { didSet { Self.d.set(speechText, forKey: "rig.speechText") } }

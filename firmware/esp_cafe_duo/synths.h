@@ -14,6 +14,7 @@
 
 extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, for the phone)
 volatile bool co_noearth = false;   // ARP_DELAY's PHONE_COCO: EARTH does not switch the recording (it bends the phone's pitch)
+volatile bool co_stop_app = false;  //   ... the phone's REC key does ("F 98 <0|1>": 1 = not recording; the lamp on, as COCO_MOD)
 void IRAM_ATTR coco_mod() {
 
 
@@ -49,8 +50,9 @@ void IRAM_ATTR coco_mod() {
   }
 
   // HYSTERESIS (Using earth_cv)
-  if (co_noearth) {                                 // (PHONE_COCO: always recording, the lamp off)
-    if (audio_frozen_state || lamp) { audio_frozen_state = false; lamp = false; LAMP_OFF; }
+  if (co_noearth) {                                 // (PHONE_COCO: the phone's REC key instead of EARTH)
+    bool st = co_stop_app;
+    if (audio_frozen_state != st || lamp != st) { audio_frozen_state = st; lamp = st; if (st) { LAMP_ON; } else { LAMP_OFF; } }
   } else if (earth_last_state == 0) {
     if (smoothed_earth > TRIGGER_ON_THRESHOLD) {
       lamp = !lamp;
