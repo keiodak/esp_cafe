@@ -879,7 +879,14 @@ private struct MainScreen: View {
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
             .overlay {                                                        // HABIT: the memory, under WHERE
-                if rig.padSet == .habit && i == 0 { HabitStereoScope(l: d.habits[0].scope, r: d.habits[1].scope) }
+                if rig.padSet == .habit && (i == 0 || i == 3) {                    // HABIT: L's memory top left, R's top right
+                    HabitScopeView(scope: d.habits[i == 0 ? 0 : 1].scope).padding(.vertical, 18)
+                        .overlay(alignment: .topTrailing) {
+                            Text(i == 0 ? "L" : "R").font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(PastelTheme.hudBlack.opacity(0.5)).padding(.top, 6).padding(.trailing, 8)
+                        }
+                        .allowsHitTesting(false)
+                }
                 if rig.padSet == .pcoco && i < 2 {                                // COCO: the sampler's sound, under its pad
                     PcWave(pc: d.pcoco, k: i, axis: rig.pcTop[i]).padding(.vertical, 22)
                 }

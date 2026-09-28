@@ -94,29 +94,23 @@ enum Adpcm {
     }
 }
 
-/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, STARVE · GLITCH / CLEAN · LEVEL, TONE · DRIFT,
-/// ECHO · FEEDBACK, DETUNE · OCTAVES
+/// HABIT's pads, one set per side: the left half plays Cafe A's memory (L), the right half Cafe B's (R).
+/// WHERE · JUMP (how far back · how often it jumps somewhere else), PITCH · WOW, GLITCH · STARVE. The sound itself
+/// comes out plain: clean, dry, at full level.
 enum HabitPad {
-    static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "STARVE · GLITCH",
-                         "CLEAN · LEVEL", "TONE · DRIFT", "ECHO · FEEDBACK", "DETUNE · OCTAVES"]
-    /// (it starts as a plain run: LENGTH at the top = the whole memory played on at ×1, a little behind)
-    static let starts: [(Double, Double)] = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.0, 0.0),
-                                             (0.5, 0.6), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
-    /// LENGTH: 30 ms … 4 s, and at the top: the whole run (a tape delay from WHERE)
-    static func whole(_ x: Double) -> Bool { x >= 0.97 }
-    static func length(_ x: Double) -> Double { 0.03 * pow(4.0 / 0.03, min(1, x / 0.97)) }
-    /// SPEED: ¼ … 4, with a catch at 1
-    static func speed(_ x: Double) -> Double { abs(x - 0.5) < 0.04 ? 1 : pow(2, (x - 0.5) * 4) }
+    static let titles = ["L WHERE · JUMP", "L PITCH · WOW", "R PITCH · WOW", "R WHERE · JUMP",
+                         "L GLITCH · STARVE", "—", "—", "R GLITCH · STARVE"]
+    static let starts: [(Double, Double)] = [(0.0, 0.0), (0.5, 0.0), (0.5, 0.0), (0.0, 0.0),
+                                             (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    /// each side's pads: WHERE, PITCH, GLITCH
+    static let pads = [[0, 1, 4], [3, 2, 7]]
+    /// PITCH: -12 … +12 semitones, a catch at 0
+    static func semis(_ x: Double) -> Double { abs(x - 0.5) < 0.03 ? 0 : ((x - 0.5) * 24).rounded() }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 0: return String(format: "%.0f s LATER · %d%%", HabitEngine.shownSeconds * (1 - x * 0.95), Int(y * 100))
-        case 1: return (whole(x) ? "WHOLE" : String(format: "%.2f s", length(x))) + String(format: " · GAP %d%%", Int(y * 100))
-        case 2: return String(format: "×%.2f · REV %d%%", speed(x), Int(y * 100))
-        case 3: return "STARVE \(Int(x * 100))% · GLITCH \(Int(y * 100))%"
-        case 4: return "CLEAN \(Int(x * 100))% · LEVEL \(Int(y * 100))%"
-        case 5: return "TONE \(Int(x * 100))% · DRIFT \(Int(y * 100))%"
-        case 6: return x < 0.02 ? "ECHO OFF" : String(format: "%.2f s · FB %d%%", 0.05 + x * x * 0.95, Int(y * 85))
-        case 7: return "DETUNE \(Int(x * 100))% · OCT \(Int(y * 100))%"
+        case 0, 3: return String(format: "%.0f s LATER · JUMP %d%%", HabitEngine.shownSeconds * (1 - x * 0.95), Int(y * 100))
+        case 1, 2: let st = Int(semis(x)); return "\(st > 0 ? "+" : "")\(st) st · WOW \(Int(y * 100))%"
+        case 4, 7: return "GLITCH \(Int(x * 100))% · STARVE \(Int(y * 100))%"
         default: return ""
         }
     }
@@ -198,7 +192,7 @@ final class HabitEngine {
         timer?.invalidate(); timer = nil
         unit.hbUp = 0; unit.hbDown = 0
     }
-    func clear() { mw = 0; voices = []; wholeVoice = nil }
+    func clear() { mw = 0; pos = -1 }
 
     // MARK: up — the Cafe's input into the memory
 
@@ -319,118 +313,70 @@ final class HabitEngine {
         }
     }
 
-    /// one sample of the playing (±1)
+    /// one sample of the playing (±1): the plain run, LENGTH (… minus WHERE) behind the recording; JUMP moves it
+    /// now and then; PITCH shifts it without moving it (two overlapping heads); then GLITCH · STARVE; full level
+    private var pos: Double = -1                 // the play head (memory samples, ever)
+    private var jumpOff: Double = 0, jumpNow = false
+    private var fadeIn: Double = 1
+    private var pd: Double = 0, wow: Double = 0
     private func next() -> Double {
         let have = filled
         guard have > Int(rate * 0.2) else { return 0 }
-        func a(_ i: Int) -> PadAxis { axes[i] }
         let r = rate
-        // DRIFT: WHERE wanders by itself
-        drift += Double.random(in: -1...1) * a(5).y * 0.00002
-        drift = max(-0.3, min(0.3, drift * 0.99999))
-        var whereBack = min(1, max(0, a(0).x + drift)) * Double(have - Int(r * 0.1)) + r * 0.05
-        if earthOn { whereBack = min(Double(have) - r * 0.1, earthBack * r + r * 0.05) }          // EARTH: its place
-        if pull, let o = other { whereBack = min(Double(have) - r * 0.1, max(r * 0.05, o.age * r)) }   // SKIP: the other's
-        let dir: Double = flip ? -1 : 1                                                        // FLIP: backwards
-        var out = 0.0
-        if HabitPad.whole(a(1).x) {
-            // WHOLE: the plain run. The recording is played back LENGTH (30 s …) later, on and on, while it goes on
-            // recording; frozen (HOLD / AUTO), the held memory goes round. WHERE shortens the wait.
-            let delay = seconds * r * (1 - a(0).x * 0.95)
-            let lo = Double(mw - have + 2), hi = Double(mw - 2)
-            if !hold && Double(mw) < delay { return 0 }                                           // (not yet: still taking)
-            var target = Double(mw) - delay
-            if earthOn { target = Double(mw) - min(Double(have) - r * 0.1, earthBack * r + r * 0.05) }
-            if pull, let o = other { target = Double(mw) - min(Double(have) - r * 0.1, max(r * 0.05, o.age * r)) }
-            if wholeVoice == nil || jump {
-                wholeVoice = Voice(pos: max(lo, target), step: 1, left: .max, len: .max, fade: 1)
-                jump = false
-            }
-            var st = HabitPad.speed(a(2).x) * dir
-            if !hold {                                                                            // (kept on its place: a
-                let err = target - wholeVoice!.pos                                                //  hair faster / slower,
-                st += max(-0.03, min(0.03, err / (r * 2)))                                        //  never a jump)
-            }
-            wholeVoice!.step = st
-            out = sample(wholeVoice!.pos)
-            var p = wholeVoice!.pos + st
-            if hold {                                                                             // frozen: round and round
-                if p >= hi { p -= Double(have - 4) }
-                if p < lo { p += Double(have - 4) }
-            } else { p = min(hi, max(lo, p)) }
-            wholeVoice!.pos = p
-            age = (Double(mw) - p) / r
-            voices = []
+        let side = HabitPad.pads[unit.slot == 1 ? 1 : 0]
+        let wh = axes[side[0]], pt = axes[side[1]], gl = axes[side[2]]
+        let lo = Double(mw - have + 2), hi = Double(mw - 2)
+        let delay = seconds * r * (1 - wh.x * 0.95)
+        if !hold && Double(mw) < delay { return 0 }                                           // (not yet: still taking)
+        // JUMP: now and then somewhere else in the memory (Y = how often: up to ~4 a second)
+        if wh.y > 0.02 {
+            if Double.random(in: 0..<1) < wh.y * wh.y * 4 / r { jumpOff = Double.random(in: 0...Double(have) * 0.9); jumpNow = true }
+        } else if jumpOff != 0 { jumpOff = 0; jumpNow = true }
+        var back = delay + jumpOff
+        if earthOn { back = earthBack * r + r * 0.05 }                                            // EARTH: its place
+        if pull, let o = other { back = max(r * 0.05, o.age * r) }                                // SKIP: the other's
+        back = min(Double(have) - r * 0.1, back)
+        let target = Double(mw) - back
+        if pos < 0 || jump || jumpNow || pos < lo { pos = max(lo, target); fadeIn = 0; jump = false; jumpNow = false }
+        if flip {                                                                                // FLIP: backwards, freely
+            pos -= 1
+            if pos < lo { pos = hi - 1 }
+        } else if hold {                                                                         // frozen: round and round
+            pos += 1
+            if pos >= hi { pos -= Double(have - 4) }
         } else {
-            wholeVoice = nil
-            let layers = 2
-            let len = max(64, Int(HabitPad.length(a(1).x) * r))
-            if jump { untilNext = 0; repeatsLeft = 0; jump = false }                              // EARTH: now
-            if untilNext <= 0 && voices.count < layers {
-                // REPEAT: the same place again, a few times
-                var start: Double
-                if repeatsLeft > 0 { repeatsLeft -= 1; start = lastStart }
-                else {
-                    let spread = a(0).y * Double(have) * 0.3
-                    start = Double(mw) - whereBack - Double.random(in: 0...max(1, spread)) - Double(len) * 4
-                    start = max(Double(mw - have + 2), start)
-                }
-                lastStart = start
-                age = (Double(mw) - start) / r
-                var step = HabitPad.speed(a(2).x)
-                step *= pow(2, Double.random(in: -1...1) * a(7).x * 0.08)                  // DETUNE
-                if Double.random(in: 0..<1) < a(7).y * 0.5 { step *= Bool.random() ? 2 : 0.5 }   // OCTAVES
-                if Double.random(in: 0..<1) < a(2).y { step = -step }                        // REVERSE
-                step *= dir                                                                  // FLIP
-                let pos = step < 0 ? start + Double(len) * abs(step) : start
-                let fade = max(32, Int(Double(len) * 0.2))
-                voices.append(Voice(pos: pos, step: step, left: len, len: len, fade: fade))
-                let gap = a(1).y * 3
-                untilNext = max(32, Int(Double(len) / Double(layers) * (1 + gap)))
-            }
-            untilNext -= 1
-            var k = 0
-            while k < voices.count {
-                var v = voices[k]
-                let done = v.len - v.left
-                let e = min(1, Double(min(done, v.left)) / Double(v.fade))
-                out += sample(v.pos) * e * e
-                v.pos += v.step
-                v.left -= 1
-                if v.left <= 0 { voices.remove(at: k) } else { voices[k] = v; k += 1 }
-            }
-            out /= max(1, Double(layers).squareRoot())
+            if abs(target - pos) > r * 0.5 { pos = target; fadeIn = 0 }                          // (moved far: go there)
+            pos += 1 + max(-0.03, min(0.03, (target - pos) / (r * 2)))                           // (kept on its place)
+            pos = min(hi, max(lo, pos))
         }
-        // TONE: a gentle low-pass (open at the top)
-        let t = a(5).x
-        if t < 0.98 {
-            let c = 0.02 + t * t * 0.9
-            lp += (out - lp) * c
-            out = lp
+        age = (Double(mw) - pos) / r
+        // PITCH (+ WOW): two heads behind the play head, sliding, crossfaded — the place stays, the pitch moves
+        wow += 2 * .pi * 0.6 / r; if wow > 2 * .pi { wow -= 2 * .pi }
+        let ratio = pow(2, HabitPad.semis(pt.x) / 12) * (1 + pt.y * 0.03 * sin(wow))
+        var out: Double
+        if ratio == 1 {
+            out = sample(pos)
+        } else {
+            let w = r * 0.08
+            pd -= ratio - 1
+            pd = pd.truncatingRemainder(dividingBy: w); if pd < 0 { pd += w }
+            let d2 = (pd + w / 2).truncatingRemainder(dividingBy: w)
+            let g1 = 1 - abs(2 * pd / w - 1), g2 = 1 - abs(2 * d2 / w - 1)
+            out = sample(pos - pd) * g1 + sample(pos - d2) * g2
         }
-        out = effects(out, r)
-        // CLEAN · LEVEL: brought up to the memory's loudness (at most ×3, never on near-silence), then CLEAN: the hiss
-        // of the thin link taken off the top (a gentle low-pass) and out of the gaps (an expander under its floor)
-        out *= min(3, 0.7 / max(0.15, peak)) * (a(4).y * 2)
-        let c = a(4).x
-        // (no low-pass here any more: at 4K / 8K there is no top to spare — it only muffled. Instead a lift of the
-        //  top, making up for the averaging on the Cafe and the straight lines between samples)
+        if fadeIn < 1 { fadeIn = min(1, fadeIn + 1 / (r * 0.006)); out *= fadeIn }            // (no click on a jump)
+        out = effects(out, r, glitch: gl.x, starve: gl.y)
+        // full level: brought up to the memory's loudness (at most ×4, never on near-silence)
+        out *= min(4, 0.95 / max(0.1, peak))
+        // (a lift of the top: makes up for the averaging on the Cafe and the straight lines between samples)
         let pre = out
         out += (out - dh) * 0.45
         dh = pre
-        if c > 0.01 {
-            env = max(abs(out), env * 0.9993)
-            let th = 0.01 + c * 0.08
-            let k = env >= th ? 1.0 : (env / th) * (env / th)
-            eg += (k - eg) * 0.003
-            out *= eg
-        }
         return max(-1, min(1, out))
     }
 
-    private func effects(_ x0: Double, _ r: Double) -> Double {
+    private func effects(_ x0: Double, _ r: Double, glitch gv: Double, starve sv: Double) -> Double {
         var x = x0
-        let sv = axes[3].x, gv = axes[3].y
         // GLITCH: now and then, a piece of what just played again (2 … 6 times, sometimes backwards)
         hist[hw] = x; hw = (hw + 1) % hist.count
         if glLeft <= 0 && gv > 0.01 && Double.random(in: 0..<1) < gv * gv * 0.0006 {
@@ -457,16 +403,6 @@ final class HabitEngine {
             }
             gateN -= 1
             if !gateOn { x *= 0.05 }
-        }
-        // ECHO
-        let ex = axes[6].x
-        if ex >= 0.02 {
-            let d = max(1, min(echo.count - 1, Int(r * (0.05 + ex * ex * 0.95))))
-            let e = echo[(ew - d + echo.count) % echo.count]
-            let fb = axes[6].y * 0.85
-            echo[ew] = x + e * fb
-            ew = (ew + 1) % echo.count
-            x += e * 0.6
         }
         return x
     }
