@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.86"
+#define FW_VERSION "3.87"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -527,11 +527,11 @@ volatile int16_t bb_p[17] = {450, 0, 300, 450, 0, 0, 0, 0, 0, 500, 0, 0, 1000, 0
 void bb_update() {
   float hz = clock_hz(), p[17];
   for (int i = 0; i < 17; i++) p[i] = bb_p[i] / 1000.0f;
-  float r = 40.0f * powf(1600.0f, p[0]);                              // RATE: 40 Hz .. 64 kHz
+  float r = 40.0f * powf(25000.0f, p[0]);                             // RATE: 40 Hz .. 1 MHz (t runs ~30x the samples)
   bb_inc = (uint32_t)(r / hz * 65536.0f);
   bb_win = (int32_t)(p[1] * 16.0f * 256.0f);                           // WINDOW: bits 0-7 .. 16-23
-  bb_v[0] = 1 + (int)(p[2] * 15.99f);                                  // a · b: 1 .. 16
-  bb_v[1] = 1 + (int)(p[3] * 15.99f);
+  bb_v[0] = 1 + (int)(p[2] * 31.99f);                                  // x · y (the X · Y pad): 1 .. 32
+  bb_v[1] = 1 + (int)(p[3] * 31.99f);
   bb_loopb = p[4] < 0.03f ? 0 : 17 - (int)((p[4] - 0.03f) / 0.97f * 12.99f);   // LOOP: off, then 2^17 .. 2^5
   bb_slice = (int)(p[5] * 15.99f);
   bb_stepb = 15 - (int)(p[9] * 9.99f);                                 // STEP: 2^15 .. 2^6

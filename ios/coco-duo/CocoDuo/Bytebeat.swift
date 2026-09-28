@@ -1,21 +1,22 @@
 // Bytebeat.swift — coco duo (k.odk)
 // BYTEBEAT: mode 1 of the BLE preset. ONE formula of t ("J 0 <hex>"); pad 3 = the formula (a die, a tap = the key
-// board: t, a, b, y = the last output, i = the input). XY: RATE · WINDOW, A · B (the numbers a and b in the formula),
+// board: t, x, y = the X · Y pad, o = the last output, i = the input). XY: RATE · WINDOW, X · Y (x and y in the formula),
 // LOOP · SLICE, PHASE · DRIFT (B pushed on / sliding against A), PING-PONG · STEP (the steps go A, B, A, B),
 // CHORD · SPREAD (the frozen loop stacked at other speeds), FILTER · RES. Keys: DICE, SYNC, FREEZE, REV.
 
 import SwiftUI
 
 enum Bytebeat {
-    static let seed = "t*(t>>a|t>>b)"
+    static let seed = "t*(t>>x|t>>y)"
 
     /// a new formula: one of the well-known shapes with fresh numbers
     static func random() -> String {
-        let shapes = ["t*(t>>a|t>>b)", "t*(t>>a&t>>b)&C", "(t>>a)*(t>>b&C)", "t*((t>>a|t>>b)&C&t>>D)",
-                      "(t*E&t>>a)|(t*F&t>>b)", "(t>>a|t)*(t>>b&C)", "t*(t^t+(t>>a|E))", "t&t>>a",
-                      "(t&t>>a)*(t>>b&C)", "t>>D^t*(t>>a&C)", "(t*E^t>>a)&(t>>b|C)", "t*(t>>a|t>>b)&(t>>D|C)",
-                      "(t*E&t>>a|t*F&t>>b)^t>>D", "t*((t>>a)%E+1)&C", "t*E&t>>a", "(t>>a)*E&t>>b",
-                      "t*(t>>a|y>>D)", "(t>>a|t)*(y&C)", "t*(t>>a&t>>b)+y", "(t^y)*(t>>a&C)", "t*a&t>>b", "(t*b&t>>a)^t>>D"]
+        let shapes = ["t*(t>>x|t>>y)", "t*(t>>x&t>>y)&C", "(t>>x)*(t>>y&C)", "t*((t>>x|t>>y)&C&t>>D)",
+                      "(t*E&t>>x)|(t*F&t>>y)", "(t>>x|t)*(t>>y&C)", "t*(t^t+(t>>x|y))", "t&t>>x",
+                      "(t&t>>x)*(t>>y&C)", "t>>D^t*(t>>x&C)", "(t*E^t>>x)&(t>>y|C)", "t*(t>>x|t>>y)&(t>>D|C)",
+                      "(t*E&t>>x|t*F&t>>y)^t>>D", "t*((t>>x)%y+1)&C", "t*y&t>>x", "(t>>x)*y&t>>D",
+                      "t*(t>>x|o>>D)", "(t>>x|t)*(o&C)", "t*(t>>x&t>>y)+o", "(t^o)*(t>>x&C)", "t*x&t>>y",
+                      "(t*y&t>>x)^t>>D", "t%(x*y+1)*t>>D", "(t*x^t>>y)&C", "t*(x&t>>y)|t>>D"]
         var s = shapes.randomElement()!
         let cs = [3, 7, 15, 31, 63, 127]
         for (k, v) in [("D", Int.random(in: 3...11)), ("C", cs.randomElement()!), ("E", Int.random(in: 1...9)), ("F", Int.random(in: 2...9))] {
@@ -64,8 +65,11 @@ enum Bytebeat {
             if let k = ["t", "a", "b", "c", "d", "e"].firstIndex(of: String(c)) {
                 toks.append(.v(UInt8(k + 1))); words.append(String(c)); i += 1; continue
             }
-            if c == "y" || c == "i" {                   // y = the fed-back output, i = the input jack
-                toks.append(.v(c == "y" ? 9 : 25)); words.append(String(c)); i += 1; continue
+            if c == "x" || c == "y" {                   // x · y = the X · Y pad (the same as a · b)
+                toks.append(.v(c == "x" ? 2 : 3)); words.append(String(c)); i += 1; continue
+            }
+            if c == "o" || c == "i" {                   // o = the last output (fed back), i = the input jack
+                toks.append(.v(c == "o" ? 9 : 25)); words.append(String(c)); i += 1; continue
             }
             if i + 1 < ch.count, ["<<", ">>", "=="].contains(String([c, ch[i + 1]])) {
                 toks.append(.op(String([c, ch[i + 1]]))); words.append(String([c, ch[i + 1]])); i += 2; continue
@@ -136,7 +140,7 @@ enum Bytebeat {
 }
 
 enum BytePad {
-    static let titles = ["RATE · WINDOW", "A · B", "FORMULA", "LOOP · SLICE",
+    static let titles = ["RATE · WINDOW", "X · Y", "FORMULA", "LOOP · SLICE",
                          "PHASE · DRIFT", "PING-PONG · STEP", "CHORD · SPREAD", "FILTER · RES"]
     static let starts: [(Double, Double)] = [(0.45, 0.0), (0.3, 0.45), (0, 0), (0.0, 0.0),
                                              (0.0, 0.0), (0.0, 0.5), (0.0, 0.0), (1.0, 0.0)]
@@ -147,9 +151,9 @@ enum BytePad {
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
         case 0:
-            let r = 40 * pow(1600, x), b = Int(y * 16)
-            return (r < 1000 ? String(format: "%.0f Hz", r) : String(format: "%.1f kHz", r / 1000)) + " · BITS \(b)–\(b + 7)"
-        case 1: return "a \(1 + Int(x * 15.99)) · b \(1 + Int(y * 15.99))"
+            let r = 40 * pow(25000, x), b = Int(y * 16)
+            return (r < 1000 ? String(format: "%.0f Hz", r) : r < 1_000_000 ? String(format: "%.1f kHz", r / 1000) : String(format: "%.2f MHz", r / 1_000_000)) + " · BITS \(b)–\(b + 7)"
+        case 1: return "x \(1 + Int(x * 31.99)) · y \(1 + Int(y * 31.99))"
         case 3: return loop(x) == 0 ? "LOOP OFF" : "LOOP 2^\(loop(x)) · SLICE \(1 + Int(y * 15.99))"
         case 4: return "B +\(Int(x * 16)) STEPS · \(String(format: "%.2f", y * y * 2))%"
         case 5: return "\(Int(x * 100))% · STEP 2^\(15 - Int(y * 9.99))"
@@ -163,6 +167,7 @@ enum BytePad {
 /// pad 3: the formula on a little LCD. The die = a new one; a tap = the key board
 struct FormulaPad: View {
     @ObservedObject var rig: Rig
+    @ObservedObject var xy: PadAxis             // the X · Y pad: x and y in the formula, shown under it
     let tag: String
     let set: (String) -> Void
     @State private var editing = false
@@ -197,6 +202,9 @@ struct FormulaPad: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .contentShape(Rectangle())
                     .onTapGesture { editing = true }
+                Text("x \(1 + Int(xy.x * 31.99))  ·  y \(1 + Int(xy.y * 31.99))")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(PastelTheme.hudOrange)
             }
             .padding(7)
         }
@@ -221,7 +229,7 @@ struct FormulaBoard: View {
     }
 
     private let rows: [[String]] = [
-        ["t", "a", "b", "y", "i", "(", ")", "⌫", "CLR"],
+        ["t", "x", "y", "o", "i", "(", ")", "⌫", "CLR"],
         ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
         ["+", "-", "*", "/", "%", "&", "|", "^", "~", "<<", ">>"],
     ]

@@ -787,7 +787,7 @@ private struct MainScreen: View {
                 .id("sx\(i)")
         } else if rig.padSet == .byte && i == 2 {                   // BYTEBEAT: the formula
             let director = d
-            FormulaPad(rig: rig, tag: "03", set: { director.setBbFormula($0) })
+            FormulaPad(rig: rig, xy: rig.bbAxes[1], tag: "03", set: { director.setBbFormula($0) })
                 .frame(height: padHeight)
         } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })

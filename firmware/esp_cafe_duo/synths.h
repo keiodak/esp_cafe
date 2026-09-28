@@ -2084,8 +2084,8 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 // ==========================================
 // BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
 // ==========================================
-// ONE formula of t (the phone compiles it: "J 0 <hex bytes>"); a and b in it are the A · B pad. What moves it:
-//  RATE    40 Hz … 64 kHz of t · WINDOW which 8 bits of the result are heard (low = buzz, high = rhythm)
+// ONE formula of t (the phone compiles it: "J 0 <hex bytes>"); x and y in it are the X · Y pad. What moves it:
+//  RATE    40 Hz … 1 MHz of t · WINDOW which 8 bits of the result are heard (low = buzz, high = rhythm)
 //  LOOP    t goes round one slice of the bar (2^LOOP steps; off at the bottom) · SLICE which of the 16
 //  PHASE   the two Cafes, the same formula: B's t is pushed on (up to a bar) · DRIFT B runs a hair faster -> they
 //          slide apart and come back (SYNC puts them together again)
@@ -2094,9 +2094,9 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 //  FILTER  a low-pass with resonance on the way out (ASH = the sound before it)
 // REVERSE = t runs backwards. FREEZE = t goes round the last two steps. SKIP / SYNC = t back to 0.
 // Parameters: "J 9 <id> <0..1000>" (bb_update). YELLOW: a pulse at every step this Cafe plays.
-// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 9 y (the last output) · 25 i (the input)
+// ops: 0 end · 1 t · 2 x · 3 y (the pad) · 4 5 c d · 6 e (EARTH) · 7 n8 · 8 n16 · 9 o (the last output) · 25 i (the input)
 //      10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >> · 20 ~ 21 neg · 22 < 23 > 24 ==
-volatile uint8_t bb_prog[2][64] = { { 1, 1, 2, 19, 1, 3, 19, 16, 12, 0 }, { 0 } };   // t*(t>>a|t>>b)
+volatile uint8_t bb_prog[2][64] = { { 1, 1, 2, 19, 1, 3, 19, 16, 12, 0 }, { 0 } };   // t*(t>>x|t>>y)
 volatile uint8_t bb_cur = 0;
 volatile uint32_t bb_inc = 11889;          // t per sample, Q16
 volatile int32_t bb_v[4] = { 5, 8, 32, 16 };
