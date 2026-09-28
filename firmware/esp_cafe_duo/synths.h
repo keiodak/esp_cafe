@@ -2265,6 +2265,7 @@ volatile int hb_div = 4;                      // RATE: every 4th (~8K) or 8th (~
 volatile int32_t hb_dry = 256, hb_wet = 256;  // Q8
 volatile uint32_t hb_rp = 0;                  // the read head (tape samples)
 volatile bool hb_reset = true;
+volatile uint32_t hb_wend = 0;                // where the phone's writing has got to (tape samples): past it = stale
 
 static inline uint8_t IRAM_ATTR hb_enc(int32_t x, int32_t &pred, int &ix) {   // one 16-bit sample -> 4 bits
   int32_t st = hb_steps[ix], d = x - pred;
@@ -2319,7 +2320,12 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
     }
   }
   // the tape, round and round: what the phone wrote ahead of this head
-  int32_t p = dread(hb_rp) - 2048;
+  // (only what the phone wrote ahead of this head: once the head passes the end of its writing — the link fell
+  //  behind — the tape holds the last round's sound, which would come out as noise: then it fades to silence)
+  static int32_t hg = 0;
+  bool fresh = ((hb_wend - hb_rp) & 0x1FFFF) < 65536;
+  hg += ((fresh ? 4096 : 0) - hg) >> 6;
+  int32_t p = ((dread(hb_rp) - 2048) * hg) >> 12;
   hb_rp = (hb_rp + 1) & 0x1FFFF;
   int32_t y = ((in * hb_dry) >> 8) + ((p * hb_wet) >> 8);
   if (y > 2047) y = 2047; if (y < -2047) y = -2047;
@@ -2352,6 +2358,7 @@ void hb_write(const uint8_t *d, size_t n) {
       pos++;
     }
   }
+  hb_wend = ((pos % len) * div) & 0x1FFFF;                   // (the head may play up to here)
   wv_valid = false;
 }
 

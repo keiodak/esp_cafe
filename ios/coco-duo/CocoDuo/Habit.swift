@@ -81,7 +81,7 @@ enum HabitPad {
     static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "LAYERS · FADE",
                          "LEVEL · DRIVE", "TONE · DRIFT", "REPEAT · CHANCE", "DETUNE · OCTAVES"]
     /// (it starts as a plain run: LENGTH at the top = the whole memory played on at ×1, a little behind)
-    static let starts: [(Double, Double)] = [(0.1, 0.0), (1.0, 0.0), (0.5, 0.0), (0.35, 0.4),
+    static let starts: [(Double, Double)] = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.35, 0.4),
                                              (0.6, 0.2), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
     /// LENGTH: 30 ms … 4 s, and at the top: the whole run (a tape delay from WHERE)
     static func whole(_ x: Double) -> Bool { x >= 0.97 }
@@ -90,7 +90,7 @@ enum HabitPad {
     static func speed(_ x: Double) -> Double { abs(x - 0.5) < 0.04 ? 1 : pow(2, (x - 0.5) * 4) }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 0: return String(format: "%.0f s AGO · %d%%", x * HabitEngine.shownSeconds, Int(y * 100))
+        case 0: return String(format: "%.0f s LATER · %d%%", HabitEngine.shownSeconds * (1 - x * 0.95), Int(y * 100))
         case 1: return (whole(x) ? "WHOLE" : String(format: "%.2f s", length(x))) + String(format: " · GAP %d%%", Int(y * 100))
         case 2: return String(format: "×%.2f · REV %d%%", speed(x), Int(y * 100))
         case 3: return "\(1 + Int(x * 3.99)) · FADE \(Int(y * 100))%"
@@ -208,6 +208,7 @@ final class HabitEngine {
         }
         guard active, rpAt != .distantPast, unit.hz > 1000 else { return }
         readInputs()
+        if auto && !hold && filled >= Int(seconds * rate) - 1 { hold = true; onAutoHold?() }
         if now.timeIntervalSince(scopeT) >= 0.2 { scopeT = now; drawScope() }
         let tapeLen = TAPE / div
         let r = rate
@@ -248,14 +249,18 @@ final class HabitEngine {
     }
 
     // MARK: the Cafe's FLIP / SKIP / EARTH (from its status lines)
-    private var flip = false, pull = false
+    private var flip = false, pull = false, flipWas = false
+    /// AUTO: once the memory is full (LENGTH), it freezes by itself
+    var auto = false
+    var onAutoHold: (() -> Void)?
     private var rest: Double = -1                // EARTH's resting level (what an open input reads)
     private var earthOn = false
     private var earthBack: Double = 0            // EARTH's place (s back)
     private var jump = false                     // EARTH moved: go there now
 
     private func readInputs() {
-        flip = unit.flip
+        if unit.flip && !flipWas { flip.toggle() }                // FLIP: each press turns it round
+        flipWas = unit.flip
         pull = unit.skip && (other?.active ?? false)
         let e = Double(unit.earth)
         if rest < 0 { rest = e }
@@ -285,18 +290,32 @@ final class HabitEngine {
         let dir: Double = flip ? -1 : 1                                                        // FLIP: backwards
         var out = 0.0
         if HabitPad.whole(a(1).x) {
-            // WHOLE: one head, reading on from WHERE (a tape delay of the past)
-            let target = Double(mw) - whereBack
-            if wholeVoice == nil || jump || (!pull && abs((wholeVoice!.pos) - target) > r * 1.5) {
-                wholeVoice = Voice(pos: target, step: HabitPad.speed(a(2).x), left: .max, len: .max, fade: 1)
+            // WHOLE: the plain run. The recording is played back LENGTH (30 s …) later, on and on, while it goes on
+            // recording; frozen (HOLD / AUTO), the held memory goes round. WHERE shortens the wait.
+            let delay = seconds * r * (1 - a(0).x * 0.95)
+            let lo = Double(mw - have + 2), hi = Double(mw - 2)
+            if !hold && Double(mw) < delay { return 0 }                                           // (not yet: still taking)
+            var target = Double(mw) - delay
+            if earthOn { target = Double(mw) - min(Double(have) - r * 0.1, earthBack * r + r * 0.05) }
+            if pull, let o = other { target = Double(mw) - min(Double(have) - r * 0.1, max(r * 0.05, o.age * r)) }
+            if wholeVoice == nil || jump {
+                wholeVoice = Voice(pos: max(lo, target), step: 1, left: .max, len: .max, fade: 1)
                 jump = false
             }
-            wholeVoice!.step = HabitPad.speed(a(2).x) * dir
-            if pull { wholeVoice!.pos += (target - wholeVoice!.pos) * 0.0004 }                  // (pulled, not thrown)
+            var st = HabitPad.speed(a(2).x) * dir
+            if !hold {                                                                            // (kept on its place: a
+                let err = target - wholeVoice!.pos                                                //  hair faster / slower,
+                st += max(-0.03, min(0.03, err / (r * 2)))                                        //  never a jump)
+            }
+            wholeVoice!.step = st
             out = sample(wholeVoice!.pos)
-            wholeVoice!.pos += wholeVoice!.step
-            if wholeVoice!.pos > Double(mw - 2) || wholeVoice!.pos < Double(mw - have + 2) { wholeVoice!.pos = Double(mw) - whereBack }
-            age = (Double(mw) - wholeVoice!.pos) / r
+            var p = wholeVoice!.pos + st
+            if hold {                                                                             // frozen: round and round
+                if p >= hi { p -= Double(have - 4) }
+                if p < lo { p += Double(have - 4) }
+            } else { p = min(hi, max(lo, p)) }
+            wholeVoice!.pos = p
+            age = (Double(mw) - p) / r
             voices = []
         } else {
             wholeVoice = nil

@@ -123,7 +123,8 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
-                habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold
+                habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].auto = rig.habitAuto
+                habits[s].onAutoHold = { [weak self] in self?.rig.habitHold = true }
                 habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].start()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
@@ -582,6 +583,13 @@ final class Director: ObservableObject {
         for u in ctxUnits() { u.send("B 0 \(on ? 1000 : 0)"); habits[u.slot].div = on ? 8 : 4; habits[u.slot].clear() }
     }
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
+    func setHabitAuto(_ on: Bool) {
+        rig.habitAuto = on
+        habits.forEach { e in
+            e.auto = on
+            e.onAutoHold = { [weak self] in self?.rig.habitHold = true }
+        }
+    }
     func setHabitSeconds(_ v: Double) {
         rig.habitSeconds = v; HabitEngine.shownSeconds = v
         habits.forEach { $0.seconds = v }
@@ -1132,7 +1140,7 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(rig.habit8k ? "4K" : "8K", on: rig.habit8k) { d.setHabit8k(!rig.habit8k) }    // the rate: 8K / 4K
             case 1: key("pause.circle", on: rig.habitHold) { d.setHabitHold(!rig.habitHold) }            // HOLD: keep the memory
-            case 2: textKey("SAVE", on: rig.habitWav != nil) { d.habitSave() }                          // the memory -> Files
+            case 2: textKey("AUTO", on: rig.habitAuto) { d.setHabitAuto(!rig.habitAuto) }             // full -> it freezes
             default: textKey("CLEAR", on: false) { d.habitClear() }
             }
         case .wave:
