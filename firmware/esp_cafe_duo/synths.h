@@ -16,6 +16,11 @@ extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, fo
 volatile bool co_noearth = false;    // ARP_DELAY's PHONE_COCO: EARTH leaves the recording alone (it is the phone's pitch);
                                       //   the Cafe's BUTTON (a short press) and the phone's REC switch it
 volatile bool co_rec_toggle = false;  // the phone's REC key ("F 98"): the recording on / off, as a press of EARTH
+// APP+CAFE's COCO (with the phone's RUNGLE, "F 88"): a plain COCO whose head can be driven by the phone when LINK is on —
+// its OSC = the head's speed (the pitch, recorded and played), its XOR = FLIP, its S&H = SKIP (a gate, as the jack)
+volatile bool co_link = false;         // (set by ARP_DELAY while that layer plays with LINK on)
+volatile bool co_vflip = false, co_vskip = false;
+volatile int32_t co_spd = 256;         // Q8: 256 = x1
 void IRAM_ATTR coco_mod() {
 
 
@@ -90,7 +95,11 @@ void IRAM_ATTR coco_mod() {
   } else {
     if (rg < 256) rg++;
   }
-  int dir = FLIPPERAT ? -1 : 1;  //inverted to make work with sampler based presets
+  const bool lk = co_link;
+  int dir = (FLIPPERAT || (lk && co_vflip)) ? -1 : 1;  //inverted to make work with sampler based presets
+  static int32_t cfr = 0;
+  int adv = 1;
+  if (lk) { cfr += co_spd; adv = cfr >> 8; cfr &= 255; }      // LINK: the head at the phone's speed
 
   if (xf > 0) {
     int32_t on = dread(t);
@@ -101,16 +110,29 @@ void IRAM_ATTR coco_mod() {
     int32_t on2 = dread(t);
     if (gh) dwrite(t, on2 + (((gyo - on2) * gh) >> 8));
     pout = (on * (256 - xf) + ot * xf) >> 8;
-    tail = (tail + dir) & 0x1FFFF;
+    tail = (tail + dir * adv) & 0x1FFFF;
     xf--;
   } else {
     int32_t v = dread(t);
-    if (rg) dwrite(t, v + (((gyo - v) * rg) >> 8));
-    pout = v;
+    if (lk) {                                                 // (between two cells; every cell passed is recorded)
+      int32_t v2 = dread((t + dir) & 0x1FFFF);
+      pout = v + (((v2 - v) * cfr) >> 8);
+      if (rg) {
+        dwrite(t, v + (((gyo - v) * rg) >> 8));
+        for (int k = 1; k < adv; k++) {
+          uint32_t c = (t + dir * k) & 0x1FFFF;
+          int32_t o = dread(c);
+          dwrite(c, o + (((gyo - o) * rg) >> 8));
+        }
+      }
+    } else {
+      if (rg) dwrite(t, v + (((gyo - v) * rg) >> 8));
+      pout = v;
+    }
   }
-  t = (t + dir) & 0x1FFFF;
+  t = (t + dir * adv) & 0x1FFFF;
 
-  if (SKIPPERAT) {
+  if (SKIPPERAT || (lk && co_vskip)) {
     if (lastskp == 0) delayskp = t;
     lastskp = 1;
   } else {
@@ -1371,6 +1393,19 @@ static inline int32_t IRAM_ATTR soft_clip(int32_t x) {
   if (x < -2047) x = -2047;
   return x;
 }
+// the input's gate (against the input's own hiss: the ADC's and the board's noise, ~10 of 4096): the input's DC out, and
+// below ~-45 dB it closes, slowly (~0.3 s) — above ~-40 dB it is wide open (it opens in ~1 ms)
+struct InGate { int32_t dc, env, g; };
+static inline int32_t IRAM_ATTR in_gate(int32_t x, InGate &s) {
+  s.dc += ((x << 8) - s.dc) >> 13;                          // (~0.6 Hz)
+  x -= s.dc >> 8;
+  int32_t a = x < 0 ? -x : x;
+  s.env += ((a << 4) - s.env) >> 9;                         // (~16 ms)
+  int32_t e = s.env >> 4;
+  int32_t tg = e <= 8 ? 0 : (e >= 26 ? 4096 : (e - 8) * 227);
+  s.g += (tg - s.g) >> (tg > s.g ? 5 : 13);
+  return (x * s.g) >> 12;
+}
 
 // ==========================================
 // DELAY --- mode 2 of the BLE preset (k.odk): stereo / ping-pong
@@ -1834,6 +1869,33 @@ static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f
 // (a file, MAKE, GRAIN's recording) makes it just a sound again -> the built-in waves: sine · triangle · saw · square,
 // the same on every Cafe, always in tune
 volatile bool wv_valid = false;
+// WAVE REC ("S 25 2"): the input goes straight into the table's 64 frames (~0.5 s); then, out of the audio, each
+// frame's DC comes out, the whole goes to full scale and each frame's end leans into its start (no click on the wrap)
+volatile int32_t wv_recn = 0;
+volatile bool wv_recdone = false;
+static void wv_finish() {
+  if (!wv_recdone) return;
+  wv_recdone = false;
+  static int32_t m[64];
+  int32_t pk = 16;
+  for (int f = 0; f < 64; f++) {
+    int32_t a = 0;
+    for (int i = 0; i < 256; i++) a += dread(f * 256 + i);
+    m[f] = a >> 8;
+    for (int i = 0; i < 256; i++) { int32_t x = dread(f * 256 + i) - m[f]; if (x < 0) x = -x; if (x > pk) pk = x; }
+  }
+  int32_t g = (1900 << 8) / pk; if (g > 32 << 8) g = 32 << 8;       // (up to x32)
+  for (int f = 0; f < 64; f++) {
+    int32_t x0 = ((dread(f * 256) - m[f]) * g) >> 8;
+    for (int i = 0; i < 256; i++) {
+      int32_t x = ((dread(f * 256 + i) - m[f]) * g) >> 8;
+      if (i >= 192) x += ((x0 - x) * (i - 191)) >> 6;               // the last quarter leans into the start
+      if (x > 2047) x = 2047; if (x < -2047) x = -2047;
+      dwrite(f * 256 + i, x + 2048);
+    }
+  }
+  wv_valid = true;
+}
 RTC_DATA_ATTR int16_t wv_sin[257];            // (RTC memory: the heap stays for BLE)
 static inline int32_t wv_builtin(int c, uint32_t ph) {
   if (c == 0) { int i = ph >> 24; int32_t fi = (ph >> 16) & 255, a = wv_sin[i], b = wv_sin[i + 1]; return a + (((b - a) * fi) >> 8); }
@@ -2314,7 +2376,9 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   static int accn = 0, ix = 0, pkn = 0;
   static uint16_t seq = 0;
   if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; hb_rp = hb_wp; }
-  // up: the input, averaged over RATE samples, into packets for the phone
+  // up: the input (its hiss gated out), averaged over RATE samples, into packets for the phone
+  static InGate ig = { 0, 0, 0 };
+  in = in_gate(in, ig);
   acc += in;
   if (++accn >= hb_div) {
     int32_t x = (acc << 6) / accn;                           // 12 -> 16 bits, ×4 hotter: the 4-bit link's noise
@@ -2357,10 +2421,8 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   s1 += ((p - s1) * ak) >> 12;
   s2 += ((s1 - s2) * ak) >> 12;
   p = s2;
-  int32_t y = ((in * hb_dry) >> 8) + ((p * hb_wet) >> 8);
-  if (y > 2047) y = 2047; if (y < -2047) y = -2047;
-  int32_t r = (p * hb_wet) >> 8;
-  if (r > 2047) r = 2047; if (r < -2047) r = -2047;
+  int32_t y = soft_clip(((in * hb_dry) >> 8) + ((p * hb_wet) >> 8));
+  int32_t r = soft_clip((p * hb_wet) >> 8);
   *rout = r;
   return y;
 }
@@ -2420,6 +2482,12 @@ void IRAM_ATTR coco_pc() {
   gyo = ADCREADER
     pc_samples++;
   earth_ac();
+  if (wv_recn > 0) {                                         // WAVE REC: the input into the table
+    int32_t n = wv_recn;
+    dwrite(16384 - n, gyo);
+    if (--n == 0) wv_recdone = true;
+    wv_recn = n;
+  }
 
   // --- MODE: fade the old one out, start the new one, fade it in (~6 ms each way) ---
   int want = pc_mode;
@@ -2671,7 +2739,8 @@ void IRAM_ATTR harmony() {
     hd_align = true;
   }
   bool hold = hd_hold || FLIPPERAT || audio_frozen_state;
-  int32_t in = gyo - 2048;
+  static InGate ig = { 0, 0, 0 };
+  int32_t in = in_gate(gyo - 2048, ig);                      // (the input's hiss gated out)
 
   // a new cycle: the record head moves to the next buffer, the voices start again at their TIMING
   bool jump = false;  // a restart (new cycle, tempo, tap, sync): de-click the voices
@@ -2742,14 +2811,15 @@ void IRAM_ATTR harmony() {
     int32_t old = hd_keep ? dread(base + t) - 2048 : 0;
     // (recorded ×3 hotter — the tape's and the voices' own noise stays that much further under the sound; the voices
     //  come out at a half, so turning them up no longer turns up hiss)
-    int32_t w = in * 3 + ((((v[0] + v[1]) >> 1) * hd_fb) >> 8) + ((old * hd_keep) >> 8);
+    int32_t w = in * 4 + ((((v[0] + v[1]) >> 1) * hd_fb) >> 8) + ((old * hd_keep) >> 8);
     dwrite(base + t, soft_clip(w) + 2048);
   }
   if (++t >= S) t = 0;
 
   int32_t dry = (in * hd_dry) >> 8;
-  int32_t l = soft_clip(dry + ((v[0] * hd_lvl) >> 9));        // main = VOICE 1, ASH = VOICE 2 (not both on both)
-  int32_t r = soft_clip(dry + ((v[1] * hd_lvl) >> 9));        // (a soft ceiling: louder voices don't crack)
+  int32_t l = soft_clip(dry + ((v[0] * hd_lvl) >> 8));        // main = VOICE 1, ASH = VOICE 2 (not both on both)
+  int32_t r = soft_clip(dry + ((v[1] * hd_lvl) >> 8));        // (a soft ceiling: louder voices don't crack; as loud as
+                                                              //  it goes — the DACs' own noise, the 8-bit ASH's above all, stays under)
   int32_t o = l + 2048;
   if (o > 4095) o = 4095;
   if (o < 0) o = 0;
@@ -4141,7 +4211,8 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
   Ts += (tgt - Ts) >> 11;
   int32_t T = Ts >> 8;
   // the summer: the input, and the return through MIX (the loop inverts: each repeat flips)
-  int32_t x = (in * zg_in) >> 8;
+  static InGate ig = { 0, 0, 0 };
+  int32_t x = (in_gate(in, ig) * zg_in) >> 8;               // (the input's hiss gated out)
   int32_t fb = hold ? 256 : zg_mix;
   int32_t sum = x - ((wet * fb) >> 8);
   // (the chip is driven ×2 hotter and its return taken back ×½: its grit stays under the sound, the loop gain is the
@@ -4170,7 +4241,8 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
   o1 += ((rd - o1) * kf) >> 12; o2 += ((o1 - o2) * kf) >> 12;
   o3 += ((o2 - o3) * kf) >> 12; o4 += ((zg_diodes(o3) - o4) * kf) >> 12;
   wet = o4 >> 1;
-  *rout = wet;                                               // ASH: the return (POST)
+  *rout = soft_clip(o4);                                     // ASH: the return (POST), taken back whole (the 8-bit ASH
+                                                             //  keeps its steps under it)
   return -sum;                                               // main: the summer (PRE), the right way up
 }
 
@@ -4183,9 +4255,11 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
 // SPEECH (F 97 1): the phone speaks instead of arpeggiating, and this Cafe is COCO (the BLE preset's mode 1):
 // a record head on the tape and a play head in a loop, EARTH = FM of the speed ("C <id> <v>" as in BLE COCO).
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
+volatile bool cl_on = false;  // RUNGLE's COCO: LINK ("F 88 3")
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
   if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
+  if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; coco_mod(); co_link = false; return; }   // RUNGLE's COCO: a plain COCO (+ LINK)
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;

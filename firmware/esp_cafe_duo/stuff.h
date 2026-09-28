@@ -233,15 +233,18 @@ inline void write_ash_compressed(int raw_val) {
     dc_tracker += ((raw_val << 12) - dc_tracker) >> 12; 
     int32_t ac_only = raw_val - (dc_tracker >> 12); 
     
-    // Boosting by 2 to pull quiet sounds up
-    ac_only = ac_only * 2; 
+    // Boosting by 2 to pull quiet sounds up — with a knee (k.odk): x2 up to 700, then bent so the loudest (2047)
+    // just reaches the top: a louder sound is no longer cut flat
+    { int32_t a = ac_only < 0 ? -ac_only : ac_only;
+      a = a < 700 ? a * 2 : 1400 + (((a - 700) * 492) >> 10);
+      ac_only = ac_only < 0 ? -a : a; }
     
     // Hard Limiting (clamp at 12-bit cieling)
     if (ac_only > 2047) ac_only = 2047;
     if (ac_only < -2048) ac_only = -2048;
     
     // Scale to full 8-bit range
-    int32_t out_8bit = (ac_only + 2048) >> 4; 
+    int32_t out_8bit = (ac_only + 2048 + 8) >> 4;           // (rounded, not cut down)
     
     // Safety Clipping
     if (out_8bit > 255) out_8bit = 255;

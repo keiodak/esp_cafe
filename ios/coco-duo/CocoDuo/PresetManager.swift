@@ -43,6 +43,7 @@ struct PresetManagerView: View {
                             ChipButton(title: "HOLD", filled: rig.sxHold) { d.setSxHold(!rig.sxHold) }
                             ChipButton(title: "FREEZE", filled: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
                             ChipButton(title: "FILE", filled: false) { wvPick = true }
+                            ChipButton(title: "REC", filled: rig.wvRec) { d.wvRecord() }
                             Text(rig.wvNote)
                                 .font(.hud(8, .semibold))
                                 .foregroundStyle(PastelTheme.textSecondary)
@@ -407,7 +408,7 @@ private struct ArpCard: View {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
-                ChipButton(title: "BLIPPOO", filled: rig.arpMode == 2) { d.setArpMode(2) }
+                ChipButton(title: "RUNGLE", filled: rig.arpMode == 2) { d.setArpMode(2) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -439,7 +440,7 @@ private struct ArpCard: View {
     }
 }
 
-/// APP+CAFE · SUNDAY: the phone's small Sunnandæg (play, level); the Cafes' HOLD
+/// APP+CAFE · RUNGLE: the phone's box (play, level); the Cafes: ZEITGEIST (its card) or COCO (LINK)
 private struct SunControls: View {
     let d: Director
     @ObservedObject var rig: Rig
@@ -449,11 +450,21 @@ private struct SunControls: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: sun.playing ? "STOP" : "PLAY", filled: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
-                ChipButton(title: Rig.sunSendNames[rig.sunSend], filled: rig.sunSend > 0) { d.cycleSunSend() }
+                ChipButton(title: "ZEITGEIST", filled: rig.sunCafe == 0) { d.setSunCafe(0) }         // the Cafes: ZEITGEIST or COCO
+                ChipButton(title: "COCO", filled: rig.sunCafe == 1) { d.setSunCafe(1) }
+                if rig.sunCafe == 1 {
+                    ChipButton(title: "LINK", filled: rig.sunLink) { d.setSunLink(!rig.sunLink) }      // OSC → speed · XOR → FLIP · S&H → SKIP
+                } else {
+                    ChipButton(title: Rig.sunSendNames[rig.sunSend], filled: rig.sunSend > 0) { d.cycleSunSend() }
+                }
             }
             PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
-            PanelRow(label: "INPUT", value: Binding(get: { rig.sunZgIn }, set: { rig.sunZgIn = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: INPUT
-            PanelRow(label: "MOD", value: Binding(get: { rig.sunZgMod }, set: { rig.sunZgMod = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: EARTH → time
+            Group {
+                PanelRow(label: "INPUT", value: Binding(get: { rig.sunZgIn }, set: { rig.sunZgIn = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: INPUT
+                PanelRow(label: "MOD", value: Binding(get: { rig.sunZgMod }, set: { rig.sunZgMod = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: EARTH → time
+            }
+            .disabled(rig.sunCafe == 1)
+            .unlit(rig.sunCafe == 1)
         }
     }
 }

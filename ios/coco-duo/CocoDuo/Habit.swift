@@ -210,15 +210,30 @@ final class HabitEngine {
         rpAt = Date()
         unit.hbDrops = Int(UInt16(b[6]) | UInt16(b[7]) << 8)
         lastSeq = seq
-        guard !hold else { return }
+        if !dub { dubW = -1 }
+        guard !hold || dub else { return }
         var p = Int32(Int16(bitPattern: UInt16(b[8]) | UInt16(b[9]) << 8))
         var i = min(88, Int(b[10]))
+        let have = filled
+        if dub && have < Int(rate * 0.5) { return }                  // (nothing to dub onto yet)
+        let lo = mw - have
+        if dub && dubW < 0 {                                          // (where the Cafe is heard now: the play head, less
+            let back = Int(Self.lead * rate)                          //  what waits in its queue)
+            dubW = lo + (((Int(max(0, pos)) - back - lo) % have) + have) % have
+        }
         for k in 11..<b.count {
             for h in 0..<2 {
                 let n = h == 0 ? b[k] & 15 : b[k] >> 4
                 let v = Adpcm.dec(n, &p, &i)
-                mem[mw % cap] = Int16(v)
-                mw += 1
+                if dub {                                              // DUB: onto what is there, round and round
+                    let j = dubW % cap
+                    let m = Double(mem[j]) * 0.9 + Double(v)
+                    mem[j] = Int16(max(-32767, min(32767, m > 24000 ? 24000 + (m - 24000) * 0.25 : (m < -24000 ? -24000 + (m + 24000) * 0.25 : m))))
+                    dubW += 1; if dubW >= mw { dubW = lo }
+                } else {
+                    mem[mw % cap] = Int16(v)
+                    mw += 1
+                }
                 let av = Double(abs(v)) / 32768
                 peak = av > peak ? av : peak * 0.99998 + 0.0000002
             }
@@ -237,7 +252,6 @@ final class HabitEngine {
         }
         guard active, rpAt != .distantPast, unit.hz > 1000 else { return }
         readInputs()
-        if auto && !hold && filled >= Int(seconds * rate) - 1 { hold = true; onAutoHold?() }
         if now.timeIntervalSince(scopeT) >= 0.2 { scopeT = now; drawScope() }
         guard toCafe else { return }                            // (the phone plays it itself: nothing goes back)
         let r = rate
@@ -277,8 +291,9 @@ final class HabitEngine {
 
     // MARK: the Cafe's FLIP / SKIP / EARTH (from its status lines)
     private var flip = false, pull = false, flipWas = false
-    /// AUTO: once the memory is full (LENGTH), it freezes by itself
-    var auto = false
+    /// DUB: the memory stops moving on and the input is laid over it, round and round (the old at 0.9)
+    var dub = false
+    private var dubW = -1
     /// EARTH jumps through the memory only when this is on (off by default: a floating input kept moving it)
     var useEarth = false
     /// where the playing goes: false = the phone's own output (L = Cafe A, R = Cafe B: smooth, nothing over the
@@ -293,7 +308,6 @@ final class HabitEngine {
         while ph >= 1 { ph -= 1; pv = cv; cv = next() }
         return Float(pv + (cv - pv) * ph)
     }
-    var onAutoHold: (() -> Void)?
     private var rest: Double = -1                // EARTH's resting level (what an open input reads)
     private var earthOn = false
     private var earthBack: Double = 0            // EARTH's place (s back)
@@ -333,6 +347,7 @@ final class HabitEngine {
         let wh = axes[side[0]], pt = axes[side[1]], gl = axes[side[2]], lp = axes[side[3]]
         let lo = Double(mw - have + 2), hi = Double(mw - 2)
         let delay = seconds * r * (1 - wh.x * 0.95)
+        let hold = self.hold || dub                                                              // (DUB plays as HOLD)
         if !hold && Double(mw) < delay { return 0 }                                           // (not yet: still taking)
         // JUMP: now and then somewhere else in the memory (Y = how often: up to ~4 a second)
         if wh.y > 0.02 {

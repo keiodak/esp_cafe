@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.10"
+#define FW_VERSION "4.11"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -794,7 +794,14 @@ void pc_line(char *s) {
                 else if (e == 94 && k >= 2) fx_hold_app = id != 0;
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
-                else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 2 ? 2 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 SUNDAY (string + reverb)
+                else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
+                else if (e == 88 && k >= 3) {                                // RUNGLE's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK
+                  if (val < 0) val = 0; if (val > 1000) val = 1000;
+                  if (id == 0) co_spd = (int32_t)(256.0f * powf(2.0f, (val - 500) / 250.0f));
+                  else if (id == 1) co_vflip = val != 0;
+                  else if (id == 2) co_vskip = val != 0;
+                  else if (id == 3) { cl_on = val != 0; if (!cl_on) { co_vflip = false; co_vskip = false; } }
+                }
                 else if (e == 95 && k >= 2) fx_edepth = (int32_t)((id < 0 ? 0 : (id > 1000 ? 1000 : id)) * 256 / 1000);
                 else if (e == 96 && k >= 2) { float hz = clock_hz(); float q = (id < 0 ? 0 : (id > 1000 ? 1000 : id)) / 1000.0f; fx_gap = (int32_t)(hz * (0.05f + q * q * 4.95f)); }
               } break;
@@ -810,7 +817,9 @@ void pc_line(char *s) {
                 if (id >= 0 && id < 9 && k >= 2) { sx_p[id] = (int16_t)a1; sx_update(); }
                 else if (id >= 20 && id < 25 && k >= 2) { wv_p[id - 20] = (int16_t)a1; sx_update(); }   // WAVE
                 else if (id == 9 && k >= 2) sx_role = a1 >= 2 ? 2 : (int)a1;   // which Cafe this is (seesaw)
-                else if (id == 25 && k >= 2) wv_valid = a1 != 0;                 // WAVE: the tape now holds a table
+                else if (id == 25 && k >= 2) {                                   // WAVE: 1 = the tape now holds a table, 2 = REC
+                  if (a1 == 2) { wv_valid = false; wv_recdone = false; wv_recn = 16384; } else wv_valid = a1 != 0;
+                }
                 else if (id >= 10 && id < 14 && k >= 4) {
                   if (a2 < 0) a2 = 0; if (a2 > 1000) a2 = 1000; if (a3 < 0) a3 = 0; if (a3 > 1000) a3 = 1000;
                   sx_x[id - 10] = (int16_t)a1; sx_y[id - 10] = (int16_t)a2; sx_a[id - 10] = (int16_t)a3;
@@ -1156,6 +1165,7 @@ Serial.println("--- BOOT COMPLETE: Entering Main Loop ---\n"); // FOR DEBUGGING
 void loop() {
 
   pc_service();   // lines from the phone (BLE)
+  wv_finish();    // WAVE REC: the table made ready
   hb_service();   // HABIT: the input out to the phone
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 

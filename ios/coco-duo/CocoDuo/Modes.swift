@@ -365,6 +365,7 @@ final class Rig: ObservableObject {
     let wvTop: [PadAxis] = [PadAxis((0.5, 0.5)), PadAxis((0.3, 0.0))]
     var wvAxes: [PadAxis] { [sxAxes[0], wvTop[0], wvTop[1], sxAxes[3]] + Array(sxAxes[4...7]) }
     @Published var wvPicking = false       // the file picker for the table
+    @Published var wvRec = false           // REC: the Cafes taking their input as the table
     @Published var wvNote = ""             // which file the table came from
     func wvCommands(pad i: Int) -> [String] {
         switch i {
@@ -416,7 +417,7 @@ final class Rig: ObservableObject {
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false
-    @Published var habitAuto = false            // AUTO: HOLD by itself once the memory is full
+    @Published var habitDub = false             // DUB: the input laid over the memory (it plays as HOLD)
     @Published var habitEarth = false           // EARTH moves the playing (off: it does nothing)
     @Published var habitSeconds = 150.0         // the memory: 30 s … 10 min
     @Published var habitWav: Data? = nil
@@ -467,6 +468,9 @@ final class Rig: ObservableObject {
     @Published var sunZgIn: Double = 0.5
     /// what goes to the Cafes as a CV (onto the ZEITGEIST's time, with EARTH, at MOD): OFF · S&H · RUNG · XOR
     @Published var sunSend = 0
+    /// RUNGLE's Cafes: 0 ZEITGEIST · 1 COCO; LINK (COCO): the phone drives their heads
+    @Published var sunCafe: Int = Rig.d.integer(forKey: "rig.sunCafe") { didSet { Self.d.set(sunCafe, forKey: "rig.sunCafe") } }
+    @Published var sunLink = false
     static let sunSendNames = ["→ OFF", "→ S&H", "→ RUNG", "→ XOR"]
     /// SUNDAY's MOD (S&H -> OSC, SR -> TWIN PEAK: the key in the top left pad) and SYNC (feedback: bottom right)
     @Published var sunMod = true

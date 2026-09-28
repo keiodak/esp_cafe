@@ -1,5 +1,5 @@
 // PhoneSun.swift — coco duo (k.odk)
-// APP+CAFE's BLIPPOO: a Blippoo Box on the phone, after Rob Hordijk's own description ("The Blippoo Box: A Chaotic
+// APP+CAFE's RUNGLE: a Blippoo Box on the phone, after Rob Hordijk's own description ("The Blippoo Box: A Chaotic
 // Electronic Music Instrument, Bent by Design", Leonardo Music Journal 19, 2009) and notes from those who rebuilt it:
 //   the CHAOTIC CORE — two oscillators (triangle and square, exponential, ~16 octaves up to 12 kHz) that bend each
 //   other three ways:
@@ -37,6 +37,8 @@ final class PhoneSun: ObservableObject {
     var cvRung1: Double { d1 * 2 - 1 }
     var cvRung2: Double { d2 * 2 - 1 }
     private(set) var cvXor = -1.0
+    /// each oscillator's pitch as it moves (octaves from its knob: sweep, step, time warp)
+    private(set) var cvModA = 0.0, cvModB = 0.0
 
     private let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?
@@ -118,8 +120,11 @@ final class PhoneSun: ObservableObject {
             gain += (want - gain) * 0.0005
             let triA = 1 - 4 * abs(pa - 0.5), triB = 1 - 4 * abs(pb - 0.5)
             // the chaotic core: sweep (the other's triangle), step (a rungler), time warp (the S&H), in octaves
-            let a = Self.oscHz(sA) * pow(2, sweepBA * triB * 4 + stepA * (d1 - 0.5) * 4 + shAmt * sh * 3)
-            let b = Self.oscHz(sB) * pow(2, sweepAB * triA * 4 + stepB * (d2 - 0.5) * 4 + shAmt * sh * 3)
+            let mA = sweepBA * triB * 4 + stepA * (d1 - 0.5) * 4 + shAmt * sh * 3
+            let mB = sweepAB * triA * 4 + stepB * (d2 - 0.5) * 4 + shAmt * sh * 3
+            cvModA = mA; cvModB = mB
+            let a = Self.oscHz(sA) * pow(2, mA)
+            let b = Self.oscHz(sB) * pow(2, mB)
             pa += min(0.45, a / sr); pa -= floor(pa)
             pb += min(0.45, b / sr); pb -= floor(pb)
             let nA = triA > 0, nB = triB > 0

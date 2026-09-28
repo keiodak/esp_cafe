@@ -144,8 +144,7 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
-                habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].auto = rig.habitAuto
-                habits[s].onAutoHold = { [weak self] in self?.rig.habitHold = true }
+                habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
                 habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].useEarth = rig.habitEarth
                 habits[s].start()                  // (the playing goes back to the Cafe)
             default: rig.nzAll(slot: s).forEach(u.send)
@@ -155,9 +154,10 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(rig.arpMode)")                            // ARP: the tap delay · PHONE_COCO: COCO · SUNDAY: string + reverb
+            u.send("F 97 \(cafeAdMode)")                             // ARP: the tap delay · PHONE_COCO: COCO · RUNGLE: ZEITGEIST / COCO
             if rig.arpMode == 2 {
                 sunCafe(slot: s).forEach(u.send)
+                sunLinkSend(u)
                 applySun(); sun.play(true)
             } else if rig.arpMode == 1 {
                 rig.coAll(slot: s).forEach(u.send)
@@ -323,7 +323,47 @@ final class Director: ObservableObject {
     /// BLIPPOO → the Cafes: the chosen signal as a CV (~30x a second, only when it changes): S&H to both, the runglers
     /// (1 to Cafe A, 2 to Cafe B), or the squares' XOR
     private var sunCVSent = [-1, -1]
+    private var sunCoSent = [[-1, -1, -1], [-1, -1, -1]]
+    /// what the Cafe is on APP+CAFE: 0 ARP · 1 PHONE_COCO · 2 ZEITGEIST · 3 COCO (RUNGLE's two)
+    var cafeAdMode: Int { rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : rig.arpMode }
+    /// RUNGLE's Cafes: ZEITGEIST (0) or COCO (1)
+    func setSunCafe(_ m: Int) {
+        rig.sunCafe = m == 1 ? 1 : 0
+        guard rig.arpMode == 2 else { return }
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
+            u.send("F 97 \(cafeAdMode)")
+            if rig.sunCafe == 0 { sunCafe(slot: u.slot).forEach(u.send) }
+            sunLinkSend(u)
+        }
+    }
+    /// LINK (COCO): the phone's OSC → the head's speed (A → Cafe A, B → Cafe B), XOR → FLIP, S&H → SKIP
+    func setSunLink(_ on: Bool) {
+        rig.sunLink = on
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp && rig.arpMode == 2 { sunLinkSend(u) }
+    }
+    func sunLinkSend(_ u: CafeUnit) {
+        let s = u.slot == 1 ? 1 : 0
+        sunCoSent[s] = [-1, -1, -1]
+        let on = rig.sunLink && rig.sunCafe == 1
+        u.send("F 88 3 \(on ? 1 : 0)")
+        if !on { u.send("F 88 0 500") }                                  // (the head back to x1)
+    }
     func sendSunCV(_ on: [CafeUnit]) {
+        if rig.sunCafe == 1 {
+            guard rig.sunLink else { return }
+            for u in on {
+                let s = u.slot == 1 ? 1 : 0
+                // OSC: its knob (±2 octaves about the middle) and all that moves it, halved
+                let knob = s == 0 ? sun.oscA : sun.oscB, mod = s == 0 ? sun.cvModA : sun.cvModB
+                let oct = max(-2, min(2, (knob - 0.5) * 4 + mod * 0.5))
+                let n = [Int((500 + oct * 250).rounded()), sun.cvXor > 0 ? 1 : 0, sun.cvSH > 0 ? 1 : 0]
+                for i in 0..<3 where n[i] != sunCoSent[s][i] {
+                    sunCoSent[s][i] = n[i]
+                    u.send("F 88 \(i) \(n[i])")
+                }
+            }
+            return
+        }
         for u in on {
             let s = u.slot == 1 ? 1 : 0
             let v: Double
@@ -407,9 +447,9 @@ final class Director: ObservableObject {
         }
         if rig.arpMode != 2 { sun.stop() }
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
-            u.send("F 97 \(rig.arpMode)")
+            u.send("F 97 \(cafeAdMode)")
             if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) }
-            else if rig.arpMode == 2 { sunCafe(slot: u.slot).forEach(u.send) }
+            else if rig.arpMode == 2 { sunCafe(slot: u.slot).forEach(u.send); sunLinkSend(u) }
             else { rig.arpDelayAll().forEach(u.send) }
         }
         if rig.arpMode == 2 {
@@ -711,13 +751,7 @@ final class Director: ObservableObject {
     }
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
     func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
-    func setHabitAuto(_ on: Bool) {
-        rig.habitAuto = on
-        habits.forEach { e in
-            e.auto = on
-            e.onAutoHold = { [weak self] in self?.rig.habitHold = true }
-        }
-    }
+    func setHabitDub(_ on: Bool) { rig.habitDub = on; habits.forEach { $0.dub = on } }
     func setHabitSeconds(_ v: Double) {
         rig.habitSeconds = v; HabitEngine.shownSeconds = v
         habits.forEach { $0.seconds = v }
@@ -733,6 +767,13 @@ final class Director: ObservableObject {
     func setSxHold(_ on: Bool) {
         rig.sxHold = on
         if !on { rig.sxArea = [0, 0, 0, 0]; for k in 0..<4 { padMoved(4 + k) } }
+    }
+    /// WAVE: REC — each Cafe on WAVE takes ~0.5 s of its input as its table ("S 25 2")
+    func wvRecord() {
+        ctxUnits().forEach { $0.send("S 25 2") }
+        rig.wvNote = "CAFE REC"
+        rig.wvRec = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.rig.wvRec = false }
     }
     /// WAVE: an audio file -> a 64-frame wavetable -> the start of the tape of every Cafe on WAVE
     func loadWaveTable(_ url: URL) {
@@ -888,7 +929,7 @@ private struct MainScreen: View {
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
-        case .sun: return (rig.sunAxes[i], SunPad.titles[i])
+        case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1297,7 +1338,7 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(rig.habit8k ? "4K" : "8K", on: rig.habit8k) { d.setHabit8k(!rig.habit8k) }    // the rate: 8K / 4K
             case 1: key("pause.circle", on: rig.habitHold) { d.setHabitHold(!rig.habitHold) }            // HOLD: keep the memory
-            case 2: textKey("AUTO", on: rig.habitAuto) { d.setHabitAuto(!rig.habitAuto) }             // full -> it freezes
+            case 2: textKey("DUB", on: rig.habitDub) { d.setHabitDub(!rig.habitDub) }                 // the input laid over the memory
             default: textKey("CLEAR", on: false) { d.habitClear() }
             }
         case .wave:
@@ -1305,7 +1346,7 @@ private struct HudBar: View {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
             case 1: key("pause.circle", on: rig.sxHold) { d.setSxHold(!rig.sxHold) }
             case 2: textKey("FREEZE", on: rig.wvFreeze > 0) { d.setWvFreeze(rig.wvFreeze > 0 ? 0 : 1) }
-            default: textKey("FILE", on: rig.wvPicking) { rig.wvPicking = true }                // an audio file -> the table
+            default: textKey("REC", on: rig.wvRec) { d.wvRecord() }                              // the Cafe's input -> the table
             }
         case .sidrax:
             switch n {
@@ -1333,7 +1374,8 @@ private struct HudBar: View {
         case .sun:
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
-            case 1: textKey(Rig.sunSendNames[rig.sunSend], on: rig.sunSend > 0) { d.cycleSunSend() }       // what the Cafes are sent
+            case 1: if rig.sunCafe == 1 { textKey("LINK", on: rig.sunLink) { d.setSunLink(!rig.sunLink) } }   // COCO: the phone drives the heads
+                    else { textKey(Rig.sunSendNames[rig.sunSend], on: rig.sunSend > 0) { d.cycleSunSend() } }     // what the Cafes are sent
             case 2: textKey(rig.sunSync ? "S&H RUNG" : "S&H TRI B", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() }   // what the S&H takes
             default: key("arrow.triangle.2.circlepath") { d.sun.restart() }                                  // SYNC: the core from the start
             }
@@ -1376,7 +1418,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "BLIPPOO", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "RUNGLE", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]
