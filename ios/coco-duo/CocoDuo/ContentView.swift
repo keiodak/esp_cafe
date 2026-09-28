@@ -125,7 +125,8 @@ final class Director: ObservableObject {
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].auto = rig.habitAuto
                 habits[s].onAutoHold = { [weak self] in self?.rig.habitHold = true }
-                habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].start()
+                habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].useEarth = rig.habitEarth
+                habits[s].start()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -583,6 +584,7 @@ final class Director: ObservableObject {
         for u in ctxUnits() { u.send("B 0 \(on ? 1000 : 0)"); habits[u.slot].div = on ? 8 : 4; habits[u.slot].clear() }
     }
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
+    func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
     func setHabitAuto(_ on: Bool) {
         rig.habitAuto = on
         habits.forEach { e in

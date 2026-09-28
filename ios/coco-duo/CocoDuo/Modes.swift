@@ -366,6 +366,7 @@ final class Rig: ObservableObject {
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false
     @Published var habitAuto = false            // AUTO: HOLD by itself once the memory is full
+    @Published var habitEarth = false           // EARTH moves the playing (off: it does nothing)
     @Published var habitSeconds = 150.0         // the memory: 30 s … 10 min
     @Published var habitWav: Data? = nil
     /// the Cafe plays the tape only (no dry), at full level: LEVEL · DRIVE are the phone's

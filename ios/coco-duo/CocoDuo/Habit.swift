@@ -272,6 +272,8 @@ final class HabitEngine {
     private var flip = false, pull = false, flipWas = false
     /// AUTO: once the memory is full (LENGTH), it freezes by itself
     var auto = false
+    /// EARTH jumps through the memory only when this is on (off by default: a floating input kept moving it)
+    var useEarth = false
     var onAutoHold: (() -> Void)?
     private var rest: Double = -1                // EARTH's resting level (what an open input reads)
     private var earthOn = false
@@ -282,9 +284,10 @@ final class HabitEngine {
         if unit.flip && !flipWas { flip.toggle() }                // FLIP: each press turns it round
         flipWas = unit.flip
         pull = unit.skip && (other?.active ?? false)
+        guard useEarth else { earthOn = false; jump = false; return }   // (EARTH only when asked: off, it moves nothing)
         let e = Double(unit.earth)
         if rest < 0 { rest = e }
-        let margin = 14.0                        // (~5 %: the faint CV lives under this)
+        let margin = 30.0                        // (~12 %: the faint CV and its wobble live under this)
         if !earthOn {
             if e > rest + margin { earthOn = true } else { rest += (e - rest) * 0.02 }   // (the rest follows the drift)
         } else if e < rest + margin * 0.6 { earthOn = false }

@@ -60,6 +60,7 @@ struct PresetManagerView: View {
                                 ChipButton(title: v < 60 ? "\(Int(v))S" : (v == 150 ? "2M30" : "\(Int(v / 60))M"),
                                            filled: rig.habitSeconds == v) { d.setHabitSeconds(v) }
                             }
+                            ChipButton(title: "EARTH", filled: rig.habitEarth) { d.setHabitEarth(!rig.habitEarth) }
                         }
                     }
                     if rig.padSet == .noise {
