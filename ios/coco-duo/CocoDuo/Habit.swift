@@ -347,7 +347,7 @@ final class HabitEngine {
             out = lp
         }
         // LEVEL · DRIVE: brought up to the memory's loudness (a quiet input still plays loud), then a soft ceiling
-        let g = min(12, 0.7 / max(0.02, peak)) * (a(4).x * 2)
+        let g = min(3, 0.7 / max(0.15, peak)) * (a(4).x * 2)          // (at most ×3, and not at all on near-silence: no hiss)
         let dr = 1 + a(4).y * 5
         out = tanh(out * g * dr) / tanh(dr) * min(1, 0.9 + 0.1 / dr)
         return max(-1, min(1, out))
