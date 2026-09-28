@@ -240,6 +240,7 @@ async function bleConnect(){
     const rx = await svc.getCharacteristic(NUS_RX), tx = await svc.getCharacteristic(NUS_TX);
     const dec = new TextDecoder();
     tx.addEventListener('characteristicvaluechanged', e=>{
+      if (e.target.value.byteLength && e.target.value.getUint8(0) === 0xFF) return;   // (HABIT's sound for the app: not text)
       const t = dec.decode(e.target.value); rxBytes += t.length; lastRaw = (lastRaw + t).slice(-160);
       for(const ch of t){ rawHex.push(ch.charCodeAt(0).toString(16).padStart(2,'0')); if(rawHex.length>48) rawHex.shift(); }
       bleBuf += t; let i;

@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.93"
+#define FW_VERSION "3.94"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -84,6 +84,7 @@ RTC_DATA_ATTR static char ble_rb[1024];            // bytes written by the BLE t
 static volatile uint16_t ble_wh = 0, ble_rh = 0;
 static volatile bool ota_active = false;         // a firmware update is running (see below)
 static uint32_t hb_sent = 0;                     // HABIT packets that went out (shown on the phone)
+static volatile bool hb_armed = false;            // HABIT sends only to the app that asked ("B"), never to a page that did not
 static volatile uint32_t ble_last_rx = 0;        // millis() of the last bytes from the phone (a silent link is dropped)
 
 class CafeServerCB : public NimBLEServerCallbacks {
@@ -93,7 +94,7 @@ class CafeServerCB : public NimBLEServerCallbacks {
     Serial.printf("[ble] connected, interval %u x1.25ms. heap %u largest %u\n", (unsigned)ble_itvl, (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
   void onDisconnect(NimBLEServer *s, NimBLEConnInfo &ci, int reason) override {
-    ble_conn = false; pc_link = false;
+    ble_conn = false; pc_link = false; hb_armed = false;
     if (ota_active) { Update.abort(); Serial.println("[ota] link lost: restarting"); ESP.restart(); }
     Serial.printf("[ble] disconnected, reason 0x%X. heap %u\n", reason, (unsigned)ESP.getFreeHeap());
   }
@@ -739,7 +740,7 @@ volatile int pc_goto = -1;                  // "G <n>": the phone asks for prese
 
 void ota_cmd(char *s);
 void pc_line(char *s) {
-  if (s[0] == 'U') { ota_cmd(s); return; }
+  if (s[0] == 'U') { hb_armed = false; ota_cmd(s); return; }   // (an update: HABIT stops sending at once)
   if (ota_active) return;                   // updating: nothing else
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
@@ -836,6 +837,7 @@ void pc_line(char *s) {
               } break;
     case 'B': {                            // HABIT: "B <id> <0..1000>": 0 rate (0 = 1/4 ~8K, 1000 = 1/8 ~4K of the clock) · 1 dry · 2 wet
                 long id = -1, v = 0; sscanf(s + 1, "%ld %ld", &id, &v);
+                hb_armed = true;                   // (the app is here: HABIT may send)
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
                 if (id == 0) { int d = v >= 500 ? 8 : 4; if (d != hb_div) { hb_div = d; hb_reset = true; } }   // 8K / 4K
                 else if (id == 1) hb_dry = (int32_t)(v * 256 / 1000);
@@ -887,7 +889,7 @@ void hb_service() {
     NimBLEServer *srv = NimBLEDevice::getServer();
     if (srv && srv->getConnectedCount()) { uint16_t m = srv->getPeerInfo(0).getMTU(); if (m > ble_mtu) ble_mtu = m; }
   }
-  if (!ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
+  if (!hb_armed || !ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
   int sent = 0;
   while (hb_qr != hb_qw && sent < 8) {
     if (!ble_tx->notify(hb_q[hb_qr & (HB_Q - 1)], HB_PK)) break;   // (on the text link; out of buffers: next time)
