@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.83"
+#define FW_VERSION "3.84"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -69,15 +69,12 @@
 #define NUS_RX  "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"   // computer -> Cafe (write)
 #define NUS_TX  "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"   // Cafe -> computer (notify)
 #define OTA_RX  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"   // firmware update: binary pieces (write without response)
-#define HB_TX   "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"   // HABIT: the input, ADPCM, to the phone (notify)
-#define HB_RX   "6E400006-B5A3-F393-E0A9-E50E24DCCA9E"   // HABIT: the phone's playing, ADPCM, onto the tape (write without response)
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <driver/adc.h>
 #include <driver/rtc_io.h>
 volatile uint32_t earth_fail = 0, pin_fix = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
-static NimBLECharacteristic *hb_tx = nullptr;     // HABIT up
 static volatile bool ble_conn = false;
 static volatile uint16_t ble_mtu = 23;
 static volatile uint16_t ble_itvl = 0;          // connection interval, units of 1.25 ms
@@ -113,12 +110,6 @@ class CafeRxCB : public NimBLECharacteristicCallbacks {
       if (n == ble_rh) break;                      // full: drop the rest
       ble_rb[ble_wh] = (char)d[i]; ble_wh = n;
     }
-  }
-};
-class CafeHbCB : public NimBLECharacteristicCallbacks {   // HABIT down: straight onto the tape
-  void onWrite(NimBLECharacteristic *c, NimBLEConnInfo &ci) override {
-    NimBLEAttValue v = c->getValue();
-    hb_write(v.data(), v.size());
   }
 };
 // ---- BLE firmware update (k.odk) ----
@@ -162,9 +153,6 @@ void ble_begin() {
   rx->setCallbacks(new CafeRxCB());
   NimBLECharacteristic *ota = svc->createCharacteristic(OTA_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   ota->setCallbacks(new CafeOtaCB());
-  hb_tx = svc->createCharacteristic(HB_TX, NIMBLE_PROPERTY::NOTIFY);
-  NimBLECharacteristic *hbrx = svc->createCharacteristic(HB_RX, NIMBLE_PROPERTY::WRITE_NR);
-  hbrx->setCallbacks(new CafeHbCB());
   svc->start();
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   NimBLEAdvertisementData ad, sr;
