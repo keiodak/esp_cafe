@@ -344,7 +344,7 @@ final class Director: ObservableObject {
         }
         if rig.arpMode == 1 { setPcMode(rig.pcMode) } else { refresh() }
     }
-    /// the Cafe's COCO recording on / off — the same as a press of its EARTH
+    /// the Cafe's COCO recording on / off — the same as a short press of its BUTTON
     func setPcCafeRec(_ s: Int) { if units[s].isConnected { units[s].send("F 98") } }
     func setPcMode(_ m: Int) {
         rig.pcMode = m == 1 ? 1 : 0
@@ -1249,7 +1249,7 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(pc.loading[0] ? "LOAD…" : "FILE A", on: rig.pcPicking == 0 || pc.loading[0]) { rig.pcSlot = 0; rig.pcPicking = 0 }
             case 1: textKey(pc.loading[1] ? "LOAD…" : "FILE B", on: rig.pcPicking == 1 || pc.loading[1]) { rig.pcSlot = 1; rig.pcPicking = 1 }
-            case 2: textKey("REC", on: unit.recording) { d.setPcCafeRec(0) }     // the Cafe's COCO recording on / off (as EARTH)
+            case 2: textKey("REC", on: unit.recording) { d.setPcCafeRec(0) }     // the Cafe's COCO recording on / off (as its BUTTON)
             default: textKey("REC", on: unit.recording) { d.setPcCafeRec(1) }
             }
         case .speech:
