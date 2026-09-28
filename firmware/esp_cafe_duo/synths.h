@@ -4240,7 +4240,8 @@ void IRAM_ATTR arpdelay() {
     if (ad_mode == 2) {
       // BLIPPOO: the phone's Blippoo Box into the ZEITGEIST delay ("F 89 ..")
       fx_rs[1] = true;
-      l = zg_tick(in, &r, hold);
+      l = zg_tick(in, &r, false);           // (no HOLD here: a HOLD left on from another layer, or a BUTTON freeze, shut the
+                                            //  input out and the ZEITGEIST seemed to do nothing)
     } else {
       bool rs = fx_rs[1];
       fx_rs[1] = false;

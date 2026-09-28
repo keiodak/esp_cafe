@@ -412,7 +412,10 @@ final class Director: ObservableObject {
             else if rig.arpMode == 2 { sunCafe(slot: u.slot).forEach(u.send) }
             else { rig.arpDelayAll().forEach(u.send) }
         }
-        if rig.arpMode == 2 { applySun(); sun.play(true) }
+        if rig.arpMode == 2 {
+            applySun(); sun.play(true)
+            if rig.fxHold { fxToggleHold() }                  // (HOLD has no place in BLIPPOO: never leave it on)
+        }
         if rig.arpMode == 1 { setPcMode(rig.pcMode) } else { refresh() }
     }
     /// the Cafe's COCO recording on / off — the same as a short press of its BUTTON
