@@ -312,7 +312,7 @@ final class Director: ObservableObject {
 
     func applySun() {
         let a = rig.sunAxes, s = sun
-        s.freq = SunPad.freq(a[0].x); s.spread = 6; s.rate = SunPad.rate(a[0].y)
+        s.freq = SunPad.freq(a[0].x); s.spread = 6; s.div = a[0].y
         s.mod = rig.sunMod; s.sync = rig.sunSync
         s.fold1 = a[3].x; s.fold2 = a[3].y
         s.fold3 = a[4].x; s.feedback = a[4].y

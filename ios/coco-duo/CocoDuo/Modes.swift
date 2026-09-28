@@ -115,13 +115,13 @@ enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony
 /// APP+CAFE's SUNDAY (PhoneSun.swift): the four outer pads play the phone's small Sunnandæg (and reach the Cafes: the
 /// string follows FREQ, PEAK 2 brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
 enum SunPad {
-    static let titles = ["FREQ · RATE", "L RING · DECAY", "R RING · DECAY", "FOLD 1 · FOLD 2",
+    static let titles = ["FREQ · DIV", "L RING · DECAY", "R RING · DECAY", "FOLD 1 · FOLD 2",
                          "FOLD 3 · FEEDBACK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK 1 · PEAK 2"]
     static let starts: [(Double, Double)] = [(0.35, 0.3), (0.5, 0.5), (0.5, 0.5), (0.3, 0.2),
                                              (0.0, 0.0), (0.4, 0.6), (0.4, 0.6), (0.3, 0.7)]
     static func freq(_ x: Double) -> Double { 30 * pow(50, x) }            // 30 Hz … 1.5 kHz
-    /// RATE: the clock of the S&H and the shift register, 0.2 … 30 a second
-    static func rate(_ y: Double) -> Double { 0.2 * pow(150, y) }
+    /// DIV: how many gates (the folds rising through 0) make one step of the S&H and the shift register
+    static func div(_ y: Double) -> Int { min(5000, max(1, Int(1 / max(1 - min(y, 0.9995), 0.0002)))) }
     /// the Cafe's string: the phone's note brought into its four octaves from A1
     static func stringPitch(_ x: Double) -> Int {
         var semi = 12 * log2(freq(x) / 55)
@@ -131,7 +131,7 @@ enum SunPad {
     }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         switch i {
-        case 0: return String(format: "%.0f Hz · %.1f /s", freq(x), rate(y))
+        case 0: return String(format: "%.0f Hz · ÷%d", freq(x), div(y))
         case 1, 2: return "RING \(Int(x * 100))% · DECAY \(Int(y * 100))%"
         case 3: return "\(Int(x * 100))% · \(Int(y * 100))%"
         case 4: return "\(Int(x * 100))% · FB \(Int(y * 100))%"
