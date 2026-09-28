@@ -334,36 +334,28 @@ final class Rig: ObservableObject {
     @Published var wvFreeze = 0
     func wvAll() -> [String] { sxAll() + wvCommands(pad: 1) + wvCommands(pad: 2) + ["S 24 \(Rig.freezeValue(wvFreeze))"] }
 
-    // BYTEBEAT (BLE mode 1): one formula; XY pads 1 2 5 6 7 8; 3 = the formula, 4 = the rhythm
+    // BYTEBEAT (BLE mode 1): one formula; pad 3 = the formula, the other seven XY
     let bbAxes: [PadAxis] = BytePad.starts.map { PadAxis($0) }
     @Published var bbCode: String = Rig.d.string(forKey: "rig.bbCode") ?? Bytebeat.seed {
         didSet { Self.d.set(bbCode, forKey: "rig.bbCode") }
     }
-    let bbCA = RhythmCA()
-    /// SLOW: t at 1/32
-    @Published var bbSlow = false
-    /// FREEZE: t goes round the last two steps
+    /// REVERSE: t runs backwards
+    @Published var bbRev = false
+    /// FREEZE: t goes round the last two steps (CHORD stacks it)
     @Published var bbFreeze = false
     static func freezeValue(_ m: Int) -> Int { m > 0 ? 1000 : 0 }
-    /// the settings for one Cafe. B: the window two bits higher, the slice four on (the same t: SYNC)
+    /// the settings for one Cafe (the same for both, but for which side it is: PHASE / DRIFT / PING-PONG use it)
     func bbParams(slot: Int) -> [String] {
-        let p0 = bbAxes[0], p1 = bbAxes[1], p4 = bbAxes[4], p5 = bbAxes[5], p6 = bbAxes[6], p7 = bbAxes[7]
-        let b = slot == 1
-        let win = b ? min(1, p0.y + 2.0 / 16) : p0.y
-        let slice = b ? (p1.y + 4.0 / 16).truncatingRemainder(dividingBy: 1) : p1.y
-        // 0 rate · 1 window · 2 loop · 3 slice · 4 feedback · 5 delay · 6 in->t · 7 in->bits · 8 rule · 9 slow
-        // 10 step · 11 click · 12 decay · 13 level · 14 freeze
-        let v = [p0.x, win, p1.x, slice, p4.x, p4.y, p5.x, p5.y, p6.x, bbSlow ? 1 : 0, p6.y, p7.x, p7.y, 0.7, bbFreeze ? 1 : 0]
+        let rw = bbAxes[0], ab = bbAxes[1], ls = bbAxes[3], ph = bbAxes[4], pp = bbAxes[5], ch = bbAxes[6], fl = bbAxes[7]
+        // 0 rate · 1 window · 2 a · 3 b · 4 loop · 5 slice · 6 phase · 7 drift · 8 ping-pong · 9 step · 10 chord
+        // 11 spread · 12 filter · 13 resonance · 14 freeze · 15 reverse · 16 side
+        let v = [rw.x, rw.y, ab.x, ab.y, ls.x, ls.y, ph.x, ph.y, pp.x, pp.y, ch.x, ch.y, fl.x, fl.y,
+                 bbFreeze ? 1 : 0, bbRev ? 1 : 0, slot == 1 ? 1 : 0]
         return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
     }
     func bbFormulaLines(slot: Int) -> [String] {
         guard let p = Bytebeat.parse(bbCode) else { return [] }
         return ["J 0 " + Bytebeat.hex(p.bytes)]
-    }
-    /// the phone's rhythm picture follows A
-    func bbCAUpdate() {
-        let tHz = 1000 * pow(32, bbAxes[0].x) / (bbSlow ? 32 : 1)
-        bbCA.configure(rule: BytePad.rule(bbAxes[6].x), period: Double(1 << BytePad.step(bbAxes[6].y)) / tHz, frozen: bbFreeze)
     }
     func bbAll(slot: Int) -> [String] { bbFormulaLines(slot: slot) + bbParams(slot: slot) }
     func sxAll() -> [String] { (0..<8).flatMap { sxCommands(pad: $0) } + ["S 8 \(sxAligned ? 1000 : 0)", "S 24 \(Rig.freezeValue(sxFreeze))"] }

@@ -2084,38 +2084,38 @@ static int32_t __attribute__((noinline)) co_tick(uint32_t wpos, int32_t in, int3
 // ==========================================
 // BYTEBEAT --- mode 1 of the BLE preset (k.odk; it replaced COCO here — COCO itself stays for ARP_DELAY's SPEECH)
 // ==========================================
-// ONE formula of t (the phone compiles it to a little stack program: "J 0 <hex bytes>"). What moves it:
-//  WINDOW  which 8 bits of the result are heard (sliding smoothly: low = buzz and grain, high = rhythm)
-//  LOOP    t goes round one slice of the bar (2^LOOP steps; off at the bottom) · SLICE = which of the 16 slices
-//  FEEDBACK the output of DELAY steps ago pushes t (and is the formula's "y") -> it runs away with itself
-//  INPUT   the input jack pushes t (IN) and breaks the low bits (XOR) -> patch the other Cafe in: they collide
-//          (the formula's "i" = the input)
-//  RHYTHM  a 16-step cellular automaton (RULE; off at the bottom) gates the sound, a step every 2^STEP of t, a new
-//          generation every bar; each live step clicks YELLOW, and ASH plays a click (CLICK pitch, DECAY)
-// SLOW = t at 1/32. FREEZE = t loops the last two steps. SKIP / SYNC = t back to 0, the automaton to its seed.
-// Parameters: "J 9 <id> <0..1000>" (bb_update).
-// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 9 y (the fed-back output) · 25 i (the input)
+// ONE formula of t (the phone compiles it: "J 0 <hex bytes>"); a and b in it are the A · B pad. What moves it:
+//  RATE    40 Hz … 64 kHz of t · WINDOW which 8 bits of the result are heard (low = buzz, high = rhythm)
+//  LOOP    t goes round one slice of the bar (2^LOOP steps; off at the bottom) · SLICE which of the 16
+//  PHASE   the two Cafes, the same formula: B's t is pushed on (up to a bar) · DRIFT B runs a hair faster -> they
+//          slide apart and come back (SYNC puts them together again)
+//  PING-PONG  the steps (2^STEP of t) go A, B, A, B … (how much the other one drops out)
+//  CHORD   while FROZEN: the frozen loop again at other speeds (5th, 3rd, 7th …) on top · SPREAD detunes them
+//  FILTER  a low-pass with resonance on the way out (ASH = the sound before it)
+// REVERSE = t runs backwards. FREEZE = t goes round the last two steps. SKIP / SYNC = t back to 0.
+// Parameters: "J 9 <id> <0..1000>" (bb_update). YELLOW: a pulse at every step this Cafe plays.
+// ops: 0 end · 1 t · 2..5 a b c d · 6 e (EARTH) · 7 n8 · 8 n16 · 9 y (the last output) · 25 i (the input)
 //      10 + 11 - 12 * 13 / 14 % 15 & 16 | 17 ^ 18 << 19 >> · 20 ~ 21 neg · 22 < 23 > 24 ==
-volatile uint8_t bb_prog[2][64] = { { 1, 1, 7, 5, 19, 1, 7, 8, 19, 16, 12, 0 }, { 0 } };   // t*(t>>5|t>>8)
+volatile uint8_t bb_prog[2][64] = { { 1, 1, 2, 19, 1, 3, 19, 16, 12, 0 }, { 0 } };   // t*(t>>a|t>>b)
 volatile uint8_t bb_cur = 0;
-volatile uint32_t bb_inc = 11889;          // t per sample, Q16 (8 kHz)
-volatile int32_t bb_v[4] = { 64, 128, 32, 16 };
-volatile int32_t bb_level = 180;           // Q8
+volatile uint32_t bb_inc = 11889;          // t per sample, Q16
+volatile int32_t bb_v[4] = { 5, 8, 32, 16 };
 volatile int32_t bb_win = 0;               // WINDOW: the lowest bit heard, Q8 (0 .. 16 << 8)
-volatile int bb_loopb = 0;                 // LOOP: 0 off, else 2^bb_loopb steps
-volatile int bb_slice = 0;                 // SLICE: 0..15
-volatile int32_t bb_fb = 0, bb_fbd = 64;   // FEEDBACK into t (Q8) · its DELAY (steps)
-volatile int32_t bb_int = 0;               // INPUT -> t (Q8)
-volatile int bb_inx = 0;                   // INPUT -> the low bits (0..8)
-volatile int bb_rule = 0;                  // RHYTHM rule (0 = no gate)
+volatile int bb_loopb = 0, bb_slice = 0;   // LOOP (0 off, else 2^bb_loopb steps) · SLICE 0..15
+volatile uint32_t bb_phase = 0;            // PHASE: B's t is ahead by this (t steps)
+volatile int32_t bb_drift = 0;             // DRIFT: B's rate, Q24 above 1
+volatile int bb_side = 0;                  // 0 = A, 1 = B
+volatile int32_t bb_pp = 0;                // PING-PONG depth, Q12
 volatile int bb_stepb = 11;                // a step every 2^bb_stepb of t
-volatile uint32_t bb_cinc = 0;             // CLICK pitch (Q32 per sample)
-volatile int32_t bb_cdec = 65000;          // CLICK decay (Q16 per sample)
+volatile int bb_chord = 0;                 // CHORD (0 = none)
+volatile int32_t bb_spread = 0;            // SPREAD, Q16 per voice
+volatile int32_t bb_ff = 4096, bb_fq = 4096; // FILTER: cutoff (Q12, 4096 = open) · damping (Q12)
 volatile bool bb_restart = false, bb_reset = true;
-volatile bool bb_slow = false, bb_frz = false;
+volatile bool bb_rev = false, bb_frz = false;
 volatile int bb_gate = 0;
 static uint32_t bb_yv = 128, bb_iv = 128;  // "y" and "i" for the formula
-static uint8_t bb_hist[2048];              // the output, for FEEDBACK
+// CHORD: the other voices' speeds (Q8) — none · oct · 5th · maj · min · sus4 · maj7 · 5th+oct
+static const uint16_t bb_chords[8][2] = { {0, 0}, {512, 0}, {384, 0}, {320, 384}, {307, 384}, {341, 384}, {320, 480}, {384, 512} };
 
 static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   uint32_t st[16];
@@ -2157,77 +2157,83 @@ static uint32_t bb_run(const volatile uint8_t *pr, uint32_t t) {
   return sp ? st[sp - 1] : 0;
 }
 
+static inline int32_t bb_bits(uint32_t v) {                 // WINDOW: 8 bits, sliding between two neighbours
+  int sh = bb_win >> 8, fr = bb_win & 255;
+  int32_t w0 = (int32_t)((v >> sh) & 255), w1 = (int32_t)((v >> (sh + 1)) & 255);
+  return (w0 * (256 - fr) + w1 * fr) >> 8;
+}
+
 static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
-  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, cph = 0, tf = 0, fl = 0, hp = 0;
-  static int32_t out = 0, dc = 0, cenv = 0, gg = 4096, ins = 0;
-  static int ylit = 0, laststep = -1, topb = 0;
-  static uint16_t ca = 0x0100;
+  static uint32_t frac = 0, t = 0, lastt = 0xFFFFFFFFu, tf = 0, fl = 0;
+  static int32_t out = 0, dc = 0, gg = 4096, low = 0, band = 0;
+  static int ylit = 0, laststep = -1;
   static bool was = false;
-  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; cenv = 0; ca = 0x0100; laststep = -1; }
-  if (bb_restart) { bb_restart = false; frac = 0; t = 0; ca = 0x0100; laststep = -1; }
-  ins += (in - ins) >> 3;                                    // (the input, a little smoothed)
-  frac += bb_slow ? (bb_inc >> 5) : bb_inc;
+  if (bb_reset) { bb_reset = false; frac = 0; t = 0; lastt = 0xFFFFFFFFu; out = 0; dc = 0; low = band = 0; laststep = -1; }
+  if (bb_restart) { bb_restart = false; frac = 0; t = 0; laststep = -1; }
+  uint32_t inc = bb_inc;
+  if (bb_side == 1 && bb_drift) inc += (uint32_t)(((uint64_t)inc * (uint32_t)bb_drift) >> 24);   // DRIFT (B)
+  frac += inc;
   uint32_t adv = frac >> 16;
   frac &= 0xFFFF;
   if (bb_frz) {                                              // FREEZE: t goes round the last two steps
     if (!was) { was = true; fl = 2u << bb_stepb; tf = t - fl; }
-    t += adv;
-    if (t - tf >= fl) t = tf + ((t - tf) % fl);
+    t += bb_rev ? (0u - adv) : adv;
+    uint32_t d = t - tf; if ((int32_t)d < 0) d += fl;
+    t = tf + d % fl;
   } else {
     was = false;
-    t += adv;
+    t += bb_rev ? (0u - adv) : adv;                          // REVERSE
   }
   if (t != lastt) {
     lastt = t;
-    // RHYTHM: the 16 steps of the bar; a new generation at every bar
-    int step = (int)((t >> bb_stepb) & 15);
+    uint32_t tt = t + (bb_side == 1 ? bb_phase : 0);         // PHASE (B)
+    // PING-PONG: the steps take turns, A B A B
+    int step = (int)((tt >> bb_stepb) & 0xFFFF);
     bool onset = step != laststep;
-    if (onset && step == 0 && laststep >= 0 && bb_rule) {
-      uint16_t nc = 0;
-      for (int i = 0; i < 16; i++) {
-        int l = (ca >> ((i + 15) & 15)) & 1, m = (ca >> i) & 1, r = (ca >> ((i + 1) & 15)) & 1;
-        nc |= (uint16_t)(((bb_rule >> ((l << 2) | (m << 1) | r)) & 1) << i);
-      }
-      ca = nc ? nc : 0x0100;                                 // (died out: the seed again)
-    }
     laststep = step;
-    bool live = !bb_rule || ((ca >> step) & 1);
-    // the t the formula hears: LOOP / SLICE, then FEEDBACK and INPUT push it
-    uint32_t tl = t;
+    bool mine = ((step & 1) == bb_side);
+    // LOOP / SLICE
+    uint32_t tl = tt;
     if (bb_loopb) {
       uint32_t L = 1u << bb_loopb;
-      tl = (t & ~((L << 4) - 1)) + (uint32_t)bb_slice * L + (t & (L - 1));
+      tl = (tt & ~((L << 4) - 1)) + (uint32_t)bb_slice * L + (tt & (L - 1));
     }
-    bb_yv = bb_hist[(hp - (uint32_t)bb_fbd) & 2047];
-    tl += (uint32_t)((((int32_t)bb_yv - 128) * bb_fb) >> 5);
-    tl += (uint32_t)((ins * bb_int) >> 8);
-    bb_iv = (uint32_t)((ins >> 4) + 128) & 255;
-    uint32_t v = bb_run(bb_prog[bb_cur], tl);
-    // WINDOW: which 8 bits (between two neighbouring windows, smoothly)
-    int sh = bb_win >> 8, fr = bb_win & 255;
-    int32_t w0 = (int32_t)((v >> sh) & 255), w1 = (int32_t)((v >> (sh + 1)) & 255);
-    int32_t m = (w0 * (256 - fr) + w1 * fr) >> 8;
-    if (bb_inx) m ^= (int32_t)(bb_iv & ((1u << bb_inx) - 1));   // INPUT breaks the low bits
-    m &= 255;
-    bb_hist[hp & 2047] = (uint8_t)m;
-    hp++;
+    bb_iv = (uint32_t)(((in >> 4) + 128) & 255);
+    int32_t m = bb_bits(bb_run(bb_prog[bb_cur], tl));
+    // CHORD (while frozen): the loop again, faster, on top
+    if (bb_frz && bb_chord) {
+      int nv = 1;
+      for (int k = 0; k < 2; k++) {
+        uint32_t r = bb_chords[bb_chord][k];
+        if (!r) continue;
+        r += (uint32_t)((r * (uint32_t)bb_spread * (k + 1)) >> 16);
+        uint32_t d = tl - tf;
+        uint32_t tk = tf + (uint32_t)(((uint64_t)d * r >> 8) % (fl ? fl : 1));
+        m += bb_bits(bb_run(bb_prog[bb_cur], tk));
+        nv++;
+      }
+      m /= nv;
+    }
+    bb_yv = (uint32_t)m;
     out = (m - 128) * 12;
-    // the clicks: every live step (RHYTHM on), else the top bit of the window rising
-    int tb = (m >> 7) & 1;
-    bool hit = bb_rule ? (onset && live) : (tb && !topb);
-    topb = tb;
-    if (hit) { cenv = 4096 << 8; cph = 0; ylit = 220; }
-    gg += ((live ? 4096 : 0) - gg) >> 4;
-  } else gg += (((!bb_rule || ((ca >> ((t >> bb_stepb) & 15)) & 1)) ? 4096 : 0) - gg) >> 4;
+    if (onset && (mine || !bb_pp)) ylit = 220;
+    gg += (((mine || !bb_pp) ? 4096 : 4096 - bb_pp) - gg) >> 3;
+  }
   dc += (out - dc) >> 10;
-  int32_t y = ((((out - dc) * gg) >> 12) * bb_level) >> 8;
+  int32_t x = (((out - dc) * gg) >> 12);
+  if (x > 2047) x = 2047; if (x < -2047) x = -2047;
+  *rout = x;                                                 // ASH: before the filter
+  // FILTER: a state-variable low-pass with resonance
+  int32_t y = x;
+  if (bb_ff < 4096) {
+    low += (bb_ff * band) >> 12;
+    int32_t high = x - low - ((bb_fq * band) >> 12);
+    band += (bb_ff * high) >> 12;
+    if (low > 32767) low = 32767; if (low < -32768) low = -32768;
+    if (band > 32767) band = 32767; if (band < -32768) band = -32768;
+    y = low;
+  }
   if (y > 2047) y = 2047; if (y < -2047) y = -2047;
-  // the click (ASH): a short falling blip — a triangle whose pitch drops as it dies away
-  int32_t ce = cenv >> 8;
-  cph += bb_cinc + (uint32_t)(((uint64_t)bb_cinc * ce) >> 11);
-  int32_t tr = (int32_t)(cph >> 20); tr = tr < 2048 ? tr * 2 - 2048 : 6143 - tr * 2;
-  *rout = (tr * ce) >> 12;
-  cenv = (int32_t)(((int64_t)cenv * bb_cdec) >> 16);
   if (ylit > 0) ylit--;
   bb_gate = ylit > 0;
   return y;

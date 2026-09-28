@@ -117,7 +117,7 @@ final class Director: ObservableObject {
             u.send("M 25 \(rig.mode[s])")
             switch rig.mode[s] {
             case 0: grain.allCommands(slot: s).forEach(u.send)
-            case 1: rig.bbAll(slot: s).forEach(u.send); rig.bbCA.reseed(); rig.bbCAUpdate()
+            case 1: rig.bbAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
@@ -203,7 +203,6 @@ final class Director: ObservableObject {
     }
     func sync() {
         ctxUnits().forEach { $0.send("Z") }
-        if rig.padSet == .byte { rig.bbCA.reseed() }        // (the Cafe's automaton starts again too)
     }
 
     // MARK: pads
@@ -220,9 +219,8 @@ final class Director: ObservableObject {
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
-            if BytePad.isView(i) { return }                     // (the formula and the automaton are not XY)
+            if BytePad.isView(i) { return }                     // (the formula is not XY)
             for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
-            rig.bbCAUpdate()
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:
@@ -567,7 +565,6 @@ final class Director: ObservableObject {
     func setBbFreeze(_ on: Bool) {
         rig.bbFreeze = on
         ctxUnits().forEach { $0.send("J 9 14 \(on ? 1000 : 0)") }
-        rig.bbCAUpdate()
     }
     /// BYTEBEAT: the formula, sent when it reads
     func setBbFormula(_ f: String) {
@@ -578,7 +575,7 @@ final class Director: ObservableObject {
     /// a new one
     func bbDice() { setBbFormula(Bytebeat.random()) }
     /// SLOW: t at 1/32
-    func setBbSlow(_ on: Bool) { rig.bbSlow = on; ctxUnits().forEach { $0.send("J 9 9 \(on ? 1000 : 0)") }; rig.bbCAUpdate() }
+    func setBbRev(_ on: Bool) { rig.bbRev = on; ctxUnits().forEach { $0.send("J 9 15 \(on ? 1000 : 0)") } }
     // MARK: HABIT
     func setHabit8k(_ on: Bool) {
         rig.habit8k = on
@@ -791,9 +788,6 @@ private struct MainScreen: View {
         } else if rig.padSet == .byte && i == 2 {                   // BYTEBEAT: the formula
             let director = d
             FormulaPad(rig: rig, tag: "03", set: { director.setBbFormula($0) })
-                .frame(height: padHeight)
-        } else if rig.padSet == .byte && i == 3 {                   // BYTEBEAT: the rhythm
-            RhythmPad(ca: rig.bbCA, tag: "04", rule: BytePad.rule(rig.bbAxes[6].x))
                 .frame(height: padHeight)
         } else if rig.isTapPad(i) {
             TapPad(rig: rig, tag: rig.perRow ? (i < 4 ? "A" : "B") + ".04" : "08", tap: { d.tapTempo() })
@@ -1126,7 +1120,7 @@ private struct HudBar: View {
             case 0: key("dice") { d.bbDice() }                                      // a new formula
             case 1: key("arrow.triangle.2.circlepath") { d.sync() }                // the same t on both Cafes
             case 2: textKey("FREEZE", on: rig.bbFreeze) { d.setBbFreeze(!rig.bbFreeze) }   // t round the last two steps
-            default: textKey("SLOW", on: rig.bbSlow) { d.setBbSlow(!rig.bbSlow) }          // t at 1/32
+            default: textKey("REV", on: rig.bbRev) { d.setBbRev(!rig.bbRev) }              // t runs backwards
             }
         case .habit:
             switch n {
