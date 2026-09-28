@@ -222,10 +222,11 @@ final class CafeUnit: ObservableObject {
             if fw.isEmpty && helloAsked < 3 { helloAsked += 1; send("P") }   // (the first HELLO can come before notify is on)
             let a = l.split(separator: " ")
             guard a.count >= 13 else { return }
-            if a.count >= 21, fw != String(a[20]) { fw = String(a[20]) }          // (the version, on every line)
-            if a.count >= 22, let n = Int(a[21]), flashes != n { flashes = n }   // (how many times it was flashed)
-            if a.count >= 25 {                                                   // HABIT on the Cafe: packets made / sent, its MTU
-                let m = Int(a[22]) ?? 0, t = Int(a[23]) ?? 0, u = Int(a[24]) ?? 0
+            // ("T" is a[0]: the 20 numbers are a[1]…a[20], then the version, the flash count, HABIT's made / sent, the MTU)
+            if a.count >= 22, fw != String(a[21]) { fw = String(a[21]) }          // (the version, on every line)
+            if a.count >= 23, let n = Int(a[22]), flashes != n { flashes = n }   // (how many times it was flashed)
+            if a.count >= 26 {                                                   // HABIT on the Cafe: packets made / sent, its MTU
+                let m = Int(a[23]) ?? 0, t = Int(a[24]) ?? 0, u = Int(a[25]) ?? 0
                 if hbMade != m { hbMade = m }; if hbSent != t { hbSent = t }; if cafeMtu != u { cafeMtu = u }
             }
             let smp = UInt32(a[11]) ?? 0
