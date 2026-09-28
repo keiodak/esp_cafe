@@ -452,6 +452,20 @@ final class CafeUnit: ObservableObject {
         ota = 0; otaNote = "asking the Cafe…"; otaT0 = Date()
         out.removeAll()
         send("U \(data.count) \(String(Self.crc32(data), radix: 16))")
+        otaWatch(data.count)
+    }
+
+    /// an update that goes quiet is given up: no answer to U in 8 s, or no progress for 12 s
+    /// (left hanging, it held every other send — HABIT stopped — and showed UPD_00% for good)
+    private func otaWatch(_ size: Int) {
+        let seen = otaAcked, go = otaGo
+        DispatchQueue.main.asyncAfter(deadline: .now() + (otaGo ? 12 : 8)) { [weak self] in
+            guard let self, let d = self.otaData, d.count == size else { return }
+            if self.otaAcked == seen && self.otaGo == go {
+                self.otaNote = go ? "stalled (the Cafe keeps its old firmware)" : "the Cafe did not answer U (try again)"
+                self.otaData = nil; self.ota = nil; self.otaGo = false
+            } else { self.otaWatch(size) }
+        }
     }
 
     fileprivate func pumpOta() {

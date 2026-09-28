@@ -1091,9 +1091,12 @@ private struct HudBar: View {
     private var statusEnd: some View {
         HStack(spacing: 6) {
             Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
-            if let o = unit.ota {
-                HudTag(text: String(format: "UPD_%02ld%%", Int(o * 100)), fill: PastelTheme.hudOrange, size: 8)
-            }
+                .overlay {                                           // (laid over the line: it never widens the bar)
+                    if let o = unit.ota {
+                        HudTag(text: String(format: "UPD_%02ld%%", Int(o * 100)), fill: PastelTheme.hudOrange, size: 8)
+                            .fixedSize()
+                    }
+                }
             Text(unit.hz > 0 ? String(format: "%.1fK", unit.hz / 1000) : "—")
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
