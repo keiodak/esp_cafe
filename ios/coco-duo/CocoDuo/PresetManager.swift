@@ -444,8 +444,8 @@ private struct PcControls: View {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "COCO", filled: rig.pcMode == 0) { d.setPcMode(0) }
                 ChipButton(title: "SPEECH", filled: rig.pcMode == 1) { d.setPcMode(1) }
-                ChipButton(title: "A REC", filled: !rig.pcCafeStop[0]) { d.setPcCafeRec(0) }     // the Cafes' COCO recording
-                ChipButton(title: "B REC", filled: !rig.pcCafeStop[1]) { d.setPcCafeRec(1) }
+                ChipButton(title: "A REC", filled: false) { d.setPcCafeRec(0) }     // the Cafes' COCO recording on / off
+                ChipButton(title: "B REC", filled: false) { d.setPcCafeRec(1) }
             }
             // both layers laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {

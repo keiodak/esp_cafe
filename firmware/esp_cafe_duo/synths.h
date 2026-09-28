@@ -13,8 +13,7 @@
 // ash is clean audio output
 
 extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, for the phone)
-volatile bool co_noearth = false;   // ARP_DELAY's PHONE_COCO: EARTH does not switch the recording (it bends the phone's pitch)
-volatile bool co_stop_app = false;  //   ... the phone's REC key does ("F 98 <0|1>": 1 = not recording; the lamp on, as COCO_MOD)
+volatile bool co_rec_toggle = false;  // the phone's REC key ("F 98"): the recording on / off, as a press of EARTH
 void IRAM_ATTR coco_mod() {
 
 
@@ -50,10 +49,13 @@ void IRAM_ATTR coco_mod() {
   }
 
   // HYSTERESIS (Using earth_cv)
-  if (co_noearth) {                                 // (PHONE_COCO: the phone's REC key instead of EARTH)
-    bool st = co_stop_app;
-    if (audio_frozen_state != st || lamp != st) { audio_frozen_state = st; lamp = st; if (st) { LAMP_ON; } else { LAMP_OFF; } }
-  } else if (earth_last_state == 0) {
+  if (co_rec_toggle) {                              // (the phone's REC key: the same as EARTH)
+    co_rec_toggle = false;
+    lamp = !lamp;
+    audio_frozen_state = lamp;
+    if (lamp) { LAMP_ON; } else { LAMP_OFF; }
+  }
+  if (earth_last_state == 0) {
     if (smoothed_earth > TRIGGER_ON_THRESHOLD) {
       lamp = !lamp;
       audio_frozen_state = lamp;
@@ -4088,7 +4090,7 @@ void IRAM_ATTR multi() {
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
-  if (ad_mode) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
+  if (ad_mode) { fx_rs[1] = true; coco_mod(); return; }   // PHONE_COCO / SPEECH: this Cafe is COCO_MOD itself (EARTH = rec on / off)
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;
