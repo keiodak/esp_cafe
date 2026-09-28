@@ -448,10 +448,8 @@ private struct SunControls: View {
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
             }
             PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
-            PanelRow(label: "RING", value: Binding(get: { rig.sunRing }, set: { rig.sunRing = $0; d.sunCafeCard() }))      // the Cafes' string
-            PanelRow(label: "DECAY", value: Binding(get: { rig.sunDecay }, set: { rig.sunDecay = $0; d.sunCafeCard() }))
-            PanelRow(label: "SPACE", value: Binding(get: { rig.sunSpace }, set: { rig.sunSpace = $0; d.sunCafeCard() }))   // and reverb
-            PanelRow(label: "SIZE", value: Binding(get: { rig.sunSize }, set: { rig.sunSize = $0; d.sunCafeCard() }))
+            PanelRow(label: "DECAY", value: Binding(get: { rig.sunDecay }, set: { rig.sunDecay = $0; d.sunCafeCard() }))   // the Cafes' string
+            PanelRow(label: "SIZE", value: Binding(get: { rig.sunSize }, set: { rig.sunSize = $0; d.sunCafeCard() }))     // and reverb
         }
     }
 }

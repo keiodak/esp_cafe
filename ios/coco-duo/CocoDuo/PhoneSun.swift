@@ -22,11 +22,14 @@ final class PhoneSun: ObservableObject {
     var oscA = 0.55, oscB = 0.75                 // pitch knobs (0…1 over ~16 octaves, 12 kHz at the top)
     var sweepBA = 0.2, sweepAB = 0.2             // SWEEP: B's triangle → A · A's → B
     var stepA = 0.3, stepB = 0.3                 // STEP: rungler → A · rungler → B
-    var shAmt = 0.2, shSrc = 0.0                 // TIME WARP: S&H → both oscillators · what it takes (triangle B … the runglers)
+    var shAmt = 0.2                              // TIME WARP: the S&H → both oscillators
+    var shRung = false                           // what the S&H takes: triangle B, or the two runglers' mix (2018's switch)
     var peakA = 0.35, peakB = 0.6                // the resonator's two peaks (0…1 over 30 Hz … 9 kHz)
-    var q = 0.9, dist = 0.2                      // resonance (shared) · distortion (filter 2's second pole → the cutoffs)
+    var q = 0.9                                  // Q: the resonance both filters share
     var runPA = 0.3, runPB = 0.3                 // rungler → peak A · rungler → peak B
-    var ping = 0.3, dry = 0.0                    // the pulse's length · the pulses themselves in the output
+    // (fixed, as in the box: the "distortion" is one resistor from filter 2's second pole to the cutoffs; the ping is
+    //  the short pulse where the triangles meet)
+    private let dist = 0.15, pingSec = 0.00025
     var level = 0.7
     @Published private(set) var playing = false
 
@@ -98,8 +101,8 @@ final class PhoneSun: ObservableObject {
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
         let k = q * 8.2                                     // (three poles sing by themselves at 8)
-        let comp = 1 + k * 0.5
-        let pingN = max(1, Int(sr * (0.00005 + ping * ping * 0.003)))
+        let comp = (1 + k * 0.25) * 0.35                   // (a level that stays clean all the way up the Q)
+        let pingN = max(1, Int(sr * pingSec))
         for i in 0..<frames {
             sA += (oscA - sA) * 0.002; sB += (oscB - sB) * 0.002
             gain += (want - gain) * 0.0005
@@ -117,7 +120,7 @@ final class PhoneSun: ObservableObject {
             let dlt = triA - triB
             if (dlt >= 0) != (prevD >= 0) {
                 pulseLeft = pingN
-                sh = triB * (1 - shSrc) + (d1 + d2 - 1) * shSrc
+                sh = shRung ? d1 + d2 - 1 : triB
             }
             prevD = dlt
             let x: Double = pulseLeft > 0 ? 1 : 0
@@ -128,9 +131,9 @@ final class PhoneSun: ObservableObject {
             let f2 = Self.hz(peakB + runPB * (d2 - 0.5) * 0.6) * fm / 1.732
             ladder(x, f1, k, &l1)
             ladder(x, f2, k, &l2)
-            var y = (l1[2] - l2[2]) * comp + (x - 0.5) * dry
+            var y = (l1[2] - l2[2]) * comp
             dc += (y - dc) * 0.002; y -= dc
-            let o = Float(tanh(y * 0.7) * gain)
+            let o = Float((abs(y) < 0.8 ? y : (y > 0 ? 1 : -1) * (0.8 + 0.2 * tanh((abs(y) - 0.8) / 0.2))) * gain)
             l[i] = o; r[i] = o
         }
     }

@@ -115,10 +115,11 @@ enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
 /// string follows OSC B, PEAK B brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
 enum SunPad {
-    static let titles = ["OSC A · OSC B", "SWEEP B→A · A→B", "STEP →A · →B", "TIME WARP · SOURCE",
-                         "PEAK A · PEAK B", "Q · DIST", "RUNG→PK A · PK B", "PING · DRY"]
-    static let starts: [(Double, Double)] = [(0.55, 0.75), (0.2, 0.2), (0.3, 0.3), (0.2, 0.0),
-                                             (0.35, 0.6), (0.9, 0.2), (0.3, 0.3), (0.3, 0.0)]
+    // the box's twelve knobs (3 × 4), two to a pad; the last two pads: each Cafe's string and reverb
+    static let titles = ["OSC A · OSC B", "SWEEP →A · →B", "STEP →A · →B", "TIME WARP · Q",
+                         "PEAK A · PEAK B", "RUNG→PK A · PK B", "CAFE A RING · SPACE", "CAFE B RING · SPACE"]
+    static let starts: [(Double, Double)] = [(0.55, 0.75), (0.2, 0.2), (0.3, 0.3), (0.2, 0.9),
+                                             (0.35, 0.6), (0.3, 0.3), (0.5, 0.4), (0.5, 0.4)]
     /// the Cafe's string: B brought into its four octaves from A1
     static func stringPitch(_ y: Double) -> Int {
         var semi = 12 * log2(max(1, PhoneSun.oscHz(y)) / 55)
@@ -131,9 +132,8 @@ enum SunPad {
         func pc(_ v: Double) -> String { "\(Int(v * 100))%" }
         switch i {
         case 0: return "\(hz(PhoneSun.oscHz(x))) · \(hz(PhoneSun.oscHz(y))) Hz"
-        case 3: return "\(pc(x)) · " + (y < 0.05 ? "TRI B" : y > 0.95 ? "RUNGLERS" : pc(y))
+        case 3: return "\(pc(x)) · Q \(pc(y))"
         case 4: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
-        case 7: return String(format: "%.2f ms · ", (0.00005 + x * x * 0.003) * 1000) + pc(y)
         default: return "\(pc(x)) · \(pc(y))"
         }
     }

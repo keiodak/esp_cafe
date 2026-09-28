@@ -313,11 +313,10 @@ final class Director: ObservableObject {
         s.oscA = a[0].x; s.oscB = a[0].y
         s.sweepBA = a[1].x; s.sweepAB = a[1].y
         s.stepA = a[2].x; s.stepB = a[2].y
-        s.shAmt = a[3].x; s.shSrc = a[3].y
+        s.shAmt = a[3].x; s.q = a[3].y
         s.peakA = a[4].x; s.peakB = a[4].y
-        s.q = a[5].x; s.dist = a[5].y
-        s.runPA = a[6].x; s.runPB = a[6].y
-        s.ping = a[7].x; s.dry = a[7].y
+        s.runPA = a[5].x; s.runPB = a[5].y
+        s.shRung = rig.sunSync
         s.level = rig.sunLevel
     }
     /// the card's RING / DECAY / SPACE / SIZE -> the Cafes on BLIPPOO
@@ -331,7 +330,8 @@ final class Director: ObservableObject {
         let a = rig.sunAxes
         func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
         let pitch = "F 7 0 \(SunPad.stringPitch(a[0].y))", damp = "F 7 2 \(v(0.3 + a[4].y * 0.7))"
-        let rg = ["F 7 6 \(v(rig.sunRing))", "F 7 1 \(v(rig.sunDecay))"], sp = ["F 6 6 \(v(rig.sunSpace))", "F 6 0 \(v(rig.sunSize))"]
+        let mine = a[slot == 1 ? 7 : 6]                                  // (pads 7 / 8: each Cafe's RING · SPACE)
+        let rg = ["F 7 6 \(v(mine.x))", "F 7 1 \(v(rig.sunDecay))"], sp = ["F 6 6 \(v(mine.y))", "F 6 0 \(v(rig.sunSize))"]
         guard let pad else {
             return [pitch, damp] + rg + sp + ["F 7 3 0", "F 7 4 100", "F 7 5 300", "F 7 7 1000",
                                               "F 6 1 400", "F 6 2 500", "F 6 3 500", "F 6 4 0", "F 6 5 200", "F 6 7 1000"]
@@ -340,6 +340,8 @@ final class Director: ObservableObject {
         case 0: return [pitch]                                   // (OSC B tunes the string)
         case 4: return [damp]                                    // (PEAK B brightens it)
         case -1: return rg + sp                                  // (the card)
+        case 6: return slot == 0 ? [rg[0], sp[0]] : []
+        case 7: return slot == 1 ? [rg[0], sp[0]] : []
         default: return []
         }
     }
@@ -1315,6 +1317,7 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
+            case 2: textKey(rig.sunSync ? "S&H RUNG" : "S&H TRI B", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() }   // what the S&H takes
             default: blank
             }
         case .pcoco:
