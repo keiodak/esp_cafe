@@ -18,12 +18,14 @@ final class PhoneSun: ObservableObject {
     // settings: written on the main thread, read by the audio thread (plain numbers, no locks)
     var freqA = 3.0, freqB = 180.0               // Hz
     var fmBA = 0.2, fmAB = 0.2                   // cross FM (0…1)
-    var runOsc = 0.4, runPeak = 0.4              // RUNGLER → both oscillators · → the peaks
-    var peakA = 0.3, peakB = 0.6                 // the two cutoffs (0…1 over 40 Hz … 6 kHz)
-    var res = 0.85                               // resonance
+    var runA = 0.4, runB = 0.4                   // RUNGLER 2 → A · RUNGLER 1 → B (pitch)
+    var peakA = 0.3, peakB = 0.6                 // the two peaks (0…1 over 40 Hz … 6 kHz)
+    var res = 0.85, curve = 1.0                  // Q (the shared resonance) · CURVE (0 = a low-pass at the upper
+                                                 //   peak, 1 = the band between the two)
+    var run1Peak = 0.4, run2Peak = 0.4           // RUNGLER 1 → PEAK 1 · RUNGLER 2 → PEAK 2
+    var shPeak = 0.2, fmPeak = 0.0               // S&H → both peaks · B's triangle → both peaks (audio rate)
+    var shMix = 1.0, bias = 0.5                  // the comparator: S&H (1) or B (0) against A · its threshold
     var level = 0.7
-    /// S&H: the comparator weighs the S&H against A (off: B against A)
-    var mod = true
     /// LOOP: the rungler takes only its own last step (the pattern goes round, held)
     var loop = false
     @Published private(set) var playing = false
@@ -100,8 +102,8 @@ final class PhoneSun: ObservableObject {
             let triA = 1 - 4 * abs(pa - 0.5), triB = 1 - 4 * abs(pb - 0.5)
             d1s += (d1 - d1s) * 0.02; d2s += (d2 - d2s) * 0.02
             // pitch: the other's triangle (cross FM) and the other rungler, in octaves
-            let a = fA * pow(2, triB * fmBA * 3 + (d2s - 0.5) * 4 * runOsc)
-            let b = fB * pow(2, triA * fmAB * 3 + (d1s - 0.5) * 4 * runOsc)
+            let a = fA * pow(2, triB * fmBA * 3 + (d2s - 0.5) * 4 * runA)
+            let b = fB * pow(2, triA * fmAB * 3 + (d1s - 0.5) * 4 * runB)
             pa += min(0.45, a / sr); pa -= floor(pa)
             pb += min(0.45, b / sr); pb -= floor(pb)
             let nA = triA > 0, nB = triB > 0
@@ -117,15 +119,17 @@ final class PhoneSun: ObservableObject {
                 d2 = Double((r2 >> 5) & 0b111) / 7
             }
             sqA = nA; sqB = nB
-            // the comparator: the S&H (or B) against A
-            let cmp = (mod ? sh : triB) > triA ? 1.0 : -1.0
-            // the twin peak: each peak on its rungler
-            let f1 = Self.hz(peakA + (d1s - 0.5) * runPeak * 0.8), f2 = Self.hz(peakB + (d2s - 0.5) * runPeak * 0.8)
+            // the comparator: the S&H (or B) against A, around its threshold
+            let cmp = sh * shMix + triB * (1 - shMix) + (bias - 0.5) > triA ? 1.0 : -1.0
+            // the twin peak: each peak on its rungler, both on the S&H and on B's triangle
+            let common = sh * shPeak * 0.3 + triB * fmPeak * 0.25
+            let f1 = Self.hz(peakA + (d1s - 0.5) * run1Peak * 0.8 + common)
+            let f2 = Self.hz(peakB + (d2s - 0.5) * run2Peak * 0.8 + common)
             let lo = min(f1, f2) / 1.732, hi = max(f1, f2) / 1.732          // (three poles peak at √3 × their corner)
             let tilt = min(4, max(1, (hi / lo).squareRoot()))
             let low = ladder(cmp, lo, k, &la) * comp
             let high = ladder(cmp * tilt, hi, k, &lb) * comp / tilt.squareRoot()
-            var tp = high - low, side = low
+            var tp = high - low * curve, side = low
             dcL += (tp - dcL) * 0.002; tp -= dcL
             dcR += (side - dcR) * 0.002; side -= dcR
             l[i] = Float(tanh(tp * 0.6) * gain)

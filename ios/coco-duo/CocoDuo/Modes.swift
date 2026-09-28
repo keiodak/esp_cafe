@@ -115,10 +115,10 @@ enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
 /// string follows OSC B, PEAK B brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
 enum SunPad {
-    static let titles = ["OSC A · OSC B", "L RING · DECAY", "R RING · DECAY", "FM B→A · FM A→B",
-                         "RUN→OSC · RUN→PEAK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK A · PEAK B"]
-    static let starts: [(Double, Double)] = [(0.3, 0.6), (0.5, 0.5), (0.5, 0.5), (0.2, 0.2),
-                                             (0.4, 0.4), (0.4, 0.6), (0.4, 0.6), (0.3, 0.6)]
+    static let titles = ["OSC A · OSC B", "FM B→A · FM A→B", "RUN→A · RUN→B", "PEAK 1 · PEAK 2",
+                         "Q · CURVE", "RUN→P1 · RUN→P2", "S&H→PEAK · B→PEAK", "S&H · THRESH"]
+    static let starts: [(Double, Double)] = [(0.3, 0.6), (0.2, 0.2), (0.4, 0.4), (0.3, 0.6),
+                                             (0.85, 1.0), (0.4, 0.4), (0.2, 0.0), (1.0, 0.5)]
     static func oscA(_ x: Double) -> Double { 0.1 * pow(8000, x) }          // 0.1 Hz … 800 Hz
     static func oscB(_ y: Double) -> Double { 5 * pow(800, y) }             // 5 Hz … 4 kHz
     /// the Cafe's string: B brought into its four octaves from A1
@@ -130,13 +130,13 @@ enum SunPad {
     }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         func hz(_ f: Double) -> String { f < 10 ? String(format: "%.2f", f) : String(format: "%.0f", f) }
+        func pc(_ v: Double) -> String { "\(Int(v * 100))%" }
         switch i {
         case 0: return "\(hz(oscA(x))) · \(hz(oscB(y))) Hz"
-        case 1, 2: return "RING \(Int(x * 100))% · DECAY \(Int(y * 100))%"
-        case 3, 4: return "\(Int(x * 100))% · \(Int(y * 100))%"
-        case 5, 6: return "SPACE \(Int(x * 100))% · SIZE \(Int(y * 100))%"
-        case 7: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
-        default: return ""
+        case 3: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
+        case 4: return "Q \(pc(x)) · " + (y > 0.95 ? "BAND" : y < 0.05 ? "LOW-PASS" : pc(y))
+        case 7: return "S&H \(pc(x)) · \(Int((y - 0.5) * 200))"
+        default: return "\(pc(x)) · \(pc(y))"
         }
     }
 }
@@ -458,7 +458,11 @@ final class Rig: ObservableObject {
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
     @Published var sunLevel: Double = 0.7
-    @Published var sunRes: Double = 0.85
+    /// BLIPPOO: what the Cafes do with it (the card): their string and reverb
+    @Published var sunRing: Double = 0.5
+    @Published var sunDecay: Double = 0.5
+    @Published var sunSpace: Double = 0.4
+    @Published var sunSize: Double = 0.6
     /// SUNDAY's MOD (S&H -> OSC, SR -> TWIN PEAK: the key in the top left pad) and SYNC (feedback: bottom right)
     @Published var sunMod = true
     @Published var sunSync = false
