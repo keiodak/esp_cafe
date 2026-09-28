@@ -115,7 +115,7 @@ enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony
 /// PHONE_COCO's COCO (PhoneCoco.swift): top row = the phone's two samplers, bottom row = the Cafe's COCO (as SPEECH)
 enum PcPad {
     static let titles = ["A START · LENGTH", "B START · LENGTH", "PITCH · EARTH", "LEVEL · CROSS"]
-    static let starts: [(Double, Double)] = [(0, 1), (0, 1), (0.5, 0.5), (0.8, 0)]
+    static let starts: [(Double, Double)] = [(0, 1), (0, 1), (0.5, 0.75), (0.8, 0)]
     static func len(_ y: Double) -> Double { 0.01 + y * y * 0.99 }
     static func pitch(_ x: Double) -> Double { pow(2, ((x - 0.5) * 4 * 12).rounded() / 12) }   // ×0.25 … ×4, semitones
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {

@@ -42,6 +42,9 @@ final class PhoneCoco: NSObject, ObservableObject {
     var pitch = 1.0, depth = 0.5
     var level = 0.8, cross = 0.0
     private var earth = [0.0, 0.0]
+    /// what each sampler last heard from its Cafe (drawn on its waveform: FLIP · SKIP · EARTH), and SKIPs counted
+    private(set) var seen: [(flip: Bool, skip: Bool, earth: Double)] = [(false, false, 0), (false, false, 0)]
+    private(set) var skips = [0, 0]
     private var side = [0, 1]                    // (link, as the audio thread reads it)
     private var flipWas = [false, false], skipWas = [false, false]
 
@@ -115,18 +118,18 @@ final class PhoneCoco: NSObject, ObservableObject {
     /// k = which sampler; flip / skip / earth (0…255) of the Cafe playing it
     func jacks(_ k: Int, flip: Bool, skip: Bool, earth e: Int) {
         let s = v[k]
-        if flip && !flipWas[k] { s.reverse.toggle() }               // FLIP: a press turns it round
-        flipWas[k] = flip
-        if skip && !skipWas[k] { s.restart = true }                  // SKIP: from the start
+        s.reverse = flip                                             // FLIP: backwards while it is on (as the Cafe's COCO)
+        if skip && !skipWas[k] { s.restart = true; skips[k] += 1 }   // SKIP: from the loop's start
         skipWas[k] = skip
-        // EARTH: at rest it reads ~28 — below 40 counts as nothing
-        let t = max(0, Double(e) - 40) / 215
-        earth[k] += (t - earth[k]) * 0.35
+        // EARTH: at rest it reads ~28 — below 36 counts as nothing; above, up to 4 octaves (PITCH · EARTH's Y)
+        let t = max(0, Double(e) - 36) / 219
+        earth[k] += (t - earth[k]) * 0.6
+        seen[k] = (flip, skip, earth[k])
         update(k)
     }
     func update(_ k: Int) {
         let s = v[k]
-        s.step = pitch * pow(2, earth[k] * 2 * depth) * s.srcRate / sr
+        s.step = pitch * pow(2, earth[k] * 4 * depth) * s.srcRate / sr
     }
     func updateAll() { update(0); update(1); side = link }
 
@@ -248,6 +251,17 @@ struct PcWave: View {
                 ctx.fill(bars, with: .color(PastelTheme.hudBlack.opacity(0.4)))
                 let x = CGFloat(pc.playing(k)) * size.width
                 ctx.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(PastelTheme.hudOrange))
+                // what comes from its Cafe: FLIP · SKIP lit while on, EARTH as a bar on the right
+                let j = pc.seen[k]
+                func tag(_ t: String, _ on: Bool, _ at: CGFloat) {
+                    ctx.draw(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundColor(on ? PastelTheme.hudOrange : PastelTheme.hudLine),
+                             at: CGPoint(x: at, y: 6), anchor: .topLeading)
+                }
+                tag("FLIP", j.flip, 4)
+                tag("SKIP \(pc.skips[k] % 100)", j.skip, 34)
+                let eh = CGFloat(min(1, j.earth)) * size.height
+                ctx.fill(Path(CGRect(x: size.width - 4, y: size.height - eh, width: 3, height: eh)), with: .color(PastelTheme.hudOrange))
             }
         }
         .allowsHitTesting(false)
