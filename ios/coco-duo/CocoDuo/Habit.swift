@@ -322,6 +322,7 @@ final class HabitEngine {
     private var pos: Double = -1                 // the play head (memory samples, ever)
     private var jumpOff: Double = 0, jumpNow = false
     private var loopStart: Double = -1
+    private var whereWas: Double = -1
     private var fadeIn: Double = 1
     private var pd: Double = 0, wow: Double = 0
     private func next() -> Double {
@@ -358,7 +359,9 @@ final class HabitEngine {
             pos += 1
             if pos >= hi { pos -= Double(have - 4) }
         } else {
-            if abs(target - pos) > r * 0.5 { pos = target; fadeIn = 0 }                          // (moved far: go there)
+            // (WHERE moved: go there. Not "far from the target": the phone plays ~1 s ahead of the Cafe's ears — the
+            //  queue — so it always looks far, and jumping back on that made it repeat the same second, not play)
+            if abs(wh.x - whereWas) > 0.01 { whereWas = wh.x; pos = target; fadeIn = 0 }
             pos += 1                                                                             // (straight: ×1, nothing bent)
             pos = min(hi, max(lo, pos))
         }
