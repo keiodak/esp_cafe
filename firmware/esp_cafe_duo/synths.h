@@ -12,6 +12,7 @@
 // earth is record on/off switch
 // ash is clean audio output
 
+extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, for the phone)
 void IRAM_ATTR coco_mod() {
 
 
@@ -38,6 +39,7 @@ void IRAM_ATTR coco_mod() {
   // EARTHREAD SLEW
   // Needed to prevent false triggers
   int raw_earth = EARTHREAD;
+  pc_earth = (uint8_t)raw_earth;                    // (the phone reads the jacks too: ARP_DELAY's PHONE_COCO)
 
   if (smoothed_earth == -1) {
     smoothed_earth = raw_earth;
@@ -140,6 +142,8 @@ void IRAM_ATTR coco_mod() {
   }
 
   ///////////END MODIFIED
+  pc_flip = FLIPPERAT ? 1 : 0;
+  pc_skip = SKIPPERAT ? 1 : 0;
 
   // HEARTBEAT
   REG(I2S_CONF_REG)
@@ -4079,6 +4083,7 @@ void IRAM_ATTR multi() {
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
+  if (ad_mode) { fx_rs[1] = true; coco_mod(); return; }   // PHONE_COCO / SPEECH: this Cafe is COCO_MOD itself
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;

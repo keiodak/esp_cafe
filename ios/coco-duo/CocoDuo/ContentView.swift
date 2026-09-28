@@ -810,8 +810,8 @@ private struct MainScreen: View {
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
-        case .speech: return (rig.spAxes[i], SpPad.titles[i])
-        case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : SpPad.titles[i])
+        case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
+        case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .knob: return (rig.nzAxes[i], "")
         }
     }
