@@ -1332,6 +1332,8 @@ private struct CafeLine: View {
                     ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  made %d sent %d  mtu %d/%d", unit.hbUp, unit.hbDown, unit.hbMade, unit.hbSent, unit.cafeMtu, unit.mtu) : ""))
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .padding(.leading, 19)
         }
     }
