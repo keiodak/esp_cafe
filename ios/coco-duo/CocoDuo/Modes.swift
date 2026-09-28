@@ -456,7 +456,7 @@ final class Rig: ObservableObject {
     @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
-    @Published var sunLevel: Double = 0.7
+    @Published var sunLevel: Double = 0.9
     /// BLIPPOO: what the Cafes do with it (the card): their string and reverb
     @Published var sunRing: Double = 0.5
     @Published var sunDecay: Double = 0.5

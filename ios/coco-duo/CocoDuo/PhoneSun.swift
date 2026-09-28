@@ -109,8 +109,8 @@ final class PhoneSun: ObservableObject {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
-        let k = q * 9.6                                     // (three poles sing by themselves at 8: the top of Q rings on)
-        let comp = (1 + k * 0.25) * 0.35                   // (a level that stays clean all the way up the Q)
+        let k = q * 8.6                                     // (three poles sing by themselves at 8: only the very top rings on)
+        let comp = min(8, 3.9 * exp(-(k - 4.8) * 0.415))     // (about the same loudness at any Q: low Q rings little, so it is lifted)
         let pingN = max(1, Int(sr * pingSec))
         if restartFlag { restartFlag = false; pa = 0; pb = 0.3; r1 = 0b0101; r2 = 0b1100; sh = 0; d1 = 0; d2 = 0 }
         for i in 0..<frames {
