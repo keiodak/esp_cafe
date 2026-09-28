@@ -449,6 +449,7 @@ private struct PcControls: View {
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(0..<2, id: \.self) { k in
+                        VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: PanelMetrics.chipSpacing) {
                             ChipButton(title: pc.loading[k] ? "LOAD…" : (k == 0 ? "FILE A" : "FILE B"), filled: pc.loading[k]) {
                                 pick = k; picking = true
@@ -458,8 +459,9 @@ private struct PcControls: View {
                             ChipButton(title: pc.link[k] == 0 ? "CAFE A · L" : "CAFE B · R", filled: false) {   // which Cafe plays it
                                 var l = pc.link; l[k] = 1 - l[k]; pc.link = l; d.pcoco.updateAll()
                             }
-                            PcWave(pc: pc, k: k, axis: rig.pcTop[k])
-                                .frame(height: 20)
+                        }
+                        PcWave(pc: pc, k: k, axis: rig.pcTop[k])                 // (its own line, under the keys)
+                            .frame(height: 44)
                         }
                     }
                 }
