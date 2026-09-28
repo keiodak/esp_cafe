@@ -104,10 +104,10 @@ enum HabitPad {
 
 /// one Cafe's memory and its playing
 final class HabitEngine {
-    static let maxSeconds = 600.0
+    static let maxSeconds = 300.0
     static var shownSeconds = 150.0              // (for the WHERE caption)
-    static let lengths: [Double] = [30, 60, 150, 300, 600]
-    var seconds = 150.0                          // LENGTH of the memory: 30 s … 10 min
+    static let lengths: [Double] = [30, 60, 150, 300]
+    var seconds = 150.0                          // LENGTH of the memory: 30 s … 5 min
     weak var other: HabitEngine?                 // the other Cafe's (SKIP pulls towards it)
     /// how far back this one is playing now (s)
     private(set) var age: Double = 0

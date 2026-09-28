@@ -57,6 +57,7 @@ final class CafeUnit: ObservableObject {
     /// the Cafe's firmware version (from its HELLO)
     @Published var fw = ""
     @Published var flashes = 0
+    @Published var hbMade = 0, hbSent = 0, cafeMtu = 0
     fileprivate var helloAsked = 0
     @Published var ls = 0
     @Published var le = TAPE
@@ -223,6 +224,10 @@ final class CafeUnit: ObservableObject {
             guard a.count >= 13 else { return }
             if a.count >= 21, fw != String(a[20]) { fw = String(a[20]) }          // (the version, on every line)
             if a.count >= 22, let n = Int(a[21]), flashes != n { flashes = n }   // (how many times it was flashed)
+            if a.count >= 25 {                                                   // HABIT on the Cafe: packets made / sent, its MTU
+                let m = Int(a[22]) ?? 0, t = Int(a[23]) ?? 0, u = Int(a[24]) ?? 0
+                if hbMade != m { hbMade = m }; if hbSent != t { hbSent = t }; if cafeMtu != u { cafeMtu = u }
+            }
             let smp = UInt32(a[11]) ?? 0
             let now = Date()
             if let last = lastSmp {
