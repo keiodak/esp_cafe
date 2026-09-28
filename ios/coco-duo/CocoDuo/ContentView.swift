@@ -31,6 +31,7 @@ final class Director: ObservableObject {
     let grain = GrainMode()
     /// HABIT: one memory per Cafe
     lazy var habits: [HabitEngine] = hub.units.map { HabitEngine(unit: $0, axes: rig.habitAxes) }
+    lazy var habitPlayer = HabitPlayer(habits)                // (HABIT plays on the phone: L = A, R = B)
     let camera = CameraRig()
     let arp = ArpEngine()
     var units: [CafeUnit] { hub.units }
@@ -126,7 +127,7 @@ final class Director: ObservableObject {
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].auto = rig.habitAuto
                 habits[s].onAutoHold = { [weak self] in self?.rig.habitHold = true }
                 habits[s].seconds = rig.habitSeconds; habits[s].other = habits[1 - s]; habits[s].useEarth = rig.habitEarth
-                habits[s].start()
+                habits[s].start(); habitPlayer.start()
             default: rig.nzAll(slot: s).forEach(u.send)
             }
         case Preset.harmony:
@@ -815,7 +816,7 @@ private struct MainScreen: View {
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
             .overlay {                                                        // HABIT: the memory, under WHERE
-                if rig.padSet == .habit && i == 0 { HabitScopeView(scope: d.habits[d.ctxUnits().first?.slot ?? 0].scope) }
+                if rig.padSet == .habit && i == 0 { HabitStereoScope(l: d.habits[0].scope, r: d.habits[1].scope) }
             }
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
         }

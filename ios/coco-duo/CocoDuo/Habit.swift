@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import AVFoundation
 
 /// what the memory looks like, for the WHERE pad: min / max per bin, newest on the left (WHERE's 0 = now), and
 /// where the playing is
@@ -20,7 +21,25 @@ final class HabitScope: ObservableObject {
     @Published var full: Double = 0              // how much of the memory holds sound
 }
 
-/// drawn over the WHERE pad
+/// both memories over the WHERE pad: L (Cafe A) above, R (Cafe B) below
+struct HabitStereoScope: View {
+    @ObservedObject var l: HabitScope
+    @ObservedObject var r: HabitScope
+    var body: some View {
+        VStack(spacing: 2) {
+            HabitScopeView(scope: l).overlay(alignment: .bottomTrailing) { tag("L") }
+            HabitScopeView(scope: r).overlay(alignment: .bottomTrailing) { tag("R") }
+        }
+        .padding(.vertical, 18)
+        .allowsHitTesting(false)
+    }
+    private func tag(_ s: String) -> some View {
+        Text(s).font(.system(size: 8, weight: .bold, design: .monospaced))
+            .foregroundStyle(PastelTheme.hudBlack.opacity(0.5)).padding(3)
+    }
+}
+
+/// one memory
 struct HabitScopeView: View {
     @ObservedObject var scope: HabitScope
     var body: some View {
@@ -121,7 +140,7 @@ final class HabitEngine {
     private var scopeT = Date()
 
     // the memory: a ring of 16-bit samples at the rate the Cafe sends
-    private var mem: [Int16]
+    private let mem: UnsafeMutablePointer<Int16>    // (a plain block: the audio thread reads it while the link writes it)
     private var mw = 0                           // samples written, ever (the ring index is mw % cap)
     private let cap: Int
     // the Cafe's read head, as its last packet said (tape samples), and when
@@ -158,7 +177,8 @@ final class HabitEngine {
         self.unit = unit
         self.axes = axes
         cap = Int(Self.maxSeconds * 17000)
-        mem = [Int16](repeating: 0, count: cap)
+        mem = UnsafeMutablePointer<Int16>.allocate(capacity: cap)
+        mem.initialize(repeating: 0, count: cap)
         unit.onHabit = { [weak self] d in self?.receive(d) }
     }
 
@@ -227,6 +247,7 @@ final class HabitEngine {
         readInputs()
         if auto && !hold && filled >= Int(seconds * rate) - 1 { hold = true; onAutoHold?() }
         if now.timeIntervalSince(scopeT) >= 0.2 { scopeT = now; drawScope() }
+        guard toCafe else { return }                            // (the phone plays it itself: nothing goes back)
         let tapeLen = TAPE / div
         let r = rate
         // where the Cafe reads now (rate samples on the tape)
@@ -274,6 +295,18 @@ final class HabitEngine {
     var auto = false
     /// EARTH jumps through the memory only when this is on (off by default: a floating input kept moving it)
     var useEarth = false
+    /// where the playing goes: false = the phone's own output (L = Cafe A, R = Cafe B: smooth, nothing over the
+    /// link but the recording); true = back onto the Cafe's tape (the old way)
+    var toCafe = false
+    // the phone's output: the memory's rate brought up to the output's, in straight lines
+    private var ph: Double = 1, pv: Double = 0, cv: Double = 0
+    /// one sample at the output's rate (called on the audio thread)
+    func pull(_ outRate: Double) -> Float {
+        guard active, !toCafe else { return 0 }
+        ph += rate / outRate
+        while ph >= 1 { ph -= 1; pv = cv; cv = next() }
+        return Float(pv + (cv - pv) * ph)
+    }
     var onAutoHold: (() -> Void)?
     private var rest: Double = -1                // EARTH's resting level (what an open input reads)
     private var earthOn = false
@@ -493,5 +526,40 @@ final class HabitEngine {
         for k in 0..<n { body[k] = mem[(mw - n + k) % cap] }
         body.withUnsafeBufferPointer { d.append(Data(buffer: $0)) }
         return d
+    }
+}
+
+
+/// HABIT's sound on the phone: Cafe A's memory on the left, Cafe B's on the right
+final class HabitPlayer {
+    private let engine = AVAudioEngine()
+    private var node: AVAudioSourceNode?
+    private let habits: [HabitEngine]
+    init(_ habits: [HabitEngine]) { self.habits = habits }
+
+    func start() {
+        if node != nil { if !engine.isRunning { try? engine.start() }; return }
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.playback, options: [.mixWithOthers])
+        try? s.setActive(true)
+        let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let sr = hw > 1000 ? hw : 48000
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2)!
+        let hs = habits
+        let n = AVAudioSourceNode(format: fmt) { _, _, frames, abl -> OSStatus in
+            let b = UnsafeMutableAudioBufferListPointer(abl)
+            guard b.count >= 2, let l = b[0].mData?.assumingMemoryBound(to: Float.self),
+                  let r = b[1].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
+            for i in 0..<Int(frames) {
+                l[i] = hs[0].pull(sr)
+                r[i] = hs.count > 1 ? hs[1].pull(sr) : 0
+            }
+            return noErr
+        }
+        engine.attach(n)
+        engine.connect(n, to: engine.mainMixerNode, format: fmt)
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+        node = n
+        try? engine.start()
     }
 }
