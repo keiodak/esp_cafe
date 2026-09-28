@@ -118,8 +118,8 @@ enum SunPad {
     static let titles = ["FREQ · DIV", "L RING · DECAY", "R RING · DECAY", "FOLD 1 · FOLD 2",
                          "FOLD 3 · FEEDBACK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK 1 · PEAK 2"]
     static let starts: [(Double, Double)] = [(0.35, 0.3), (0.5, 0.5), (0.5, 0.5), (0.3, 0.2),
-                                             (0.0, 0.0), (0.4, 0.6), (0.4, 0.6), (0.3, 0.7)]
-    static func freq(_ x: Double) -> Double { 30 * pow(50, x) }            // 30 Hz … 1.5 kHz
+                                             (0.0, 0.0), (0.4, 0.6), (0.4, 0.6), (0.2, 0.45)]
+    static func freq(_ x: Double) -> Double { 20 * pow(40, x) }            // 20 Hz … 800 Hz
     /// DIV: how many gates (the folds rising through 0) make one step of the S&H and the shift register
     static func div(_ y: Double) -> Int { min(5000, max(1, Int(1 / max(1 - min(y, 0.9995), 0.0002)))) }
     /// the Cafe's string: the phone's note brought into its four octaves from A1

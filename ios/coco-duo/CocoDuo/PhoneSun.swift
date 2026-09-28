@@ -2,7 +2,7 @@
 // APP+CAFE's SUNDAY: a small Sunnandæg on the phone, made the way Sunnandæg makes it —
 //   sine -> FOLD 1 (soft clip) -> FOLD 2 (triangle fold) -> FOLD 3 (rectifier); the folds' output back into the sine
 //   (FEEDBACK: as FM, or with SYNC as a pull of the phase to 0 where it rises past 1 − FEEDBACK);
-//   S&H: FOLD 2 rising through 0 is the gate (÷ DIV), FOLD 1 the data -> the pitch (±1.5 oct);
+//   S&H: FOLD 2 rising through 0 is the gate (÷ DIV), FOLD 1 the data -> the pitch (±1 oct);
 //   SHIFT REGISTER: FOLD 3 the gate (÷ DIV), FOLD 1 the data, 8 steps -> both twin peak positions;
 //   TWIN PEAK: two resonant band-passes, peak 1 riding FOLD 2, peak 2 riding FOLD 3 around PEAK 1 / PEAK 2 — that is
 //   the output (as Sunnandæg's, no dry). No random anywhere: it all comes from the sound itself.
@@ -15,7 +15,7 @@ final class PhoneSun: ObservableObject {
     // settings: written on the main thread, read by the audio thread (plain numbers, no locks)
     var freq = 110.0, spread = 6.0               // Hz · cents between L and R
     var fold1 = 0.0, fold2 = 0.0, fold3 = 0.0, feedback = 0.0
-    var peak1 = 0.3, peak2 = 0.7                 // twin peak positions (0…1 over ~100 Hz … 13 kHz)
+    var peak1 = 0.2, peak2 = 0.45                // twin peak positions (0…1 over ~80 Hz … 4 kHz)
     var level = 0.7
     /// MOD: the S&H into the pitch and the shift register into the twin peak (off: neither moves anything)
     var mod = false
@@ -41,7 +41,7 @@ final class PhoneSun: ObservableObject {
     private var side = [Side(), Side()]
     private var fs = 110.0, gain = 0.0
     private let q = 20.0, depth = 0.35, dataGain = 1.8, boost = 2.5
-    private let loNorm = 0.1, hiNorm = 0.98
+    private let loNorm = 0.05, hiNorm = 0.75         // (the peaks' range: ~80 Hz … ~4 kHz — higher only shrieked)
 
     func play(_ on: Bool) {
         playing = on
@@ -130,13 +130,13 @@ final class PhoneSun: ObservableObject {
             }
         }
         s.srGate = s.s3
-        // S&H: FOLD 2 rising through 0, ÷ DIV -> FOLD 1 held -> the pitch (±1.5 oct)
+        // S&H: FOLD 2 rising through 0, ÷ DIV -> FOLD 1 held -> the pitch (±1 oct)
         if s.shGate < 0 && s.s2 >= 0 {
             s.shCount += 1
             if s.shCount >= ratio {
                 s.shCount = 0
                 s.sh = tanh(s.s1 * dataGain)
-                s.shFactor = pow(2, s.sh * 1.5)
+                s.shFactor = pow(2, s.sh)
             }
         }
         s.shGate = s.s2
@@ -171,9 +171,9 @@ final class PhoneSun: ObservableObject {
         return band
     }
 
-    /// twin peak's positions in Hz (for the captions): 0…1 over ~100 Hz … 13 kHz
+    /// twin peak's positions in Hz (for the captions): 0…1 over ~80 Hz … 4 kHz
     static func hz(_ p: Double) -> Double {
-        let lr = log(250.0), lo = 60 * exp(0.1 * lr), hi = 60 * exp(0.98 * lr)
+        let lr = log(250.0), lo = 60 * exp(0.05 * lr), hi = 60 * exp(0.75 * lr)
         return lo * exp(min(1, max(0, p)) * log(hi / lo))
     }
 
