@@ -1,13 +1,15 @@
 // PhoneSun.swift — coco duo (k.odk)
-// APP+CAFE's BLIPPOO: a Blippoo Box on the phone (after Rob Hordijk's instrument, from its public descriptions):
+// APP+CAFE's BLIPPOO: a Blippoo Box on the phone (after Rob Hordijk's instrument, from its public descriptions:
+// Hordijk's blog, Perfect Circuit's notes on the rungler and the Blippoo Box):
 //   two triangle oscillators, A and B, that bend each other's pitch (FM B→A, FM A→B);
-//   the RUNGLER: an 8-step shift register clocked by A's square, fed with B's square (XOR its own last step; LOOP
-//     = its own last step only, the pattern held), read by a 3-bit DAC from its last three steps — back onto both
-//     oscillators' pitch and onto the filter's peaks;
-//   S&H: B's triangle sampled on A's clock, onto the peaks;
-//   the sound: the COMPARATOR (A's triangle against B's) into the TWIN PEAK — two resonant 18 dB low-passes whose
-//     outputs are subtracted, so two peaks stand at their cutoffs with the band between.
-// L = the twin peak's band (→ Cafe A), R = its low side (→ Cafe B). No random anywhere: it all comes from the circuit.
+//   two RUNGLERS: 8-step shift registers, one clocked by A with B as its data, the other clocked by B with A as its
+//     data (each XOR its own last step; LOOP = its own last step only: the pattern held), read by a 3-bit DAC from
+//     the last three steps — the "stepped havoc" CVs, each back onto the other oscillator's pitch and onto one peak;
+//   S&H: B's triangle taken on A's clock;
+//   the COMPARATOR: the S&H against A's triangle (S&H off: B against A) — a pulse, the sound;
+//   the TWIN PEAK: two 18 dB (three-pole) low-passes sharing one resonance, their outputs subtracted: a peak stands
+//     at each cutoff and the band between them passes (the upper one's input tilted up so both peaks are heard).
+// L = the twin peak (→ Cafe A), R = its lower filter alone (→ Cafe B). No random anywhere.
 // The Cafes answer with a string tuned to B (KARPLUS) into a reverb (see Director.sunCafe).
 
 import AVFoundation
@@ -20,7 +22,7 @@ final class PhoneSun: ObservableObject {
     var peakA = 0.3, peakB = 0.6                 // the two cutoffs (0…1 over 40 Hz … 6 kHz)
     var res = 0.85                               // resonance
     var level = 0.7
-    /// S&H onto the peaks
+    /// S&H: the comparator weighs the S&H against A (off: B against A)
     var mod = true
     /// LOOP: the rungler takes only its own last step (the pattern goes round, held)
     var loop = false
@@ -33,10 +35,10 @@ final class PhoneSun: ObservableObject {
     // the circuit (audio thread)
     private var pa = 0.0, pb = 0.25
     private var sqA = false, sqB = false
-    private var reg: UInt8 = 0b1011_0010
-    private var rung = 0.0, rungS = 0.0
-    private var sh = 0.0, shS = 0.0
-    private var la = [0.0, 0.0, 0.0], lb = [0.0, 0.0, 0.0]   // two three-pole ladders
+    private var r1: UInt8 = 0b1011_0010, r2: UInt8 = 0b0110_1001  // the two runglers
+    private var d1 = 0.0, d2 = 0.0, d1s = 0.0, d2s = 0.0              // their DACs (and a hair rounded)
+    private var sh = 0.0
+    private var la = [0.0, 0.0, 0.0], lb = [0.0, 0.0, 0.0]         // the twin peak's two three-pole low-passes
     private var gain = 0.0, dcL = 0.0, dcR = 0.0
     private var fA = 3.0, fB = 180.0
 
@@ -83,64 +85,62 @@ final class PhoneSun: ObservableObject {
         engine.pause()
     }
 
-    /// 40 Hz … 6 kHz
+    /// 40 Hz … 6 kHz (where the peak stands)
     static func hz(_ p: Double) -> Double { 40 * pow(150, min(1, max(0, p))) }
 
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
-        let k = res * 7.5                                   // (three poles ring at 8)
+        let k = res * 8.4                                   // (three poles ring at 8: the top sings by itself)
+        let comp = 1 + k * 0.5
         for i in 0..<frames {
             fA += (freqA - fA) * 0.002; fB += (freqB - fB) * 0.002
             gain += (want - gain) * 0.0005
-            // the two triangles (−1…1) and their squares
             let triA = 1 - 4 * abs(pa - 0.5), triB = 1 - 4 * abs(pb - 0.5)
-            rungS += (rung - rungS) * 0.02                       // (the DAC's steps, a hair rounded)
-            shS += (sh - shS) * 0.02
-            // pitch: the other's triangle (cross FM) and the rungler, in octaves
-            let ra = (rungS - 0.5) * 4 * runOsc
-            let a = fA * pow(2, triB * fmBA * 3 + ra)
-            let b = fB * pow(2, triA * fmAB * 3 + ra * 0.75)
+            d1s += (d1 - d1s) * 0.02; d2s += (d2 - d2s) * 0.02
+            // pitch: the other's triangle (cross FM) and the other rungler, in octaves
+            let a = fA * pow(2, triB * fmBA * 3 + (d2s - 0.5) * 4 * runOsc)
+            let b = fB * pow(2, triA * fmAB * 3 + (d1s - 0.5) * 4 * runOsc)
             pa += min(0.45, a / sr); pa -= floor(pa)
             pb += min(0.45, b / sr); pb -= floor(pb)
             let nA = triA > 0, nB = triB > 0
-            // A's square rising: the rungler steps (data = B's square XOR its last step; LOOP = its last step) and
-            // the S&H takes B's triangle
-            if nA && !sqA {
-                let last = (reg >> 7) & 1
-                let bit: UInt8 = loop ? last : (last ^ (nB ? 1 : 0))
-                reg = (reg << 1) | bit
-                rung = Double((reg >> 5) & 0b111) / 7                  // 3-bit DAC of the last three steps
+            if nA && !sqA {                                  // A's clock: rungler 1 takes B, the S&H takes B
+                let last = (r1 >> 7) & 1
+                r1 = (r1 << 1) | (loop ? last : last ^ (nB ? 1 : 0))
+                d1 = Double((r1 >> 5) & 0b111) / 7
                 sh = triB
             }
+            if nB && !sqB {                                  // B's clock: rungler 2 takes A
+                let last = (r2 >> 7) & 1
+                r2 = (r2 << 1) | (loop ? last : last ^ (nA ? 1 : 0))
+                d2 = Double((r2 >> 5) & 0b111) / 7
+            }
             sqA = nA; sqB = nB
-            // the comparator: A's triangle against B's
-            let cmp = triA > triB ? 0.8 : -0.8
-            // the peaks: their base, the rungler, the S&H
-            var ca = peakA + (rungS - 0.5) * runPeak * 0.8
-            var cb = peakB + (rungS - 0.5) * runPeak * 0.8
-            if mod { ca += shS * 0.25; cb += shS * 0.25 }
-            let fa = Self.hz(ca), fb = Self.hz(cb)
-            let lo = min(fa, fb), hi = max(fa, fb)
-            let low = ladder(cmp, lo, k, &la), high = ladder(cmp, hi, k, &lb)
-            var band = high - low                               // TWIN PEAK: the two subtracted
-            var side = low
-            dcL += (band - dcL) * 0.001; band -= dcL
-            dcR += (side - dcR) * 0.001; side -= dcR
-            l[i] = Float(tanh(band * 1.4) * gain)
-            r[i] = Float(tanh(side * 1.2) * gain)
+            // the comparator: the S&H (or B) against A
+            let cmp = (mod ? sh : triB) > triA ? 1.0 : -1.0
+            // the twin peak: each peak on its rungler
+            let f1 = Self.hz(peakA + (d1s - 0.5) * runPeak * 0.8), f2 = Self.hz(peakB + (d2s - 0.5) * runPeak * 0.8)
+            let lo = min(f1, f2) / 1.732, hi = max(f1, f2) / 1.732          // (three poles peak at √3 × their corner)
+            let tilt = min(4, max(1, (hi / lo).squareRoot()))
+            let low = ladder(cmp, lo, k, &la) * comp
+            let high = ladder(cmp * tilt, hi, k, &lb) * comp / tilt.squareRoot()
+            var tp = high - low, side = low
+            dcL += (tp - dcL) * 0.002; tp -= dcL
+            dcR += (side - dcR) * 0.002; side -= dcR
+            l[i] = Float(tanh(tp * 0.6) * gain)
+            r[i] = Float(tanh(side * 0.6) * gain)
         }
     }
 
-    /// a three-pole low-pass (18 dB) with resonance fed back from its last pole
+    /// a three-pole low-pass (18 dB); the resonance fed back from its last pole through a soft limit
     private func ladder(_ x: Double, _ fc: Double, _ k: Double, _ s: inout [Double]) -> Double {
         let g = 1 - exp(-2 * .pi * min(fc, sr * 0.3) / sr)
-        let u = tanh(x - k * s[2])
+        let u = x - k * tanh(s[2])
         s[0] += g * (u - s[0])
         s[1] += g * (s[0] - s[1])
         s[2] += g * (s[1] - s[2])
         if !s[2].isFinite { s = [0, 0, 0] }
-        return s[2] * (1 + k * 0.5)                               // (the resonance's loss made up)
+        return s[2]
     }
 }

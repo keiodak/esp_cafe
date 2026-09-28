@@ -1310,7 +1310,7 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
-            case 2: textKey("S&H", on: rig.sunMod) { rig.sunMod.toggle(); d.applySun() }     // S&H onto the peaks
+            case 2: textKey("S&H", on: rig.sunMod) { rig.sunMod.toggle(); d.applySun() }     // S&H into the comparator
             default: textKey("LOOP", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() } // the rungler's pattern held
             }
         case .pcoco:
