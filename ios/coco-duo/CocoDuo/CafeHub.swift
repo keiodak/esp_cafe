@@ -220,6 +220,7 @@ final class CafeUnit: ObservableObject {
             if fw.isEmpty && helloAsked < 3 { helloAsked += 1; send("P") }   // (the first HELLO can come before notify is on)
             let a = l.split(separator: " ")
             guard a.count >= 13 else { return }
+            if a.count >= 21, fw != String(a[20]) { fw = String(a[20]) }          // (the version, on every line)
             let smp = UInt32(a[11]) ?? 0
             let now = Date()
             if let last = lastSmp {

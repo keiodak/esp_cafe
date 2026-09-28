@@ -1313,7 +1313,7 @@ private struct CafeLine: View {
                 ChipButton(title: "DISC", filled: false) { hub.disconnect(unit.slot) }.frame(width: 36)
                 ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }.frame(width: 48)
             }
-            Text((unit.fw.isEmpty ? "" : "v\(unit.fw)  ·  ") + "\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))"
+            Text("v\(unit.fw.isEmpty ? "?" : unit.fw)  ·  " + "\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))"
                  + (unit.preset == Preset.ble && unit.mode == 6
                     ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  drop %d  mtu %d", unit.hbUp, unit.hbDown, unit.hbDrops, unit.mtu) : ""))
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
