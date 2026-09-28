@@ -63,7 +63,7 @@ final class Director: ObservableObject {
             let onPc = onArp && self.rig.arpMode == 1
             if onPc && self.rig.pcMode == 0 {
                 for k in 0..<2 {
-                    if let u = on.first(where: { $0.slot == k }) ?? on.first {
+                    if let u = on.first(where: { $0.slot == self.pcoco.link[k] }) ?? on.first {   // (its Cafe; one on it: that one)
                         self.pcoco.jacks(k, flip: u.flip, skip: u.skip, earth: u.earth)
                     }
                 }
@@ -878,6 +878,9 @@ private struct MainScreen: View {
             .allowsHitTesting(live)
             .overlay {                                                        // HABIT: the memory, under WHERE
                 if rig.padSet == .habit && i == 0 { HabitStereoScope(l: d.habits[0].scope, r: d.habits[1].scope) }
+                if rig.padSet == .pcoco && i < 2 {                                // COCO: the sampler's sound, under its pad
+                    PcWave(pc: d.pcoco, k: i, axis: rig.pcTop[i]).padding(.vertical, 22)
+                }
             }
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
         }

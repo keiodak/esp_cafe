@@ -454,10 +454,12 @@ private struct PcControls: View {
                                 pick = k; picking = true
                             }
                             ChipButton(title: k == 0 ? "REC A" : "REC B", filled: pc.recording == k) { d.pcoco.toggleRec(k) }
-                            Text(pc.names[k])
-                                .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
-                                .foregroundStyle(PastelTheme.textSecondary)
-                                .lineLimit(1)
+                            ChipButton(title: "CLEAR", filled: false) { d.pcoco.clear(k) }
+                            ChipButton(title: pc.link[k] == 0 ? "CAFE A · L" : "CAFE B · R", filled: false) {   // which Cafe plays it
+                                var l = pc.link; l[k] = 1 - l[k]; pc.link = l; d.pcoco.updateAll()
+                            }
+                            PcWave(pc: pc, k: k, axis: rig.pcTop[k])
+                                .frame(height: 20)
                         }
                     }
                 }

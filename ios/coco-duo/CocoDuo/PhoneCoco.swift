@@ -5,6 +5,7 @@
 // The Cafes stay on the tap delay (the phone's audio goes through it).
 
 import AVFoundation
+import SwiftUI
 
 final class PhoneCoco: NSObject, ObservableObject {
     /// one sampler: written on the main thread, read by the audio thread (plain numbers, no locks)
@@ -20,14 +21,28 @@ final class PhoneCoco: NSObject, ObservableObject {
     }
 
     let v = [Voice(), Voice()]
+
+    override init() {
+        super.init()
+        if let l = UserDefaults.standard.array(forKey: "pc.link") as? [Int], l.count == 2 { link = l.map { $0 == 1 ? 1 : 0 } }
+        side = link
+    }
     @Published var names = ["—", "—"]
     @Published var recording = -1               // which one the mic is going into (-1 = none)
+    /// which Cafe each sampler belongs to: 0 = A (its jacks; out on the left) · 1 = B (the right)
+    @Published var link = [0, 1] { didSet { UserDefaults.standard.set(link, forKey: "pc.link") } }
     @Published var loading = [false, false]     // a file being read (shown on its FILE key)
+    /// each sampler's sound, drawn: the loudest in each of 96 pieces (empty = nothing loaded)
+    @Published var peaks: [[Float]] = [[], []]
+    static let bins = 96
+    /// where each one is playing (0…1 of the whole), for the drawing (read by a timeline, not published)
+    func playing(_ k: Int) -> Double { let s = v[k]; return s.n > 1 ? min(1, max(0, s.pos / Double(s.n - 1))) : 0 }
 
     // settings (main thread)
     var pitch = 1.0, depth = 0.5
     var level = 0.8, cross = 0.0
     private var earth = [0.0, 0.0]
+    private var side = [0, 1]                    // (link, as the audio thread reads it)
     private var flipWas = [false, false], skipWas = [false, false]
 
     private let engine = AVAudioEngine()
@@ -66,10 +81,13 @@ final class PhoneCoco: NSObject, ObservableObject {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let g = Float(level), c = Float(cross)
+        let ra: Float = side[0] == 1 ? 1 : 0, rb: Float = side[1] == 1 ? 1 : 0     // (0 = left, 1 = right)
         for i in 0..<frames {
             let a = tick(v[0]) * g, b = tick(v[1]) * g
-            l[i] = a + b * c
-            r[i] = b + a * c
+            let al = a * (1 - ra) + a * ra * c, ar = a * ra + a * (1 - ra) * c    // each on its Cafe's side,
+            let bl = b * (1 - rb) + b * rb * c, br = b * rb + b * (1 - rb) * c    //   CROSS = some on the other
+            l[i] = al + bl
+            r[i] = ar + br
         }
     }
 
@@ -110,7 +128,7 @@ final class PhoneCoco: NSObject, ObservableObject {
         let s = v[k]
         s.step = pitch * pow(2, earth[k] * 2 * depth) * s.srcRate / sr
     }
-    func updateAll() { update(0); update(1) }
+    func updateAll() { update(0); update(1); side = link }
 
     // MARK: files and the mic
 
@@ -127,6 +145,7 @@ final class PhoneCoco: NSObject, ObservableObject {
                 self.loading[k] = false
                 guard let g = got else { return }
                 let (p, n, rate) = g
+                self.peaks[k] = Self.draw(p, n)
                 let s = self.v[k], old = s.buf
                 s.n = 0                                              // (the audio thread stops reading first)
                 s.buf = p; s.srcRate = rate; s.pos = 0
@@ -135,6 +154,24 @@ final class PhoneCoco: NSObject, ObservableObject {
                 if let old { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { old.deallocate() } }
                 self.names[k] = name ?? url.deletingPathExtension().lastPathComponent
             }
+        }
+    }
+    /// CLEAR: that sampler empty
+    func clear(_ k: Int) {
+        if recording == k { recorder?.stop(); recorder = nil; recording = -1 }
+        let s = v[k], old = s.buf
+        s.n = 0
+        s.buf = nil
+        if let old { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { old.deallocate() } }
+        names[k] = "—"; peaks[k] = []
+    }
+    private static func draw(_ p: UnsafeMutablePointer<Float>, _ n: Int) -> [Float] {
+        (0..<bins).map { b in
+            let a = b * n / bins, e = max(a + 1, (b + 1) * n / bins)
+            var m: Float = 0
+            var i = a
+            while i < e { m = max(m, abs(p[i])); i += max(1, (e - a) / 256) }
+            return m
         }
     }
     private static func read(_ url: URL) -> (UnsafeMutablePointer<Float>, Int, Double)? {
@@ -184,5 +221,35 @@ final class PhoneCoco: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
         if node != nil && !engine.isRunning { try? engine.start() }
         if k >= 0, let u = recURL { load(u, into: k, name: "MIC") }
+    }
+}
+
+/// a sampler's sound: its peaks, the loop (START · LENGTH) lit, where it plays in orange
+struct PcWave: View {
+    @ObservedObject var pc: PhoneCoco
+    let k: Int
+    @ObservedObject var axis: PadAxis                // (its START · LENGTH pad)
+    var body: some View {
+        let start = axis.x, len = PcPad.len(axis.y)
+        TimelineView(.animation(minimumInterval: 1.0 / 20)) { _ in
+            Canvas { ctx, size in
+                let pk = pc.peaks[k]
+                ctx.stroke(Path(CGRect(origin: .zero, size: size)), with: .color(PastelTheme.hudLine), lineWidth: 1)
+                guard !pk.isEmpty else { return }
+                let w = size.width / CGFloat(pk.count), mid = size.height / 2
+                let lo = start, hi = start + (1 - start) * len
+                ctx.fill(Path(CGRect(x: CGFloat(lo) * size.width, y: 0, width: CGFloat(hi - lo) * size.width, height: size.height)),
+                         with: .color(PastelTheme.hudOrange.opacity(0.12)))
+                var bars = Path()
+                for (i, m) in pk.enumerated() {
+                    let h = max(0.8, CGFloat(m) * mid * 0.95)
+                    bars.addRect(CGRect(x: CGFloat(i) * w, y: mid - h, width: max(0.8, w * 0.8), height: h * 2))
+                }
+                ctx.fill(bars, with: .color(PastelTheme.hudBlack.opacity(0.4)))
+                let x = CGFloat(pc.playing(k)) * size.width
+                ctx.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(PastelTheme.hudOrange))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
