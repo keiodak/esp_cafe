@@ -145,6 +145,8 @@ enum BytePad {
     static let starts: [(Double, Double)] = [(0.45, 0.0), (0.3, 0.45), (0, 0), (0.0, 0.0),
                                              (0.0, 0.0), (0.0, 0.5), (0.0, 0.0), (1.0, 0.0)]
     static let chords = ["—", "OCT", "5TH", "MAJ", "MIN", "SUS4", "MAJ7", "5+8"]
+    /// x · y: 1 … 24, finer at the low end (the same as the Cafe's)
+    static func xy(_ v: Double) -> Int { 1 + Int(pow(v, 1.5) * 23.99) }
     static func loop(_ x: Double) -> Int { x < 0.03 ? 0 : 17 - Int((x - 0.03) / 0.97 * 12.99) }
     /// pad 3 is not XY: the formula
     static func isView(_ i: Int) -> Bool { i == 2 }
@@ -153,7 +155,7 @@ enum BytePad {
         case 0:
             let r = 40 * pow(25000, x), b = Int(y * 16)
             return (r < 1000 ? String(format: "%.0f Hz", r) : r < 1_000_000 ? String(format: "%.1f kHz", r / 1000) : String(format: "%.2f MHz", r / 1_000_000)) + " · BITS \(b)–\(b + 7)"
-        case 1: return "x \(1 + Int(x * 31.99)) · y \(1 + Int(y * 31.99))"
+        case 1: return "x \(xy(x)) · y \(xy(y))"
         case 3: return loop(x) == 0 ? "LOOP OFF" : "LOOP 2^\(loop(x)) · SLICE \(1 + Int(y * 15.99))"
         case 4: return "B +\(Int(x * 16)) STEPS · \(String(format: "%.2f", y * y * 2))%"
         case 5: return "\(Int(x * 100))% · STEP 2^\(15 - Int(y * 9.99))"
@@ -171,6 +173,7 @@ struct FormulaPad: View {
     let tag: String
     let set: (String) -> Void
     @State private var editing = false
+    private var usesXY: Bool { rig.bbCode.lowercased().contains { "xyab".contains($0) } }
 
     var body: some View {
         let f = rig.bbCode
@@ -202,9 +205,10 @@ struct FormulaPad: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .contentShape(Rectangle())
                     .onTapGesture { editing = true }
-                Text("x \(1 + Int(xy.x * 31.99))  ·  y \(1 + Int(xy.y * 31.99))")
+                Text("x \(BytePad.xy(xy.x))  ·  y \(BytePad.xy(xy.y))")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(PastelTheme.hudOrange)
+                    .opacity(usesXY ? 1 : 0.3)                        // (dim: this formula has no x or y in it)
             }
             .padding(7)
         }
