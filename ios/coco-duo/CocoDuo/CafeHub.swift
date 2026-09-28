@@ -57,7 +57,9 @@ final class CafeUnit: ObservableObject {
     /// the Cafe's firmware version (from its HELLO)
     @Published var fw = ""
     @Published var flashes = 0
-    @Published var hbMade = 0, hbSent = 0, cafeMtu = 0
+    @Published var hbMade = 0
+    @Published var hbSent = 0
+    @Published var cafeMtu = 0
     fileprivate var helloAsked = 0
     @Published var ls = 0
     @Published var le = TAPE
