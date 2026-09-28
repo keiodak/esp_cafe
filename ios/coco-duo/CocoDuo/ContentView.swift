@@ -223,7 +223,7 @@ final class Director: ObservableObject {
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
             if BytePad.isView(i) { return }                     // (the formula is not XY)
-            for u in ctxUnits() { rig.bbParams(slot: u.slot).forEach(u.send) }
+            for u in ctxUnits() { rig.bbPad(i, slot: u.slot).forEach(u.send) }
         case .noise:
             for u in ctxUnits() { rig.nzCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .sidrax:

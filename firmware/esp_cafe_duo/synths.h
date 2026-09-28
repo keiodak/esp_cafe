@@ -2215,7 +2215,7 @@ static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
       m /= nv;
     }
     bb_yv = (uint32_t)m;
-    out = (m - 128) * 12;
+    out = (m - 128) * 5;                                     // (x12 was far louder than the other modes)
     if (onset && (mine || !bb_pp)) ylit = 220;
     gg += (((mine || !bb_pp) ? 4096 : 4096 - bb_pp) - gg) >> 3;
   }

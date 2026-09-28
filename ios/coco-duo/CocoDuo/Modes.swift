@@ -353,6 +353,13 @@ final class Rig: ObservableObject {
                  bbFreeze ? 1 : 0, bbRev ? 1 : 0, slot == 1 ? 1 : 0]
         return v.enumerated().map { "J 9 \($0.offset) \(Int(($0.element * 1000).rounded()))" }
     }
+    /// one pad's two settings only (all 17 on every move flooded the link: the moves came late or not at all)
+    func bbPad(_ i: Int, slot: Int) -> [String] {
+        let first = [0: 0, 1: 2, 3: 4, 4: 6, 5: 8, 6: 10, 7: 12][i] ?? -1
+        guard first >= 0 else { return [] }
+        let all = bbParams(slot: slot)
+        return [all[first], all[first + 1]]
+    }
     func bbFormulaLines(slot: Int) -> [String] {
         guard let p = Bytebeat.parse(bbCode) else { return [] }
         return ["J 0 " + Bytebeat.hex(p.bytes)]
