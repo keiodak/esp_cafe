@@ -184,6 +184,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Cafe BLE";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Cafe BLE connects to your two Cafes over Bluetooth to control their tape loops.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "In COCO, the mic records into the phone's samplers.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "In camera mode, light and movement seen by the camera move the pointers on the eight XY pads. No image is ever stored.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -216,6 +217,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Cafe BLE";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Cafe BLE connects to your two Cafes over Bluetooth to control their tape loops.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "In COCO, the mic records into the phone's samplers.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "In camera mode, light and movement seen by the camera move the pointers on the eight XY pads. No image is ever stored.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

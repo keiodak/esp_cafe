@@ -110,7 +110,23 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, pcoco, knob }
+
+/// ARP_DELAY's COCO (PhoneCoco.swift): top row = the phone's two samplers, bottom row = the Cafe's tap delay (as ARP)
+enum PcPad {
+    static let titles = ["A START · LENGTH", "B START · LENGTH", "PITCH · EARTH", "LEVEL · CROSS"]
+    static let starts: [(Double, Double)] = [(0, 1), (0, 1), (0.5, 0.5), (0.8, 0)]
+    static func len(_ y: Double) -> Double { 0.01 + y * y * 0.99 }
+    static func pitch(_ x: Double) -> Double { pow(2, ((x - 0.5) * 4 * 12).rounded() / 12) }   // ×0.25 … ×4, semitones
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 0, 1: return "\(Int(x * 100))% · \(Int(len(y) * 100))%"
+        case 2: return String(format: "×%.2f · EARTH %d%%", pitch(x), Int(y * 100))
+        case 3: return "\(Int(x * 100))% · CROSS \(Int(y * 100))%"
+        default: return ""
+        }
+    }
+}
 
 /// ARP_DELAY: top row = the phone's arpeggiator, bottom row = the Cafe's tap delay ("F 1 <id> <v>")
 enum ArpPad {
@@ -401,6 +417,11 @@ final class Rig: ObservableObject {
     /// SPEECH: its own four on top, COCO's SPEED · DUB, LOOP, EARTH FM and FILTER below (the same pads as BLE's COCO)
     let spTop: [PadAxis] = SpPad.starts.map { PadAxis($0) }
     var spAxes: [PadAxis] { spTop + SpPad.coPad.map { coAxes[$0] } }
+    let pcTop: [PadAxis] = PcPad.starts.map { PadAxis($0) }
+    var pcAxes: [PadAxis] { pcTop + Array(arpAxes[4..<8]) }
+    /// COCO's FILE: which sampler the file picker is for (-1 = closed)
+    @Published var pcPicking = -1
+    var pcSlot = 0
     /// ARP_DELAY's layer: 0 = ARP (arpeggio -> tap delay) · 1 = SPEECH (voice -> COCO)
     @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
     @Published var speechText: String = Rig.d.string(forKey: "rig.speechText") ?? "" { didSet { Self.d.set(speechText, forKey: "rig.speechText") } }
@@ -432,7 +453,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         if ctxPreset == Preset.multi { return .multi }
-        if ctxPreset == Preset.arp { return arpMode == 1 ? .speech : .arp }
+        if ctxPreset == Preset.arp { return arpMode == 2 ? .pcoco : arpMode == 1 ? .speech : .arp }
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
     }
@@ -442,7 +463,7 @@ final class Rig: ObservableObject {
     func isTapPad(_ i: Int) -> Bool {
         switch padSet {
         case .delay, .multi: return i % 4 == 3
-        case .arp: return i == 7
+        case .arp, .pcoco: return i == 7
         default: return false
         }
     }

@@ -34,6 +34,8 @@ final class Director: ObservableObject {
     lazy var habitPlayer = HabitPlayer(habits)                // (HABIT plays on the phone: L = A, R = B)
     let camera = CameraRig()
     let arp = ArpEngine()
+    /// ARP_DELAY's COCO: the phone's two samplers
+    let pcoco = PhoneCoco()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -57,6 +59,15 @@ final class Director: ObservableObject {
             let onArp = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.arp }
             if !onArp && self.arp.playing { self.arp.stop(); self.rig.arpPlaying = false }
             if !onArp && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
+            // COCO: each Cafe's FLIP / SKIP / EARTH play its own sampler (one Cafe on it: it plays both)
+            if onArp && self.rig.arpMode == 2 {
+                for k in 0..<2 {
+                    if let u = on.first(where: { $0.slot == k }) ?? on.first {
+                        self.pcoco.jacks(k, flip: u.flip, skip: u.skip, earth: u.earth)
+                    }
+                }
+            }
+            if !onArp && self.rig.arpMode == 2 { self.pcoco.stop() }
         }
         for u in units {
             u.onReady = { [weak self, weak u] in
@@ -96,6 +107,7 @@ final class Director: ObservableObject {
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
         case .speech: return rig.spAxes
+        case .pcoco: return rig.pcAxes
         case .knob: return []
         }
     }
@@ -135,8 +147,9 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(rig.arpMode)")                            // ARP (tap delay) or SPEECH (COCO)
+            u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")               // ARP / COCO (tap delay) or SPEECH (COCO)
             if rig.arpMode == 1 { rig.coAll(slot: s).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
+            if rig.arpMode == 2 { applyPc(); pcoco.start() }
         default:
             break
         }
@@ -177,7 +190,7 @@ final class Director: ObservableObject {
 
     func cycleMode() {
         if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
-        else if rig.ctxPreset == Preset.arp { setArpMode(1 - rig.arpMode) }       // ARP <-> SPEECH
+        else if rig.ctxPreset == Preset.arp { setArpMode((rig.arpMode + 1) % 3) }  // ARP -> SPEECH -> COCO
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -260,12 +273,27 @@ final class Director: ObservableObject {
         case .speech:
             if i < 4 { applySpeech() }
             else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
+        case .pcoco:
+            if i < 4 { applyPc() }
+            else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .arp:
             if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .knob:
             break
         }
+    }
+
+    // MARK: COCO (ARP_DELAY's third layer)
+
+    /// the top pads -> the phone's samplers
+    func applyPc() {
+        let a = rig.pcTop, p = pcoco
+        p.v[0].start = a[0].x; p.v[0].len = PcPad.len(a[0].y)
+        p.v[1].start = a[1].x; p.v[1].len = PcPad.len(a[1].y)
+        p.pitch = PcPad.pitch(a[2].x); p.depth = a[2].y
+        p.level = a[3].x; p.cross = a[3].y * 0.5
+        p.updateAll()
     }
 
     // MARK: ARP
@@ -293,10 +321,15 @@ final class Director: ObservableObject {
 
     // MARK: SPEECH (ARP_DELAY's second layer)
 
-    /// ARP_DELAY: 0 = ARP · 1 = SPEECH. The Cafes on it change too (tap delay <-> COCO).
+    /// ARP_DELAY: 0 = ARP · 1 = SPEECH · 2 = COCO (the phone's samplers). The Cafes on it change too (tap delay <-> COCO).
     func setArpMode(_ m: Int) {
-        rig.arpMode = m == 1 ? 1 : 0
+        rig.arpMode = min(max(m, 0), 2)
         arp.speechOn = rig.arpMode == 1
+        if rig.arpMode == 2 {
+            if arp.playing { arp.stop(); rig.arpPlaying = false }
+            arp.speech.playing = false; rig.speechPlaying = false
+            applyPc(); pcoco.start()
+        } else { pcoco.stop() }
         if rig.arpMode == 1 {
             if arp.playing { arp.stop(); rig.arpPlaying = false }
             arp.startAudio()
@@ -305,7 +338,7 @@ final class Director: ObservableObject {
         }
         applySpeech()
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
-            u.send("F 97 \(rig.arpMode)")
+            u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")
             if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
         }
         refresh()
@@ -671,14 +704,14 @@ private struct MainScreen: View {
 
     var body: some View {
         VStack(spacing: 7) {
-            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera,
+            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera, pc: d.pcoco,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
             pads
                 .frame(maxWidth: .infinity)
                 .zIndex(1)
-            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera,
+            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera, pc: d.pcoco,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
@@ -733,6 +766,11 @@ private struct MainScreen: View {
                     .zIndex(1)
             }
             .frame(maxHeight: .infinity)
+            .fileImporter(isPresented: Binding(get: { rig.pcPicking >= 0 }, set: { if !$0 { rig.pcPicking = -1 } }),
+                          allowedContentTypes: [.audio]) { result in                        // COCO: FILE A / B
+                if case .success(let url) = result { d.pcoco.load(url, into: rig.pcSlot) }
+                rig.pcPicking = -1
+            }
             .background(
                 GeometryReader { geo in
                     Color.clear
@@ -757,6 +795,7 @@ private struct MainScreen: View {
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
         case .speech: return (rig.spAxes[i], SpPad.titles[i])
+        case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : ArpPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -773,6 +812,9 @@ private struct MainScreen: View {
         case .speech:
             if i >= 4 { return nil }
             return { x, y in SpPad.caption(i, x, y) }
+        case .pcoco:
+            if i >= 4 { return nil }
+            return { x, y in PcPad.caption(i, x, y) }
         case .habit:
             return { x, y in HabitPad.caption(i, x, y) }
         case .byte:
@@ -999,6 +1041,7 @@ private struct HudBar: View {
     @ObservedObject var rig: Rig
     @ObservedObject var grain: GrainMode
     @ObservedObject var camera: CameraRig
+    @ObservedObject var pc: PhoneCoco
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
     @Binding var showPresets: Bool
@@ -1014,7 +1057,7 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 1 ? "waveform.and.mic" : "pianokeys")
+                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 2 ? "recordingtape" : rig.arpMode == 1 ? "waveform.and.mic" : "pianokeys")
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
@@ -1181,6 +1224,13 @@ private struct HudBar: View {
             case 2: key("hand.tap") { d.tapTempo() }
             default: key("arrow.triangle.2.circlepath") { d.arpSync() }
             }
+        case .pcoco:
+            switch n {
+            case 0: textKey("FILE A", on: rig.pcPicking == 0) { rig.pcSlot = 0; rig.pcPicking = 0 }
+            case 1: textKey("FILE B", on: rig.pcPicking == 1) { rig.pcSlot = 1; rig.pcPicking = 1 }
+            case 2: textKey("REC A", on: pc.recording == 0) { d.pcoco.toggleRec(0) }                // the mic into A
+            default: textKey("REC B", on: pc.recording == 1) { d.pcoco.toggleRec(1) }
+            }
         case .speech:
             switch n {
             case 0: key(rig.speechPlaying ? "stop.fill" : "play.fill", on: rig.speechPlaying) { d.speechToggle() }
@@ -1213,7 +1263,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]

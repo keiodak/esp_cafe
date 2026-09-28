@@ -403,6 +403,7 @@ private struct ArpCard: View {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "SPEECH", filled: rig.arpMode == 1) { d.setArpMode(1) }
+                ChipButton(title: "COCO", filled: rig.arpMode == 2) { d.setArpMode(2) }
             }
             // both layers are laid out on top of each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
