@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.84"
+#define FW_VERSION "3.85"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -221,6 +221,18 @@ void (*pool[])() = {
 };
 #define POOL_N ((int)(sizeof(pool) / sizeof(pool[0])))
 #include <Preferences.h>
+// how many times a new firmware has been put on this Cafe (USB or BLE): each build carries its date and time; when it
+// differs from the one kept in flash, the count goes up. Shown on the phone ("#N") and on the USB serial at boot.
+static uint32_t fl_count = 0;
+static void fl_check() {
+  Preferences pr; if (!pr.begin("cafe", false)) return;
+  const char *id = __DATE__ " " __TIME__;
+  String was = pr.getString("fl_id", "");
+  fl_count = pr.getUInt("fl_n", 0);
+  if (was != id) { fl_count++; pr.putUInt("fl_n", fl_count); pr.putString("fl_id", id); }
+  pr.end();
+  Serial.printf("[fw] v%s, flashed %lu times (this build: %s)\n", FW_VERSION, (unsigned long)fl_count, id);
+}
 static void pl_save() {
   Preferences pr; if (!pr.begin("cafe", false)) return;
   uint8_t b[11]; for (int i = 0; i < 11; i++) b[i] = i < active_preset_count ? (uint8_t)pl_id[i] : 0xFF;
@@ -280,13 +292,13 @@ static inline void scope_sample() {
 volatile bool seen_flip = false, seen_skip = false, seen_btn = false;
 void pc_status() {
   char tb[176];
-  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d %d %d %d %d %s",
+  snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d %d %d %d %d %s %lu",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
     (int)EARTHREAD, (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
     pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now, ch_now(),
     sc_amin > sc_amax ? 128 : sc_amin, sc_amin > sc_amax ? 128 : sc_amax, sc_ymin > sc_ymax ? 0 : sc_ymin, sc_ymin > sc_ymax ? 0 : sc_ymax,
-    FW_VERSION);                                                                  // (the version rides every status line)
+    FW_VERSION, (unsigned long)fl_count);                                         // (the version and the flash count ride every status line)
   pc_out(tb);
   seen_flip = seen_skip = seen_btn = false;
   sc_amin = 255; sc_amax = 0; sc_ymin = 255; sc_ymax = 0;
@@ -1074,6 +1086,7 @@ void setup() {
   // PRESET PLAYLIST ROUTER
   // counts the presets in the ACTIVE_PLAYLIST   
   pl_load();                                  // the playlist the phone chose (default: our 11)
+  fl_check();                                 // count the flashes
   preset = pl_id[0]; preset_counter = 0;
   Serial.printf("[2] Routing Complete. Free Heap: %d bytes\n", ESP.getFreeHeap()); // FOR DEBUGGING
 

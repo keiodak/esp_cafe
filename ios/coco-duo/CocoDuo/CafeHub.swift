@@ -56,6 +56,7 @@ final class CafeUnit: ObservableObject {
     @Published var hz: Double = 0
     /// the Cafe's firmware version (from its HELLO)
     @Published var fw = ""
+    @Published var flashes = 0
     fileprivate var helloAsked = 0
     @Published var ls = 0
     @Published var le = TAPE
@@ -221,6 +222,7 @@ final class CafeUnit: ObservableObject {
             let a = l.split(separator: " ")
             guard a.count >= 13 else { return }
             if a.count >= 21, fw != String(a[20]) { fw = String(a[20]) }          // (the version, on every line)
+            if a.count >= 22, let n = Int(a[21]), flashes != n { flashes = n }   // (how many times it was flashed)
             let smp = UInt32(a[11]) ?? 0
             let now = Date()
             if let last = lastSmp {

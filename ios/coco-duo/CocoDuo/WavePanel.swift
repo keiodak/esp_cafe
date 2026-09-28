@@ -126,7 +126,7 @@ private struct CafeWaveCard: View {
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
-            Text("v\(unit.fw.isEmpty ? "?" : unit.fw)  ·  " + "\(unit.preset < 0 ? "—" : Preset.tag(unit.preset))\(unit.preset == Preset.ble ? "  ·  " + Preset.modeNames[min(max(unit.mode, 0), Preset.modeNames.count - 1)] : "")")
+            Text("v\(unit.fw.isEmpty ? "?" : unit.fw)\(unit.flashes > 0 ? " #\(unit.flashes)" : "")  ·  " + "\(unit.preset < 0 ? "—" : Preset.tag(unit.preset))\(unit.preset == Preset.ble ? "  ·  " + Preset.modeNames[min(max(unit.mode, 0), Preset.modeNames.count - 1)] : "")")
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
