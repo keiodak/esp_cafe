@@ -24,6 +24,12 @@ enum Bytebeat {
         return s
     }
 
+    private enum Tok { case num(UInt32), v(UInt8), op(String), lp, rp }
+    private static let prec: [String: Int] = ["u-": 9, "~": 9, "*": 8, "/": 8, "%": 8, "+": 7, "-": 7,
+                                             "<<": 6, ">>": 6, "<": 5, ">": 5, "==": 4, "&": 3, "^": 2, "|": 1]
+    private static let code: [String: UInt8] = ["+": 10, "-": 11, "*": 12, "/": 13, "%": 14, "&": 15, "|": 16, "^": 17,
+                                               "<<": 18, ">>": 19, "~": 20, "u-": 21, "<": 22, ">": 23, "==": 24]
+
     /// a formula taken apart: the Cafe's program, its cells (the byte of each number / operator, in written order),
     /// and the written tokens (the cells point into them) — for the automaton
     struct Parsed {
