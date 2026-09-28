@@ -497,16 +497,16 @@ private struct SpeechControls: View {
             ChipButton(title: rig.speechPlaying ? "STOP" : "PLAY", filled: rig.speechPlaying) { d.speechToggle() }
             ChipButton(title: "SYNC", filled: false) { d.speechSync() }
         }
-        // the voice: ◀ name ▶ on a row of its own (the name takes the room between the arrows)
+        // the voice: PREV name NEXT on a row of its own (the name takes the room between the arrows)
         HStack(spacing: PanelMetrics.chipSpacing) {
-            ChipButton(title: "◀", filled: false) { d.speechVoiceStep(-1) }
+            ChipButton(title: "PREV", filled: false) { d.speechVoiceStep(-1) }
             Text(voiceName)
                 .font(.hud(8, .semibold))
                 .foregroundStyle(PastelTheme.hudBlack)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity)
-            ChipButton(title: "▶", filled: false) { d.speechVoiceStep(1) }
+            ChipButton(title: "NEXT", filled: false) { d.speechVoiceStep(1) }
         }
         PanelRow(label: "RATE", value: Binding(get: { rig.speechRate }, set: { rig.speechRate = $0 }))
         PanelRow(label: "LEVEL", value: Binding(get: { rig.speechLevel }, set: { rig.speechLevel = $0; d.applySpeech() }))
