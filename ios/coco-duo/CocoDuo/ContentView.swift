@@ -310,15 +310,15 @@ final class Director: ObservableObject {
 
     func applySun() {
         let a = rig.sunAxes, s = sun
-        s.freqA = SunPad.oscA(a[0].x); s.freqB = SunPad.oscB(a[0].y)
-        s.fmBA = a[1].x; s.fmAB = a[1].y
-        s.runA = a[2].x; s.runB = a[2].y
-        s.peakA = a[3].x; s.peakB = a[3].y
-        s.res = a[4].x; s.curve = a[4].y
-        s.run1Peak = a[5].x; s.run2Peak = a[5].y
-        s.shPeak = a[6].x; s.fmPeak = a[6].y
-        s.shMix = a[7].x; s.bias = a[7].y
-        s.loop = rig.sunSync; s.level = rig.sunLevel
+        s.oscA = a[0].x; s.oscB = a[0].y
+        s.sweepBA = a[1].x; s.sweepAB = a[1].y
+        s.stepA = a[2].x; s.stepB = a[2].y
+        s.shAmt = a[3].x; s.shSrc = a[3].y
+        s.peakA = a[4].x; s.peakB = a[4].y
+        s.q = a[5].x; s.dist = a[5].y
+        s.runPA = a[6].x; s.runPB = a[6].y
+        s.ping = a[7].x; s.dry = a[7].y
+        s.level = rig.sunLevel
     }
     /// the card's RING / DECAY / SPACE / SIZE -> the Cafes on BLIPPOO
     func sunCafeCard() {
@@ -330,7 +330,7 @@ final class Director: ObservableObject {
     func sunCafe(slot: Int, only pad: Int? = nil) -> [String] {
         let a = rig.sunAxes
         func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
-        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].y))", damp = "F 7 2 \(v(0.3 + a[3].y * 0.7))"
+        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].y))", damp = "F 7 2 \(v(0.3 + a[4].y * 0.7))"
         let rg = ["F 7 6 \(v(rig.sunRing))", "F 7 1 \(v(rig.sunDecay))"], sp = ["F 6 6 \(v(rig.sunSpace))", "F 6 0 \(v(rig.sunSize))"]
         guard let pad else {
             return [pitch, damp] + rg + sp + ["F 7 3 0", "F 7 4 100", "F 7 5 300", "F 7 7 1000",
@@ -338,7 +338,7 @@ final class Director: ObservableObject {
         }
         switch pad {
         case 0: return [pitch]                                   // (OSC B tunes the string)
-        case 3: return [damp]                                    // (PEAK 2 brightens it)
+        case 4: return [damp]                                    // (PEAK B brightens it)
         case -1: return rg + sp                                  // (the card)
         default: return []
         }
@@ -1315,7 +1315,6 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
-            case 2: textKey("LOOP", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() } // the runglers' patterns held
             default: blank
             }
         case .pcoco:

@@ -1,33 +1,33 @@
 // PhoneSun.swift — coco duo (k.odk)
-// APP+CAFE's BLIPPOO: a Blippoo Box on the phone (after Rob Hordijk's instrument, from its public descriptions:
-// Hordijk's blog, Perfect Circuit's notes on the rungler and the Blippoo Box):
-//   two triangle oscillators, A and B, that bend each other's pitch (FM B→A, FM A→B);
-//   two RUNGLERS: 8-step shift registers, one clocked by A with B as its data, the other clocked by B with A as its
-//     data (each XOR its own last step; LOOP = its own last step only: the pattern held), read by a 3-bit DAC from
-//     the last three steps — the "stepped havoc" CVs, each back onto the other oscillator's pitch and onto one peak;
-//   S&H: B's triangle taken on A's clock;
-//   the COMPARATOR: the S&H against A's triangle (S&H off: B against A) — a pulse, the sound;
-//   the TWIN PEAK: two 18 dB (three-pole) low-passes sharing one resonance, their outputs subtracted: a peak stands
-//     at each cutoff and the band between them passes (the upper one's input tilted up so both peaks are heard).
-// L = the twin peak (→ Cafe A), R = its lower filter alone (→ Cafe B). No random anywhere.
-// The Cafes answer with a string tuned to B (KARPLUS) into a reverb (see Director.sunCafe).
+// APP+CAFE's BLIPPOO: a Blippoo Box on the phone, after Rob Hordijk's own description ("The Blippoo Box: A Chaotic
+// Electronic Music Instrument, Bent by Design", Leonardo Music Journal 19, 2009) and notes from those who rebuilt it:
+//   the CHAOTIC CORE — two oscillators (triangle and square, exponential, ~16 octaves up to 12 kHz) that bend each
+//   other three ways:
+//     SWEEP: the other's triangle onto the pitch (two knobs);
+//     STEP: two runglers — short single-bit delay lines (4 steps, cross-patched, no XOR): one clocked by B's square
+//       taking A's square, the other clocked by A's square taking B's; three consecutive steps read as a 3-bit
+//       level (seven steps) — each onto the other oscillator (two knobs);
+//     TIME WARP: a sample & hold, clocked each time the two triangles are equal, taking triangle B (or the mix of
+//       the two runglers), onto both oscillators (one knob);
+//   the TWIN PEAK RESONATOR — two parallel, highly resonant three-pole low-passes, the second subtracted from the
+//   first, pinged by that same pulse train (a short pulse whenever the triangles meet); its "distortion": the second
+//   filter's second pole fed back onto both cutoffs.
+// Mono, the same to L and R. No random anywhere.
 
 import AVFoundation
+import SwiftUI
 
 final class PhoneSun: ObservableObject {
     // settings: written on the main thread, read by the audio thread (plain numbers, no locks)
-    var freqA = 3.0, freqB = 180.0               // Hz
-    var fmBA = 0.2, fmAB = 0.2                   // cross FM (0…1)
-    var runA = 0.4, runB = 0.4                   // RUNGLER 2 → A · RUNGLER 1 → B (pitch)
-    var peakA = 0.3, peakB = 0.6                 // the two peaks (0…1 over 40 Hz … 6 kHz)
-    var res = 0.85, curve = 1.0                  // Q (the shared resonance) · CURVE (0 = a low-pass at the upper
-                                                 //   peak, 1 = the band between the two)
-    var run1Peak = 0.4, run2Peak = 0.4           // RUNGLER 1 → PEAK 1 · RUNGLER 2 → PEAK 2
-    var shPeak = 0.2, fmPeak = 0.0               // S&H → both peaks · B's triangle → both peaks (audio rate)
-    var shMix = 1.0, bias = 0.5                  // the comparator: S&H (1) or B (0) against A · its threshold
+    var oscA = 0.55, oscB = 0.75                 // pitch knobs (0…1 over ~16 octaves, 12 kHz at the top)
+    var sweepBA = 0.2, sweepAB = 0.2             // SWEEP: B's triangle → A · A's → B
+    var stepA = 0.3, stepB = 0.3                 // STEP: rungler → A · rungler → B
+    var shAmt = 0.2, shSrc = 0.0                 // TIME WARP: S&H → both oscillators · what it takes (triangle B … the runglers)
+    var peakA = 0.35, peakB = 0.6                // the resonator's two peaks (0…1 over 30 Hz … 9 kHz)
+    var q = 0.9, dist = 0.2                      // resonance (shared) · distortion (filter 2's second pole → the cutoffs)
+    var runPA = 0.3, runPB = 0.3                 // rungler → peak A · rungler → peak B
+    var ping = 0.3, dry = 0.0                    // the pulse's length · the pulses themselves in the output
     var level = 0.7
-    /// LOOP: the rungler takes only its own last step (the pattern goes round, held)
-    var loop = false
     @Published private(set) var playing = false
 
     private let engine = AVAudioEngine()
@@ -35,14 +35,15 @@ final class PhoneSun: ObservableObject {
     private var sr = 48000.0
 
     // the circuit (audio thread)
-    private var pa = 0.0, pb = 0.25
+    private var pa = 0.0, pb = 0.3
     private var sqA = false, sqB = false
-    private var r1: UInt8 = 0b1011_0010, r2: UInt8 = 0b0110_1001  // the two runglers
-    private var d1 = 0.0, d2 = 0.0, d1s = 0.0, d2s = 0.0              // their DACs (and a hair rounded)
+    private var r1: UInt8 = 0b0101, r2: UInt8 = 0b1100             // the two runglers (4 steps each)
+    private var d1 = 0.0, d2 = 0.0
     private var sh = 0.0
-    private var la = [0.0, 0.0, 0.0], lb = [0.0, 0.0, 0.0]         // the twin peak's two three-pole low-passes
-    private var gain = 0.0, dcL = 0.0, dcR = 0.0
-    private var fA = 3.0, fB = 180.0
+    private var prevD = 0.0, pulseLeft = 0
+    private var l1 = [0.0, 0.0, 0.0], l2 = [0.0, 0.0, 0.0]         // the two three-pole low-passes
+    private var gain = 0.0, dc = 0.0
+    private var sA = 0.55, sB = 0.75
 
     func play(_ on: Bool) {
         playing = on
@@ -87,64 +88,60 @@ final class PhoneSun: ObservableObject {
         engine.pause()
     }
 
-    /// 40 Hz … 6 kHz (where the peak stands)
-    static func hz(_ p: Double) -> Double { 40 * pow(150, min(1, max(0, p))) }
+    /// 30 Hz … 9 kHz (where a peak stands)
+    static func hz(_ p: Double) -> Double { 30 * pow(300, min(1, max(0, p))) }
+    /// an oscillator's knob: ~16 octaves below 12 kHz
+    static func oscHz(_ x: Double) -> Double { 12000 * pow(2, -(1 - min(1, max(0, x))) * 16) }
 
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
-        let k = res * 8.4                                   // (three poles ring at 8: the top sings by itself)
+        let k = q * 8.2                                     // (three poles sing by themselves at 8)
         let comp = 1 + k * 0.5
+        let pingN = max(1, Int(sr * (0.00005 + ping * ping * 0.003)))
         for i in 0..<frames {
-            fA += (freqA - fA) * 0.002; fB += (freqB - fB) * 0.002
+            sA += (oscA - sA) * 0.002; sB += (oscB - sB) * 0.002
             gain += (want - gain) * 0.0005
             let triA = 1 - 4 * abs(pa - 0.5), triB = 1 - 4 * abs(pb - 0.5)
-            d1s += (d1 - d1s) * 0.02; d2s += (d2 - d2s) * 0.02
-            // pitch: the other's triangle (cross FM) and the other rungler, in octaves
-            let a = fA * pow(2, triB * fmBA * 3 + (d2s - 0.5) * 4 * runA)
-            let b = fB * pow(2, triA * fmAB * 3 + (d1s - 0.5) * 4 * runB)
+            // the chaotic core: sweep (the other's triangle), step (a rungler), time warp (the S&H), in octaves
+            let a = Self.oscHz(sA) * pow(2, sweepBA * triB * 4 + stepA * (d1 - 0.5) * 4 + shAmt * sh * 3)
+            let b = Self.oscHz(sB) * pow(2, sweepAB * triA * 4 + stepB * (d2 - 0.5) * 4 + shAmt * sh * 3)
             pa += min(0.45, a / sr); pa -= floor(pa)
             pb += min(0.45, b / sr); pb -= floor(pb)
             let nA = triA > 0, nB = triB > 0
-            if nA && !sqA {                                  // A's clock: rungler 1 takes B, the S&H takes B
-                let last = (r1 >> 7) & 1
-                r1 = (r1 << 1) | (loop ? last : last ^ (nB ? 1 : 0))
-                d1 = Double((r1 >> 5) & 0b111) / 7
-                sh = triB
-            }
-            if nB && !sqB {                                  // B's clock: rungler 2 takes A
-                let last = (r2 >> 7) & 1
-                r2 = (r2 << 1) | (loop ? last : last ^ (nA ? 1 : 0))
-                d2 = Double((r2 >> 5) & 0b111) / 7
-            }
+            if nB && !sqB { r1 = ((r1 << 1) | (nA ? 1 : 0)) & 0xF; d1 = Double((r1 >> 1) & 0b111) / 7 }   // B clocks, A in
+            if nA && !sqA { r2 = ((r2 << 1) | (nB ? 1 : 0)) & 0xF; d2 = Double((r2 >> 1) & 0b111) / 7 }   // A clocks, B in
             sqA = nA; sqB = nB
-            // the comparator: the S&H (or B) against A, around its threshold
-            let cmp = sh * shMix + triB * (1 - shMix) + (bias - 0.5) > triA ? 1.0 : -1.0
-            // the twin peak: each peak on its rungler, both on the S&H and on B's triangle
-            let common = sh * shPeak * 0.3 + triB * fmPeak * 0.25
-            let f1 = Self.hz(peakA + (d1s - 0.5) * run1Peak * 0.8 + common)
-            let f2 = Self.hz(peakB + (d2s - 0.5) * run2Peak * 0.8 + common)
-            let lo = min(f1, f2) / 1.732, hi = max(f1, f2) / 1.732          // (three poles peak at √3 × their corner)
-            let tilt = min(4, max(1, (hi / lo).squareRoot()))
-            let low = ladder(cmp, lo, k, &la) * comp
-            let high = ladder(cmp * tilt, hi, k, &lb) * comp / tilt.squareRoot()
-            var tp = high - low * curve, side = low
-            dcL += (tp - dcL) * 0.002; tp -= dcL
-            dcR += (side - dcR) * 0.002; side -= dcR
-            l[i] = Float(tanh(tp * 0.6) * gain)
-            r[i] = Float(tanh(side * 0.6) * gain)
+            // the triangles meet: a pulse (it pings the resonator) and the S&H takes its value
+            let dlt = triA - triB
+            if (dlt >= 0) != (prevD >= 0) {
+                pulseLeft = pingN
+                sh = triB * (1 - shSrc) + (d1 + d2 - 1) * shSrc
+            }
+            prevD = dlt
+            let x: Double = pulseLeft > 0 ? 1 : 0
+            if pulseLeft > 0 { pulseLeft -= 1 }
+            // the twin peak resonator (its peaks on the runglers; filter 2's second pole back onto both: distortion)
+            let fm = pow(2, dist * l2[1] * 2)
+            let f1 = Self.hz(peakA + runPA * (d1 - 0.5) * 0.6) * fm / 1.732      // (three poles peak at √3 × their corner)
+            let f2 = Self.hz(peakB + runPB * (d2 - 0.5) * 0.6) * fm / 1.732
+            ladder(x, f1, k, &l1)
+            ladder(x, f2, k, &l2)
+            var y = (l1[2] - l2[2]) * comp + (x - 0.5) * dry
+            dc += (y - dc) * 0.002; y -= dc
+            let o = Float(tanh(y * 0.7) * gain)
+            l[i] = o; r[i] = o
         }
     }
 
     /// a three-pole low-pass (18 dB); the resonance fed back from its last pole through a soft limit
-    private func ladder(_ x: Double, _ fc: Double, _ k: Double, _ s: inout [Double]) -> Double {
+    private func ladder(_ x: Double, _ fc: Double, _ k: Double, _ s: inout [Double]) {
         let g = 1 - exp(-2 * .pi * min(fc, sr * 0.3) / sr)
         let u = x - k * tanh(s[2])
         s[0] += g * (u - s[0])
         s[1] += g * (s[0] - s[1])
         s[2] += g * (s[1] - s[2])
         if !s[2].isFinite { s = [0, 0, 0] }
-        return s[2]
     }
 }
