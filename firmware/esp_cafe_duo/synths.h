@@ -4181,5 +4181,53 @@ void IRAM_ATTR arpdelay() {
   REG(I2S_CONF_REG)
   [0] |= (BIT(5));
 }
+// PHONE_COCO --- pool id 36 (k.odk): the phone plays (its two samplers, or SPEECH) into this Cafe, which is COCO —
+// a record head on the tape and a play head in a loop ("C <id> <v>" as in BLE COCO). The phone reads this Cafe's
+// FLIP / SKIP / EARTH from its status lines too. SKIP = back to the loop start, FLIP = backwards, EARTH = FM of the
+// speed, YELLOW = a pulse at every wrap.
+void IRAM_ATTR phonecoco() {
+  static uint32_t gen_seen = 0xFFFFFFFF;
+  static bool was_in_menu = true;
+  static int32_t rg = 0;
+  static uint32_t wpos = 0;
+  if (preset_mode) {
+    was_in_menu = true;
+  } else if (was_in_menu || gen_seen != preset_gen) {
+    gen_seen = preset_gen;
+    was_in_menu = false;
+    audio_frozen_state = false;
+    lamp = false;
+    co_reset = true;
+    rg = 0;
+  }
+  DACWRITER(pout)
+  gyo = ADCREADER
+    pc_samples++;
+  earth_ac();
+  if (skip_press()) co_restart = true;
+  int32_t in = gyo - 2048;
+  if (rg < 256) rg++;
+  int32_t old = dread(wpos);
+  dwrite(wpos, old + (((gyo - old) * ((rg * co_dub) >> 8)) >> 8));
+  wpos = (wpos + 1) & 0x1FFFF;
+  int32_t l = co_tick(wpos, in, rg, FLIPPERAT);
+  int32_t v = l + 2048;
+  if (v > 4095) v = 4095;
+  if (v < 0) v = 0;
+  pout = v;
+  ASHWRITER(v);
+  if (co_pulse > 0) { co_pulse--; YELLOW_PULSE(4095); } else { YELLOW_PULSE(0); }
+  if (FLIPPERAT) { LAMP_ON; } else { LAMP_OFF; }
+  pc_wpos = 0;
+  pc_ppos = 0;
+  pc_flip = FLIPPERAT ? 1 : 0;
+  pc_skip = SKIPPERAT ? 1 : 0;
+  REG(I2S_CONF_REG)
+  [0] &= ~(BIT(5));
+  REG(I2S_INT_CLR_REG)
+  [0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)
+  [0] |= (BIT(5));
+}
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
 #include "ieat.h"

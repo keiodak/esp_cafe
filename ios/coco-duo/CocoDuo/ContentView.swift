@@ -58,16 +58,19 @@ final class Director: ObservableObject {
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
             let onArp = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.arp }
             if !onArp && self.arp.playing { self.arp.stop(); self.rig.arpPlaying = false }
-            if !onArp && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
-            // COCO: each Cafe's FLIP / SKIP / EARTH play its own sampler (one Cafe on it: it plays both)
-            if onArp && self.rig.arpMode == 2 {
+            // PHONE_COCO: each Cafe's FLIP / SKIP / EARTH play its own sampler (one Cafe on it: it plays both);
+            // a Cafe left it: the samplers and SPEECH stop
+            let pc = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.pcoco }
+            let onPc = self.units.contains { u in (u.isConnected && u.preset >= 0 ? u.preset : self.rig.preset[u.slot]) == Preset.pcoco }
+            if onPc && self.rig.pcMode == 0 {
                 for k in 0..<2 {
-                    if let u = on.first(where: { $0.slot == k }) ?? on.first {
+                    if let u = pc.first(where: { $0.slot == k }) ?? pc.first {
                         self.pcoco.jacks(k, flip: u.flip, skip: u.skip, earth: u.earth)
                     }
                 }
             }
-            if !onArp && self.rig.arpMode == 2 { self.pcoco.stop() }
+            if !onPc { self.pcoco.stop() }
+            if !onPc && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
         for u in units {
             u.onReady = { [weak self, weak u] in
@@ -88,7 +91,7 @@ final class Director: ObservableObject {
         camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
         camera.warm()
         applyArp()
-        arp.speechOn = rig.arpMode == 1
+        arp.speechOn = rig.pcMode == 1
         applySpeech()
     }
 
@@ -147,9 +150,11 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")               // ARP / COCO (tap delay) or SPEECH (COCO)
-            if rig.arpMode == 1 { rig.coAll(slot: s).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
-            if rig.arpMode == 2 { applyPc(); pcoco.start() }
+            u.send("F 97 0")                                         // (the tap delay: SPEECH has moved to PHONE_COCO)
+            rig.arpDelayAll().forEach(u.send)
+        case Preset.pcoco:
+            rig.coAll(slot: s).forEach(u.send)                       // the Cafe is COCO
+            if rig.pcMode == 0 { applyPc(); pcoco.start() } else { arp.speechOn = true; arp.startAudio() }
         default:
             break
         }
@@ -160,7 +165,7 @@ final class Director: ObservableObject {
         var p = rig.preset
         for s in rig.slots { p[s] = n }
         rig.preset = p
-        if n == Preset.arp { arp.startAudio() }
+        if n == Preset.arp { arp.speechOn = false; arp.startAudio() }
         arpFollowPresets()
         for s in rig.slots where units[s].isConnected { sendAll(to: units[s]) }
         refresh()
@@ -173,7 +178,7 @@ final class Director: ObservableObject {
         var p = rig.preset
         p[s] = n
         rig.preset = p
-        if n == Preset.arp { arp.startAudio() }
+        if n == Preset.arp { arp.speechOn = false; arp.startAudio() }
         arpFollowPresets()
         if units[s].isConnected { sendAll(to: units[s]) }
         refresh()
@@ -190,7 +195,7 @@ final class Director: ObservableObject {
 
     func cycleMode() {
         if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
-        else if rig.ctxPreset == Preset.arp { setArpMode((rig.arpMode + 1) % 3) }  // ARP -> SPEECH -> COCO
+        else if rig.ctxPreset == Preset.pcoco { setPcMode(1 - rig.pcMode) }        // COCO <-> SPEECH
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -275,7 +280,7 @@ final class Director: ObservableObject {
             else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
         case .pcoco:
             if i < 4 { applyPc() }
-            else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
+            else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
         case .arp:
             if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
@@ -319,28 +324,20 @@ final class Director: ObservableObject {
     /// the arpeggio from its first note, and the Cafes' clicks with it
     func arpSync() { arp.restart(); ctxUnits().forEach { $0.send("Z") } }
 
-    // MARK: SPEECH (ARP_DELAY's second layer)
+    // MARK: PHONE_COCO: COCO (the samplers) or SPEECH — the Cafe is COCO in both
 
-    /// ARP_DELAY: 0 = ARP · 1 = SPEECH · 2 = COCO (the phone's samplers). The Cafes on it change too (tap delay <-> COCO).
-    func setArpMode(_ m: Int) {
-        rig.arpMode = min(max(m, 0), 2)
-        arp.speechOn = rig.arpMode == 1
-        if rig.arpMode == 2 {
-            if arp.playing { arp.stop(); rig.arpPlaying = false }
-            arp.speech.playing = false; rig.speechPlaying = false
-            applyPc(); pcoco.start()
-        } else { pcoco.stop() }
-        if rig.arpMode == 1 {
+    func setPcMode(_ m: Int) {
+        rig.pcMode = m == 1 ? 1 : 0
+        arp.speechOn = rig.pcMode == 1
+        if rig.pcMode == 1 {
+            pcoco.stop()
             if arp.playing { arp.stop(); rig.arpPlaying = false }
             arp.startAudio()
         } else {
             arp.speech.playing = false; rig.speechPlaying = false
+            if rig.preset.contains(Preset.pcoco) { applyPc(); pcoco.start() }
         }
         applySpeech()
-        for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
-            u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")
-            if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
-        }
         refresh()
     }
     /// the top pads and the sliders -> the voice chain
@@ -553,7 +550,8 @@ final class Director: ObservableObject {
     /// the arpeggio only sounds while a Cafe is on ARP_DELAY
     private func arpFollowPresets() {
         if !rig.preset.contains(Preset.arp) && arp.playing { arp.stop(); rig.arpPlaying = false }
-        if !rig.preset.contains(Preset.arp) && arp.speech.playing { arp.speech.playing = false; rig.speechPlaying = false }
+        if !rig.preset.contains(Preset.pcoco) && arp.speech.playing { arp.speech.playing = false; rig.speechPlaying = false }
+        if !rig.preset.contains(Preset.pcoco) { pcoco.stop() }
     }
 
     func setBpm(_ b: Double) {
@@ -795,7 +793,7 @@ private struct MainScreen: View {
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
         case .speech: return (rig.spAxes[i], SpPad.titles[i])
-        case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : ArpPad.titles[i])
+        case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : SpPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1057,9 +1055,9 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 2 ? "recordingtape" : rig.arpMode == 1 ? "waveform.and.mic" : "pianokeys")
+                        key(rig.ctxPreset == Preset.arp ? "pianokeys" : rig.ctxPreset == Preset.pcoco ? (rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
-                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
+                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.pcoco) { d.cycleMode() }
                     }
                 }
                 contextKey(top ? 0 : 1)
@@ -1226,8 +1224,8 @@ private struct HudBar: View {
             }
         case .pcoco:
             switch n {
-            case 0: textKey("FILE A", on: rig.pcPicking == 0) { rig.pcSlot = 0; rig.pcPicking = 0 }
-            case 1: textKey("FILE B", on: rig.pcPicking == 1) { rig.pcSlot = 1; rig.pcPicking = 1 }
+            case 0: textKey(pc.loading[0] ? "LOAD…" : "FILE A", on: rig.pcPicking == 0 || pc.loading[0]) { rig.pcSlot = 0; rig.pcPicking = 0 }
+            case 1: textKey(pc.loading[1] ? "LOAD…" : "FILE B", on: rig.pcPicking == 1 || pc.loading[1]) { rig.pcSlot = 1; rig.pcPicking = 1 }
             case 2: textKey("REC A", on: pc.recording == 0) { d.pcoco.toggleRec(0) }                // the mic into A
             default: textKey("REC B", on: pc.recording == 1) { d.pcoco.toggleRec(1) }
             }

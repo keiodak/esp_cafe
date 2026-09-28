@@ -22,6 +22,7 @@ final class PhoneCoco: NSObject, ObservableObject {
     let v = [Voice(), Voice()]
     @Published var names = ["—", "—"]
     @Published var recording = -1               // which one the mic is going into (-1 = none)
+    @Published var loading = [false, false]     // a file being read (shown on its FILE key)
 
     // settings (main thread)
     var pitch = 1.0, depth = 0.5
@@ -113,15 +114,37 @@ final class PhoneCoco: NSObject, ObservableObject {
 
     // MARK: files and the mic
 
-    func load(_ url: URL, into k: Int) {
+    /// a file (or the mic's recording) into A or B — read off the main thread (a long file takes a moment: its FILE
+    /// key says LOAD… meanwhile), then swapped in
+    func load(_ url: URL, into k: Int, name: String? = nil) {
+        loading[k] = true
         let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        guard let f = try? AVAudioFile(forReading: url) else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let got = Self.read(url)
+            if access { url.stopAccessingSecurityScopedResource() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.loading[k] = false
+                guard let g = got else { return }
+                let (p, n, rate) = g
+                let s = self.v[k], old = s.buf
+                s.n = 0                                              // (the audio thread stops reading first)
+                s.buf = p; s.srcRate = rate; s.pos = 0
+                s.n = n
+                self.update(k)
+                if let old { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { old.deallocate() } }
+                self.names[k] = name ?? url.deletingPathExtension().lastPathComponent
+            }
+        }
+    }
+    private static func read(_ url: URL) -> (UnsafeMutablePointer<Float>, Int, Double)? {
+        guard let f = try? AVAudioFile(forReading: url) else { return nil }
         let fmt = f.processingFormat
         let frames = AVAudioFrameCount(min(f.length, AVAudioFramePosition(fmt.sampleRate * 90)))   // (up to 90 s)
         guard frames > 4, let b = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames),
-              (try? f.read(into: b, frameCount: frames)) != nil, let d = b.floatChannelData else { return }
+              (try? f.read(into: b, frameCount: frames)) != nil, let d = b.floatChannelData else { return nil }
         let n = Int(b.frameLength), ch = Int(fmt.channelCount)
+        guard n > 4, ch > 0 else { return nil }
         let p = UnsafeMutablePointer<Float>.allocate(capacity: n)
         var peak: Float = 0
         for i in 0..<n {
@@ -131,13 +154,7 @@ final class PhoneCoco: NSObject, ObservableObject {
         }
         let gain: Float = peak > 0.0001 ? 0.9 / peak : 1
         for i in 0..<n { p[i] *= gain }
-        let s = v[k], old = s.buf
-        s.n = 0                                                      // (the audio thread stops reading first)
-        s.buf = p; s.srcRate = fmt.sampleRate; s.pos = 0
-        s.n = n
-        update(k)
-        if let old { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { old.deallocate() } }
-        names[k] = url.deletingPathExtension().lastPathComponent
+        return (p, n, fmt.sampleRate)
     }
 
     /// REC: the mic into A or B (up to 30 s); again = stop and play it
@@ -166,6 +183,6 @@ final class PhoneCoco: NSObject, ObservableObject {
         recorder?.stop(); recorder = nil; recording = -1
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
         if node != nil && !engine.isRunning { try? engine.start() }
-        if k >= 0, let u = recURL { load(u, into: k); names[k] = "MIC" }
+        if k >= 0, let u = recURL { load(u, into: k, name: "MIC") }
     }
 }

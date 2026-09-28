@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.98"
+#define FW_VERSION "3.99"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -219,7 +219,8 @@ void (*pool[])() = {
     ie::coco_og, ie::echo_mod, ie::flanger, ie::karplus, ie::reverb_spring, ie::reverb_granular, ie::reverb_feedback,
     ie::harmonizer, ie::external_sync, ie::window, ie::splicer, ie::scrambler, ie::dissolve, ie::sampler,
     ie::sampler_4x, ie::granular, ie::phasing, ie::bytebeats_mod, ie::megabytebeats, ie::arcade, ie::FX,
-    ie::wavetable, ie::drone, ie::groovebox, ie::polyrhythms
+    ie::wavetable, ie::drone, ie::groovebox, ie::polyrhythms,
+    phonecoco                                           // 36: PHONE_COCO (the phone's samplers / SPEECH -> COCO)
 };
 #define POOL_N ((int)(sizeof(pool) / sizeof(pool[0])))
 #include <Preferences.h>
