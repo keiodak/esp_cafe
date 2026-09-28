@@ -16,7 +16,7 @@ extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, fo
 volatile bool co_noearth = false;    // ARP_DELAY's PHONE_COCO: EARTH leaves the recording alone (it is the phone's pitch);
                                       //   the Cafe's BUTTON (a short press) and the phone's REC switch it
 volatile bool co_rec_toggle = false;  // the phone's REC key ("F 98"): the recording on / off, as a press of EARTH
-// APP+CAFE's COCO (with the phone's RUNGLE, "F 88"): a plain COCO whose head can be driven by the phone when LINK is on —
+// APP+CAFE's COCO (with the phone's BOX, "F 88"): a plain COCO whose head can be driven by the phone when LINK is on —
 // its OSC = the head's speed (the pitch, recorded and played), its XOR = FLIP, its S&H = SKIP (a gate, as the jack)
 volatile bool co_link = false;         // (set by ARP_DELAY while that layer plays with LINK on)
 volatile bool co_vflip = false, co_vskip = false;
