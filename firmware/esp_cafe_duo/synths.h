@@ -2330,8 +2330,9 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
 }
 
 /// a packet from the phone: ADPCM onto the tape at its place (called on the BLE core; the audio only reads the tape here)
+volatile bool hb_off = false;                 // a firmware update is running: the tape's memory is gone, touch nothing
 void hb_write(const uint8_t *d, size_t n) {
-  if (n < 8) return;
+  if (hb_off || pc_mode != 6 || n < 8) return;
   uint32_t pos = d[0] | (d[1] << 8) | (d[2] << 16) | ((uint32_t)d[3] << 24);
   int32_t pred = (int16_t)(d[4] | (d[5] << 8));
   int ix = d[6] > 88 ? 88 : d[6];

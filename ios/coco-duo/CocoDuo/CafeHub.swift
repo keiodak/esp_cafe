@@ -97,7 +97,7 @@ final class CafeUnit: ObservableObject {
     /// HABIT: one packet onto the tape (only when the text line has nothing waiting: commands go first)
     /// (it rides the text link after a 0xFF — text is never 0xFF — so iOS needs no new characteristic)
     func habitSend(_ d: Data) -> Bool {
-        guard let p = peri, let c = rx, out.isEmpty, p.canSendWriteWithoutResponse else { return false }
+        guard ota == nil, otaData == nil, let p = peri, let c = rx, out.isEmpty, p.canSendWriteWithoutResponse else { return false }   // (never during an update)
         var b = Data([0xFF]); b.append(d)
         p.writeValue(b, for: c, type: .withoutResponse)
         return true

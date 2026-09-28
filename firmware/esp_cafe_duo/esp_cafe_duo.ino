@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.81"
+#define FW_VERSION "3.82"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -880,7 +880,7 @@ void pc_line(char *s) {
 }
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
 void hb_service() {
-  if (!ble_conn || !ble_tx || pc_mode != 6 || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
+  if (!ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
   int sent = 0;
   while (hb_qr != hb_qw && sent < 8) {
     if (!ble_tx->notify(hb_q[hb_qr & (HB_Q - 1)], HB_PK)) break;   // (on the text link; out of buffers: next time)
@@ -917,6 +917,7 @@ void ota_cmd(char *s) {
     if (size > next->size) { pc_out("U ERR too big for the slot"); return; }
     Serial.printf("[ota] start: %lu bytes -> %s\n", size, next->label);
     // stop the audio, give the tape's memory back (the Cafe restarts at the end anyway)
+    hb_off = true;                          // (HABIT: no more writing onto the tape, whose memory is freed next)
     REG(I2S_CONF_REG)[0] &= ~(BIT(5));
     detachInterrupt(2);
     ota_active = true;
