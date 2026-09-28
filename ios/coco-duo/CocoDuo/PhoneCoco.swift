@@ -210,11 +210,16 @@ final class PhoneCoco: NSObject, ObservableObject {
         return (p, n, fmt.sampleRate)
     }
 
+    /// the mic's permission
+    static func askMic(_ done: @escaping (Bool) -> Void) {
+        AVAudioApplication.requestRecordPermission(completionHandler: done)
+    }
+
     /// REC: the mic into A or B (up to 30 s); again = stop and play it
     func toggleRec(_ k: Int) {
         if recording >= 0 { let was = recording; stopRec(); if was == k { return } }
         let s = AVAudioSession.sharedInstance()
-        s.requestRecordPermission { ok in
+        Self.askMic { ok in
             DispatchQueue.main.async {
                 guard ok else { return }
                 try? s.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
