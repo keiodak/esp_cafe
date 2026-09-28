@@ -2261,7 +2261,7 @@ DRAM_ATTR static const int8_t hb_idx[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1,
 uint8_t hb_q[HB_Q][HB_PK];                    // (8 packets, 1.4 KB: the heap — ~10 KB left after the tape — is BLE's)
 volatile uint32_t hb_qw = 0, hb_qr = 0;       // packets made / sent
 volatile uint16_t hb_drops = 0;               // packets the link could not take
-volatile int hb_div = 2;                      // RATE: every 2nd (or 4th) sample goes up
+volatile int hb_div = 4;                      // RATE: every 4th (~8K) or 8th (~4K) sample goes up
 volatile int32_t hb_dry = 256, hb_wet = 256;  // Q8
 volatile uint32_t hb_rp = 0;                  // the read head (tape samples)
 volatile bool hb_reset = true;

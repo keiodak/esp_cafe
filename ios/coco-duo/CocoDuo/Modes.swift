@@ -363,7 +363,7 @@ final class Rig: ObservableObject {
     @Published var sxFreeze = 0
     /// HABIT (BLE mode 7): its pads (the phone's playing reads them), the rate, HOLD, the WAV to hand to Files
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
-    @Published var habit8k = false
+    @Published var habit8k = false              // (the low rate: true = 4K, false = 8K)
     @Published var habitHold = false
     @Published var habitSeconds = 150.0         // the memory: 30 s … 10 min
     @Published var habitWav: Data? = nil

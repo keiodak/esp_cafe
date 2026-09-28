@@ -113,7 +113,7 @@ final class HabitEngine {
     private(set) var age: Double = 0
     let unit: CafeUnit
     let axes: [PadAxis]
-    var div = 2                                  // 1/2 (or 1/4) of the Cafe's clock
+    var div = 4                                  // 1/4 (8K) or 1/8 (4K) of the Cafe's clock
     var hold = false                             // HOLD: the memory takes nothing new
     var active = false
     let scope = HabitScope()

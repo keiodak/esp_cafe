@@ -570,8 +570,11 @@ private struct NowCard: View {
                             .foregroundStyle(PastelTheme.hudBlack)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .trailing) {                     // the Cafe's firmware (laid over: never widens the card)
                         let u = s == 0 ? a : b
-                        Text(u.isConnected ? "v\(u.fw.isEmpty ? "?" : u.fw)" : "—")      // the Cafe's firmware
+                        Text(u.isConnected ? "v\(u.fw.isEmpty ? "?" : u.fw)" : "—")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(PastelTheme.textSecondary)
                     }

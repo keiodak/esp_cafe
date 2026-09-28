@@ -135,6 +135,8 @@ private struct CafeWaveCard: View {
                     .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                     .foregroundStyle(PastelTheme.hudOrange)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { loadFile($0) }
