@@ -359,7 +359,7 @@ final class HabitEngine {
             if pos >= hi { pos -= Double(have - 4) }
         } else {
             if abs(target - pos) > r * 0.5 { pos = target; fadeIn = 0 }                          // (moved far: go there)
-            pos += 1 + max(-0.03, min(0.03, (target - pos) / (r * 2)))                           // (kept on its place)
+            pos += 1                                                                             // (straight: ×1, nothing bent)
             pos = min(hi, max(lo, pos))
         }
         if L <= 0 { loopStart = -1 }
@@ -380,12 +380,8 @@ final class HabitEngine {
         }
         if fadeIn < 1 { fadeIn = min(1, fadeIn + 1 / (r * 0.006)); out *= fadeIn }            // (no click on a jump)
         out = effects(out, r, glitch: gl.x, starve: gl.y)
-        // full level: brought up to the memory's loudness (at most ×4, never on near-silence)
-        out *= min(4, 0.95 / max(0.1, peak))
-        // (a lift of the top: makes up for the averaging on the Cafe and the straight lines between samples)
-        let pre = out
-        out += (out - dh) * 0.45
-        dh = pre
+        // straight: one fixed gain (no riding of the level, no tone lift — what was recorded, as it was)
+        out *= 2
         return max(-1, min(1, out))
     }
 
