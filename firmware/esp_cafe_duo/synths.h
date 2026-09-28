@@ -2460,7 +2460,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || bmode;                                 // SIDRAX / WAVE / BYTEBEAT: CHAR's grit stays out
+  grit_off = smode || bmode || hmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2695,6 +2695,16 @@ void IRAM_ATTR harmony() {
     int32_t r = hd_rate[k] + (int32_t)(((int64_t)hd_rate[k] * pc_emod * hd_wob) >> 15);  // EARTH = wobble
     // rpls: the voice plays its buffer at its own speed (the buffer the record head left 1 or 2 turns ago)
     int32_t x = ready ? (hd_voice(b, q[k], S) * gc) >> 8 : 0;
+    // anti-alias: a voice read faster than it was written folds the top down into hiss — two gentle poles that
+    // close as the speed goes up (at ×1 they sit up at ~7 kHz)
+    {
+      static int32_t aa1[2] = { 0, 0 }, aa2[2] = { 0, 0 };
+      int32_t ar = r < 0 ? -r : r; if (ar < 4096) ar = 4096;
+      int32_t ka = (int32_t)(((int64_t)4096 * 3072) / ar);
+      aa1[k] += ((x - aa1[k]) * ka) >> 12;
+      aa2[k] += ((aa1[k] - aa2[k]) * ka) >> 12;
+      x = aa2[k];
+    }
     // a voice at UNISON with no TIMING would only double the input: it stays silent (one harmony at a time)
     bool mute = hd_rate[k] == 4096 && hd_off[k] == 0;
     // de-click: at a jump, carry the difference and let it fade (~6 ms) -> a crossfade instead of a step
