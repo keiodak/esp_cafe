@@ -75,13 +75,13 @@ enum Adpcm {
     }
 }
 
-/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, LAYERS · FADE / LEVEL · DRIVE, TONE · DRIFT,
-/// REPEAT · CHANCE, DETUNE · OCTAVES
+/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, STARVE · GLITCH / LEVEL · DRIVE, TONE · DRIFT,
+/// ECHO · FEEDBACK, DETUNE · OCTAVES
 enum HabitPad {
-    static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "LAYERS · FADE",
-                         "LEVEL · DRIVE", "TONE · DRIFT", "REPEAT · CHANCE", "DETUNE · OCTAVES"]
+    static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "STARVE · GLITCH",
+                         "LEVEL · DRIVE", "TONE · DRIFT", "ECHO · FEEDBACK", "DETUNE · OCTAVES"]
     /// (it starts as a plain run: LENGTH at the top = the whole memory played on at ×1, a little behind)
-    static let starts: [(Double, Double)] = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.35, 0.4),
+    static let starts: [(Double, Double)] = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.0, 0.0),
                                              (0.6, 0.2), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
     /// LENGTH: 30 ms … 4 s, and at the top: the whole run (a tape delay from WHERE)
     static func whole(_ x: Double) -> Bool { x >= 0.97 }
@@ -93,10 +93,10 @@ enum HabitPad {
         case 0: return String(format: "%.0f s LATER · %d%%", HabitEngine.shownSeconds * (1 - x * 0.95), Int(y * 100))
         case 1: return (whole(x) ? "WHOLE" : String(format: "%.2f s", length(x))) + String(format: " · GAP %d%%", Int(y * 100))
         case 2: return String(format: "×%.2f · REV %d%%", speed(x), Int(y * 100))
-        case 3: return "\(1 + Int(x * 3.99)) · FADE \(Int(y * 100))%"
+        case 3: return "STARVE \(Int(x * 100))% · GLITCH \(Int(y * 100))%"
         case 4: return "LEVEL \(Int(x * 100))% · DRIVE \(Int(y * 100))%"
         case 5: return "TONE \(Int(x * 100))% · DRIFT \(Int(y * 100))%"
-        case 6: return "×\(1 + Int(x * 7.99)) · \(Int(y * 100))%"
+        case 6: return x < 0.02 ? "ECHO OFF" : String(format: "%.2f s · FB %d%%", 0.05 + x * x * 0.95, Int(y * 85))
         case 7: return "DETUNE \(Int(x * 100))% · OCT \(Int(y * 100))%"
         default: return ""
         }
@@ -127,6 +127,10 @@ final class HabitEngine {
     // the Cafe's read head, as its last packet said (tape samples), and when
     private var rp: UInt32 = 0
     private var rpAt = Date.distantPast
+    // the Cafe's read head, unwrapped, against the phone's clock: the packet that came quickest tells it best (the
+    // others waited in the radio's queue), so the estimate takes the highest, slowly letting go of it
+    private var rpUn: Double = 0, rpLast: UInt32 = 0, rpOff: Double = -.infinity
+    private let t0 = Date()
     private var lastSeq: UInt16? = nil
     // the playing
     private var wh = 0                           // the next tape place (in rate samples) the phone writes
@@ -138,6 +142,12 @@ final class HabitEngine {
     private var lastStart: Double = 0, repeatsLeft = 0
     private var lp: Double = 0, drift: Double = 0
     private var peak: Double = 0.05              // how loud the memory is (the playing is brought up to it)
+    // STARVE (a dying digital box: held samples, fewer bits, drop-outs) · GLITCH (stutters of what just played,
+    // sometimes backwards) · ECHO (on the way out)
+    private var held: Double = 0, heldN = 0, gateOn = true, gateN = 0
+    private var hist = [Double](repeating: 0, count: 16000), hw = 0
+    private var gl = 0, glLen = 0, glLeft = 0, glRev = false
+    private var echo = [Double](repeating: 0, count: 16000), ew = 0
     private var wholeVoice: Voice? = nil
     // speeds
     private var upBytes = 0, downBytes = 0, statT = Date()
@@ -179,6 +189,12 @@ final class HabitEngine {
         let seq = UInt16(b[0]) | UInt16(b[1]) << 8
         rp = UInt32(b[2]) | UInt32(b[3]) << 8 | UInt32(b[4]) << 16 | UInt32(b[5]) << 24
         rpAt = Date()
+        if unit.hz > 1000 {
+            let d = Int((rp &- rpLast) & 0x1FFFF)                // (the head goes round 131072)
+            rpUn += Double(d); rpLast = rp
+            let off = rpUn - rpAt.timeIntervalSince(t0) * unit.hz
+            rpOff = off > rpOff ? off : rpOff - unit.hz * 0.002   // (lets go by 2 ms a packet)
+        }
         unit.hbDrops = Int(UInt16(b[6]) | UInt16(b[7]) << 8)
         lastSeq = seq
         guard !hold else { return }
@@ -213,11 +229,12 @@ final class HabitEngine {
         let tapeLen = TAPE / div
         let r = rate
         // where the Cafe reads now (rate samples on the tape)
-        let est = (Double(rp) + now.timeIntervalSince(rpAt) * unit.hz) / Double(div)
-        let head = Int(est) % tapeLen
-        let lead = Int(1.0 * r), window = Int(0.5 * r)                // (a second ahead: the link comes in bursts)
+        let unEst = rpOff + now.timeIntervalSince(t0) * unit.hz
+        let est = (Double(rp) + (unEst - rpUn)) / Double(div)
+        let head = ((Int(est) % tapeLen) + tapeLen) % tapeLen
+        let lead = Int(1.2 * r), window = Int(0.5 * r)                // (over a second ahead: the link comes in bursts)
         var ahead = (wh - head) % tapeLen; if ahead < 0 { ahead += tapeLen }
-        if !synced || ahead > tapeLen / 2 || ahead < lead / 5 {   // lost the thread: start again, a second ahead
+        if !synced || ahead > tapeLen * 3 / 4 || ahead < lead / 5 {   // lost the thread: start again, ahead
             wh = (head + lead) % tapeLen
             ahead = lead
             synced = true
@@ -319,7 +336,7 @@ final class HabitEngine {
             voices = []
         } else {
             wholeVoice = nil
-            let layers = 1 + Int(a(3).x * 3.99)
+            let layers = 2
             let len = max(64, Int(HabitPad.length(a(1).x) * r))
             if jump { untilNext = 0; repeatsLeft = 0; jump = false }                              // EARTH: now
             if untilNext <= 0 && voices.count < layers {
@@ -330,7 +347,6 @@ final class HabitEngine {
                     let spread = a(0).y * Double(have) * 0.3
                     start = Double(mw) - whereBack - Double.random(in: 0...max(1, spread)) - Double(len) * 4
                     start = max(Double(mw - have + 2), start)
-                    if Double.random(in: 0..<1) < a(6).y { repeatsLeft = Int(a(6).x * 7.99) }
                 }
                 lastStart = start
                 age = (Double(mw) - start) / r
@@ -340,7 +356,7 @@ final class HabitEngine {
                 if Double.random(in: 0..<1) < a(2).y { step = -step }                        // REVERSE
                 step *= dir                                                                  // FLIP
                 let pos = step < 0 ? start + Double(len) * abs(step) : start
-                let fade = max(32, Int(Double(len) * (0.02 + a(3).y * 0.48)))
+                let fade = max(32, Int(Double(len) * 0.2))
                 voices.append(Voice(pos: pos, step: step, left: len, len: len, fade: fade))
                 let gap = a(1).y * 3
                 untilNext = max(32, Int(Double(len) / Double(layers) * (1 + gap)))
@@ -365,11 +381,55 @@ final class HabitEngine {
             lp += (out - lp) * c
             out = lp
         }
+        out = effects(out, r)
         // LEVEL · DRIVE: brought up to the memory's loudness (a quiet input still plays loud), then a soft ceiling
         let g = min(3, 0.7 / max(0.15, peak)) * (a(4).x * 2)          // (at most ×3, and not at all on near-silence: no hiss)
         let dr = 1 + a(4).y * 5
         out = tanh(out * g * dr) / tanh(dr) * min(1, 0.9 + 0.1 / dr)
         return max(-1, min(1, out))
+    }
+
+    private func effects(_ x0: Double, _ r: Double) -> Double {
+        var x = x0
+        let sv = axes[3].x, gv = axes[3].y
+        // GLITCH: now and then, a piece of what just played again (2 … 6 times, sometimes backwards)
+        hist[hw] = x; hw = (hw + 1) % hist.count
+        if glLeft <= 0 && gv > 0.01 && Double.random(in: 0..<1) < gv * gv * 0.0006 {
+            glLen = max(16, Int(r * Double.random(in: 0.02...0.16)))
+            glLeft = glLen * Int.random(in: 2...6)
+            gl = 0
+            glRev = Double.random(in: 0..<1) < 0.3
+        }
+        if glLeft > 0 {
+            let k = gl % glLen
+            let back = glLen - (glRev ? glLen - 1 - k : k)
+            x = hist[(hw - 1 - back + hist.count * 2) % hist.count]
+            gl += 1; glLeft -= 1
+        }
+        // STARVE: held samples (the rate sags), fewer bits, and the sound dropping out as the power fails
+        if sv > 0.01 {
+            if heldN <= 0 { held = x; heldN = 1 + Int(sv * sv * 10 * Double.random(in: 0.7...1.3)) }
+            heldN -= 1
+            let levels = pow(2, 12 - sv * 9)
+            x = (held * levels).rounded() / levels
+            if gateN <= 0 {
+                gateOn = Double.random(in: 0..<1) > sv * 0.45
+                gateN = Int(r * Double.random(in: 0.01...0.12))
+            }
+            gateN -= 1
+            if !gateOn { x *= 0.05 }
+        }
+        // ECHO
+        let ex = axes[6].x
+        if ex >= 0.02 {
+            let d = max(1, min(echo.count - 1, Int(r * (0.05 + ex * ex * 0.95))))
+            let e = echo[(ew - d + echo.count) % echo.count]
+            let fb = axes[6].y * 0.85
+            echo[ew] = x + e * fb
+            ew = (ew + 1) % echo.count
+            x += e * 0.6
+        }
+        return x
     }
 
     private func sample(_ p: Double) -> Double {
