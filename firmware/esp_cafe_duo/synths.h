@@ -1819,7 +1819,7 @@ static inline int32_t wv_at(int f, uint32_t ph) {                     // frame f
 // (a file, MAKE, GRAIN's recording) makes it just a sound again -> the built-in waves: sine · triangle · saw · square,
 // the same on every Cafe, always in tune
 volatile bool wv_valid = false;
-int16_t wv_sin[257];
+RTC_DATA_ATTR int16_t wv_sin[257];            // (RTC memory: the heap stays for BLE)
 static inline int32_t wv_builtin(int c, uint32_t ph) {
   if (c == 0) { int i = ph >> 24; int32_t fi = (ph >> 16) & 255, a = wv_sin[i], b = wv_sin[i + 1]; return a + (((b - a) * fi) >> 8); }
   int32_t t = (int32_t)(ph >> 20); t = t < 2048 ? t * 2 - 2048 : 6143 - t * 2;             // triangle ±2048
@@ -2249,7 +2249,7 @@ static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
 // (0 = 1/2, 1000 = 1/4) · 1 dry · 2 wet (0..1000).
 // packet up (172 bytes, on NUS TX): 0xFF · seq u16 · read head u32 (tape samples) · drops u16 · predictor i16 · index u8 · 160 bytes
 // packet down (on NUS RX, after a 0xFF): position u32 (in rate samples on the tape) · predictor i16 · index u8 · bytes (low nibble first)
-#define HB_Q 16
+#define HB_Q 8
 #define HB_PK 172                                 // (byte 0 = 0xFF: HABIT rides the text link — no new characteristic for iOS to miss)
 #define HB_NIB 320
 DRAM_ATTR static const int16_t hb_steps[89] = {
@@ -2258,7 +2258,7 @@ DRAM_ATTR static const int16_t hb_steps[89] = {
   1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484,
   7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767 };
 DRAM_ATTR static const int8_t hb_idx[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
-uint8_t hb_q[HB_Q][HB_PK];                    // (16 packets, ~2.7 KB: always there — no malloc to fail)
+uint8_t hb_q[HB_Q][HB_PK];                    // (8 packets, 1.4 KB: the heap — ~10 KB left after the tape — is BLE's)
 volatile uint32_t hb_qw = 0, hb_qr = 0;       // packets made / sent
 volatile uint16_t hb_drops = 0;               // packets the link could not take
 volatile int hb_div = 2;                      // RATE: every 2nd (or 4th) sample goes up
