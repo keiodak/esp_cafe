@@ -228,7 +228,11 @@ final class HabitEngine {
                 if dub {                                              // DUB: onto what is there, round and round
                     let j = dubW % cap
                     let m = Double(mem[j]) * 0.9 + Double(v)
-                    mem[j] = Int16(max(-32767, min(32767, m > 24000 ? 24000 + (m - 24000) * 0.25 : (m < -24000 ? -24000 + (m + 24000) * 0.25 : m))))
+                    var c: Double = m                                     // (a soft top above 24000)
+                    if c > 24000 { c = 24000 + (c - 24000) * 0.25 }
+                    if c < -24000 { c = -24000 + (c + 24000) * 0.25 }
+                    c = max(-32767, min(32767, c))
+                    mem[j] = Int16(c)
                     dubW += 1; if dubW >= mw { dubW = lo }
                 } else {
                     mem[mw % cap] = Int16(v)
