@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.82"
+#define FW_VERSION "3.83"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -880,7 +880,8 @@ void pc_line(char *s) {
 }
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
 void hb_service() {
-  if (!ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
+  if (pc_mode == 6 && !hb_q && !hb_off) hb_q = (uint8_t (*)[HB_PK])malloc(HB_Q * HB_PK);   // (HABIT's packets: made on first use)
+  if (!hb_q || !ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
   int sent = 0;
   while (hb_qr != hb_qw && sent < 8) {
     if (!ble_tx->notify(hb_q[hb_qr & (HB_Q - 1)], HB_PK)) break;   // (on the text link; out of buffers: next time)

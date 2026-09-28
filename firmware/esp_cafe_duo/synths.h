@@ -2258,7 +2258,7 @@ DRAM_ATTR static const int16_t hb_steps[89] = {
   1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484,
   7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767 };
 DRAM_ATTR static const int8_t hb_idx[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
-uint8_t hb_q[HB_Q][HB_PK];
+uint8_t (*hb_q)[HB_PK] = nullptr;            // (made when HABIT is first used: the BLE stack needs the heap at boot)
 volatile uint32_t hb_qw = 0, hb_qr = 0;       // packets made / sent
 volatile uint16_t hb_drops = 0;               // packets the link could not take
 volatile int hb_div = 2;                      // RATE: every 2nd (or 4th) sample goes up
@@ -2297,7 +2297,7 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; }
   // up: the input, averaged over RATE samples, into packets for the phone
   acc += in;
-  if (++accn >= hb_div) {
+  if (++accn >= hb_div && hb_q) {
     int32_t x = (acc << 4) / accn;                           // 12 -> 16 bits
     acc = 0; accn = 0;
     uint8_t *pk = hb_q[hb_qw & (HB_Q - 1)];
