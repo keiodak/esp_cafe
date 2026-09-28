@@ -8,6 +8,36 @@
 
 import Foundation
 import Combine
+import SwiftUI
+
+/// what the memory looks like, for the WHERE pad: min / max per bin, newest on the left (WHERE's 0 = now), and
+/// where the playing is
+final class HabitScope: ObservableObject {
+    static let bins = 96
+    @Published var lo = [Float](repeating: 0, count: HabitScope.bins)
+    @Published var hi = [Float](repeating: 0, count: HabitScope.bins)
+    @Published var play: Double = 0              // 0 (now) … 1 (the oldest held)
+    @Published var full: Double = 0              // how much of the memory holds sound
+}
+
+/// drawn over the WHERE pad
+struct HabitScopeView: View {
+    @ObservedObject var scope: HabitScope
+    var body: some View {
+        Canvas { ctx, size in
+            let n = HabitScope.bins, w = size.width / CGFloat(n), mid = size.height / 2
+            var p = Path()
+            for k in 0..<n {
+                let top = mid - CGFloat(scope.hi[k]) * mid * 0.9, bot = mid - CGFloat(scope.lo[k]) * mid * 0.9
+                p.addRect(CGRect(x: CGFloat(k) * w, y: min(top, bot), width: max(0.8, w * 0.8), height: max(0.8, abs(bot - top))))
+            }
+            ctx.fill(p, with: .color(PastelTheme.hudBlack.opacity(0.35)))
+            let x = CGFloat(scope.play) * size.width
+            ctx.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(PastelTheme.hudOrange))
+        }
+        .allowsHitTesting(false)
+    }
+}
 
 enum Adpcm {
     static let steps: [Int32] = [
@@ -86,6 +116,8 @@ final class HabitEngine {
     var div = 2                                  // 1/2 (or 1/4) of the Cafe's clock
     var hold = false                             // HOLD: the memory takes nothing new
     var active = false
+    let scope = HabitScope()
+    private var scopeT = Date()
 
     // the memory: a ring of 16-bit samples at the rate the Cafe sends
     private var mem: [Int16]
@@ -171,6 +203,7 @@ final class HabitEngine {
         }
         guard active, rpAt != .distantPast, unit.hz > 1000 else { return }
         readInputs()
+        if now.timeIntervalSince(scopeT) >= 0.2 { scopeT = now; drawScope() }
         let tapeLen = TAPE / div
         let r = rate
         // where the Cafe reads now (rate samples on the tape)
@@ -318,6 +351,27 @@ final class HabitEngine {
         let f = p - Double(i)
         let a = Double(mem[i % cap]), b = Double(mem[(i + 1) % cap])
         return (a + (b - a) * f) / 32768
+    }
+
+    /// the memory in bins (newest first), sampled sparsely: cheap
+    private func drawScope() {
+        let have = filled, n = HabitScope.bins
+        guard have > n else { return }
+        var lo = [Float](repeating: 0, count: n), hi = [Float](repeating: 0, count: n)
+        let per = have / n, stride = max(1, per / 48)
+        for k in 0..<n {
+            var a: Float = 0, b: Float = 0
+            var j = 0
+            while j < per {
+                let v = Float(mem[(mw - 1 - (k * per + j)) % cap]) / 32768
+                a = min(a, v); b = max(b, v)
+                j += stride
+            }
+            lo[k] = a; hi[k] = b
+        }
+        scope.lo = lo; scope.hi = hi
+        scope.play = min(1, max(0, age * rate / Double(have)))
+        scope.full = Double(have) / (seconds * rate)
     }
 
     // MARK: SAVE

@@ -804,6 +804,9 @@ private struct MainScreen: View {
             .frame(height: padHeight)
             .opacity(live ? 1 : 0.35)
             .allowsHitTesting(live)
+            .overlay {                                                        // HABIT: the memory, under WHERE
+                if rig.padSet == .habit && i == 0 { HabitScopeView(scope: d.habits[d.ctxUnits().first?.slot ?? 0].scope) }
+            }
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
         }
     }
