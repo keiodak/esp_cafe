@@ -75,14 +75,14 @@ enum Adpcm {
     }
 }
 
-/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, STARVE · GLITCH / LEVEL · DRIVE, TONE · DRIFT,
+/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, STARVE · GLITCH / CLEAN · LEVEL, TONE · DRIFT,
 /// ECHO · FEEDBACK, DETUNE · OCTAVES
 enum HabitPad {
     static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "STARVE · GLITCH",
-                         "LEVEL · DRIVE", "TONE · DRIFT", "ECHO · FEEDBACK", "DETUNE · OCTAVES"]
+                         "CLEAN · LEVEL", "TONE · DRIFT", "ECHO · FEEDBACK", "DETUNE · OCTAVES"]
     /// (it starts as a plain run: LENGTH at the top = the whole memory played on at ×1, a little behind)
     static let starts: [(Double, Double)] = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.0, 0.0),
-                                             (0.6, 0.2), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+                                             (0.5, 0.6), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
     /// LENGTH: 30 ms … 4 s, and at the top: the whole run (a tape delay from WHERE)
     static func whole(_ x: Double) -> Bool { x >= 0.97 }
     static func length(_ x: Double) -> Double { 0.03 * pow(4.0 / 0.03, min(1, x / 0.97)) }
@@ -94,7 +94,7 @@ enum HabitPad {
         case 1: return (whole(x) ? "WHOLE" : String(format: "%.2f s", length(x))) + String(format: " · GAP %d%%", Int(y * 100))
         case 2: return String(format: "×%.2f · REV %d%%", speed(x), Int(y * 100))
         case 3: return "STARVE \(Int(x * 100))% · GLITCH \(Int(y * 100))%"
-        case 4: return "LEVEL \(Int(x * 100))% · DRIVE \(Int(y * 100))%"
+        case 4: return "CLEAN \(Int(x * 100))% · LEVEL \(Int(y * 100))%"
         case 5: return "TONE \(Int(x * 100))% · DRIFT \(Int(y * 100))%"
         case 6: return x < 0.02 ? "ECHO OFF" : String(format: "%.2f s · FB %d%%", 0.05 + x * x * 0.95, Int(y * 85))
         case 7: return "DETUNE \(Int(x * 100))% · OCT \(Int(y * 100))%"
@@ -142,6 +142,7 @@ final class HabitEngine {
     private var lastStart: Double = 0, repeatsLeft = 0
     private var lp: Double = 0, drift: Double = 0
     private var peak: Double = 0.05              // how loud the memory is (the playing is brought up to it)
+    private var dh: Double = 0, env: Double = 0, eg: Double = 1   // CLEAN
     // STARVE (a dying digital box: held samples, fewer bits, drop-outs) · GLITCH (stutters of what just played,
     // sometimes backwards) · ECHO (on the way out)
     private var held: Double = 0, heldN = 0, gateOn = true, gateN = 0
@@ -384,10 +385,19 @@ final class HabitEngine {
             out = lp
         }
         out = effects(out, r)
-        // LEVEL · DRIVE: brought up to the memory's loudness (a quiet input still plays loud), then a soft ceiling
-        let g = min(3, 0.7 / max(0.15, peak)) * (a(4).x * 2)          // (at most ×3, and not at all on near-silence: no hiss)
-        let dr = 1 + a(4).y * 5
-        out = tanh(out * g * dr) / tanh(dr) * min(1, 0.9 + 0.1 / dr)
+        // CLEAN · LEVEL: brought up to the memory's loudness (at most ×3, never on near-silence), then CLEAN: the hiss
+        // of the thin link taken off the top (a gentle low-pass) and out of the gaps (an expander under its floor)
+        out *= min(3, 0.7 / max(0.15, peak)) * (a(4).y * 2)
+        let c = a(4).x
+        if c > 0.01 {
+            dh += (out - dh) * (1 - c * 0.6)                      // (de-hiss: softens only the very top)
+            out = dh
+            env = max(abs(out), env * 0.9993)
+            let th = 0.01 + c * 0.08
+            let k = env >= th ? 1.0 : (env / th) * (env / th)
+            eg += (k - eg) * 0.003
+            out *= eg
+        }
         return max(-1, min(1, out))
     }
 
