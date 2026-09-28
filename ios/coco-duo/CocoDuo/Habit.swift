@@ -229,8 +229,10 @@ final class HabitEngine {
         let tapeLen = TAPE / div
         let r = rate
         // where the Cafe reads now (rate samples on the tape)
+        guard rpOff.isFinite else { return }                    // (no packet timed yet: nothing to aim at)
         let unEst = rpOff + now.timeIntervalSince(t0) * unit.hz
         let est = (Double(rp) + (unEst - rpUn)) / Double(div)
+        guard est.isFinite else { return }
         let head = ((Int(est) % tapeLen) + tapeLen) % tapeLen
         let lead = Int(1.2 * r), window = Int(0.5 * r)                // (over a second ahead: the link comes in bursts)
         var ahead = (wh - head) % tapeLen; if ahead < 0 { ahead += tapeLen }
@@ -434,6 +436,7 @@ final class HabitEngine {
 
     private func sample(_ p: Double) -> Double {
         let lo = mw - filled
+        guard p.isFinite else { return 0 }
         let i = Int(floor(p))
         guard i >= lo, i + 1 < mw else { return 0 }
         let f = p - Double(i)
