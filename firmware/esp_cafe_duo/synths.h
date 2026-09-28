@@ -2247,10 +2247,10 @@ static int32_t __attribute__((noinline)) bb_tick(int32_t in, int32_t *rout) {
 // as its pads say — by writing ADPCM onto this Cafe's tape (HB_RX) a little ahead of the read head, which goes round
 // the tape at the Cafe's clock. main = the input (DRY) + the tape (WET), ASH = the tape. "B <id> <v>": 0 rate
 // (0 = 1/2, 1000 = 1/4) · 1 dry · 2 wet (0..1000).
-// packet up (171 bytes): seq u16 · read head u32 (tape samples) · drops u16 · predictor i16 · index u8 · 160 bytes
-// packet down: position u32 (in rate samples on the tape) · predictor i16 · index u8 · bytes (low nibble first)
+// packet up (172 bytes, on NUS TX): 0xFF · seq u16 · read head u32 (tape samples) · drops u16 · predictor i16 · index u8 · 160 bytes
+// packet down (on NUS RX, after a 0xFF): position u32 (in rate samples on the tape) · predictor i16 · index u8 · bytes (low nibble first)
 #define HB_Q 32
-#define HB_PK 171
+#define HB_PK 172                                 // (byte 0 = 0xFF: HABIT rides the text link — no new characteristic for iOS to miss)
 #define HB_NIB 320
 DRAM_ATTR static const int16_t hb_steps[89] = {
   7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
@@ -2304,13 +2304,14 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
     if (pkn == 0) {
       seq++;
       uint32_t rp = hb_rp; uint16_t dr = hb_drops;
-      pk[0] = seq & 255; pk[1] = seq >> 8;
-      pk[2] = rp & 255; pk[3] = (rp >> 8) & 255; pk[4] = (rp >> 16) & 255; pk[5] = rp >> 24;
-      pk[6] = dr & 255; pk[7] = dr >> 8;
-      pk[8] = pred & 255; pk[9] = (pred >> 8) & 255; pk[10] = (uint8_t)ix;
+      pk[0] = 0xFF;
+      pk[1] = seq & 255; pk[2] = seq >> 8;
+      pk[3] = rp & 255; pk[4] = (rp >> 8) & 255; pk[5] = (rp >> 16) & 255; pk[6] = rp >> 24;
+      pk[7] = dr & 255; pk[8] = dr >> 8;
+      pk[9] = pred & 255; pk[10] = (pred >> 8) & 255; pk[11] = (uint8_t)ix;
     }
     uint8_t n = hb_enc(x, pred, ix);
-    uint8_t *b = &pk[11 + (pkn >> 1)];
+    uint8_t *b = &pk[12 + (pkn >> 1)];
     if (pkn & 1) *b |= (uint8_t)(n << 4); else *b = n;
     if (++pkn >= HB_NIB) {
       pkn = 0;

@@ -95,13 +95,17 @@ final class CafeUnit: ObservableObject {
     @Published var hbDrops = 0
     fileprivate var hbRx: CBCharacteristic?
     /// HABIT: one packet onto the tape (only when the text line has nothing waiting: commands go first)
+    /// (it rides the text link after a 0xFF — text is never 0xFF — so iOS needs no new characteristic)
     func habitSend(_ d: Data) -> Bool {
-        guard let p = peri, let c = hbRx, out.isEmpty, p.canSendWriteWithoutResponse else { return false }
-        p.writeValue(d, for: c, type: .withoutResponse)
+        guard let p = peri, let c = rx, out.isEmpty, p.canSendWriteWithoutResponse else { return false }
+        var b = Data([0xFF]); b.append(d)
+        p.writeValue(b, for: c, type: .withoutResponse)
         return true
     }
-    /// the most a HABIT packet may be
-    var habitMaxLen: Int { peri.map { $0.maximumWriteValueLength(for: .withoutResponse) } ?? 20 }
+    /// the most a HABIT packet may be (after its 0xFF)
+    var habitMaxLen: Int { (peri.map { $0.maximumWriteValueLength(for: .withoutResponse) } ?? 21) - 1 }
+    /// the link's packet size (MTU): HABIT's packets up need 175
+    var mtu: Int { (peri.map { $0.maximumWriteValueLength(for: .withoutResponse) } ?? 20) + 3 }
 
     fileprivate var peri: CBPeripheral?
     fileprivate var rx: CBCharacteristic?
@@ -635,7 +639,7 @@ extension CafeHub: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
         guard let v = c.value, let u = unit(for: p) else { return }
-        if c.uuid == HB_TX { u.onHabit?(v) } else { u.receive(v) }
+        if c.uuid == HB_TX || v.first == 0xFF { u.onHabit?(Data(v.dropFirst(c.uuid == HB_TX ? 0 : 1))) } else { u.receive(v) }
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse p: CBPeripheral) {

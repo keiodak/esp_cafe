@@ -1314,7 +1314,8 @@ private struct CafeLine: View {
                 ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }.frame(width: 48)
             }
             Text((unit.fw.isEmpty ? "" : "v\(unit.fw)  ·  ") + "\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))"
-                 + (unit.hbUp > 0 || unit.hbDown > 0 ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  drop %d", unit.hbUp, unit.hbDown, unit.hbDrops) : ""))
+                 + (unit.preset == Preset.ble && unit.mode == 6
+                    ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  drop %d  mtu %d", unit.hbUp, unit.hbDown, unit.hbDrops, unit.mtu) : ""))
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .padding(.leading, 19)

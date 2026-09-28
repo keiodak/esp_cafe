@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.79"
+#define FW_VERSION "3.80"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -107,6 +107,7 @@ class CafeRxCB : public NimBLECharacteristicCallbacks {
     NimBLEAttValue v = c->getValue();
     const uint8_t *d = v.data();
     ble_last_rx = millis();
+    if (v.size() > 1 && d[0] == 0xFF) { hb_write(d + 1, v.size() - 1); return; }   // HABIT: onto the tape (text is never 0xFF)
     for (size_t i = 0; i < v.size(); i++) {
       uint16_t n = (ble_wh + 1) & 1023;
       if (n == ble_rh) break;                      // full: drop the rest
@@ -878,10 +879,10 @@ void pc_line(char *s) {
 }
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
 void hb_service() {
-  if (!ble_conn || !hb_tx || pc_mode != 6 || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
+  if (!ble_conn || !ble_tx || pc_mode != 6 || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
   int sent = 0;
   while (hb_qr != hb_qw && sent < 8) {
-    if (!hb_tx->notify(hb_q[hb_qr & (HB_Q - 1)], HB_PK)) break;   // (out of buffers: next time)
+    if (!ble_tx->notify(hb_q[hb_qr & (HB_Q - 1)], HB_PK)) break;   // (on the text link; out of buffers: next time)
     hb_qr++; sent++;
   }
 }
