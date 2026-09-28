@@ -413,9 +413,12 @@ final class HabitEngine {
         // of the thin link taken off the top (a gentle low-pass) and out of the gaps (an expander under its floor)
         out *= min(3, 0.7 / max(0.15, peak)) * (a(4).y * 2)
         let c = a(4).x
+        // (no low-pass here any more: at 4K / 8K there is no top to spare — it only muffled. Instead a lift of the
+        //  top, making up for the averaging on the Cafe and the straight lines between samples)
+        let pre = out
+        out += (out - dh) * 0.45
+        dh = pre
         if c > 0.01 {
-            dh += (out - dh) * (1 - c * 0.6)                      // (de-hiss: softens only the very top)
-            out = dh
             env = max(abs(out), env * 0.9993)
             let th = 0.01 + c * 0.08
             let k = env >= th ? 1.0 : (env / th) * (env / th)

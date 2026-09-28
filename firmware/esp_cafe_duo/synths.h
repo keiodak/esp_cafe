@@ -2335,7 +2335,7 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   // smooth: the tape holds 4K / 8K brought up to the Cafe's rate in straight lines — two gentle low-passes at about
   // half that rate take the steps' edges (the grit and the whistle above) off
   static int32_t s1 = 0, s2 = 0;
-  int32_t ak = hb_div >= 8 ? 1200 : 2000;                    // (Q12: ~1.8 kHz for 4K, ~3.5 kHz for 8K, at ~32 kHz)
+  int32_t ak = hb_div >= 8 ? 2400 : 3200;                    // (Q12: just past the link's top — only the steps' edges go, not the sound's)
   s1 += ((p - s1) * ak) >> 12;
   s2 += ((s1 - s2) * ak) >> 12;
   p = s2;
