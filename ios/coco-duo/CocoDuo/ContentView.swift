@@ -1032,7 +1032,10 @@ private struct HudBar: View {
         // one line, every part on a fixed width: switching presets never pushes the slider or the keys about
         var info = ""
         if p == Preset.ble { info = Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)] }
-        if p == Preset.ble && m == 6 { info = String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown) }     // HABIT: kB/s
+        if p == Preset.ble && m == 6 {                                              // HABIT: kB/s — or, while nothing
+            info = unit.hbUp > 0 ? String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown)  // comes: the Cafe's made / sent / MTU
+                                 : "M\(unit.hbMade % 1000)S\(unit.hbSent % 1000)U\(unit.cafeMtu)"
+        }
         if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
         if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
             info += (info.isEmpty ? "" : " ") + String(format: "%.0fBPM", unit.bpm > 0 ? unit.bpm : rig.bpm)
