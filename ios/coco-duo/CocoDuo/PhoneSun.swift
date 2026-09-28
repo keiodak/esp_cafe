@@ -48,6 +48,10 @@ final class PhoneSun: ObservableObject {
     private var gain = 0.0, dc = 0.0
     private var sA = 0.55, sB = 0.75
 
+    /// SYNC: the core from the start (both oscillators, both runglers, the S&H)
+    func restart() { restartFlag = true }
+    private var restartFlag = false
+
     func play(_ on: Bool) {
         playing = on
         if on { start() }
@@ -100,9 +104,10 @@ final class PhoneSun: ObservableObject {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
-        let k = q * 8.2                                     // (three poles sing by themselves at 8)
+        let k = q * 9.6                                     // (three poles sing by themselves at 8: the top of Q rings on)
         let comp = (1 + k * 0.25) * 0.35                   // (a level that stays clean all the way up the Q)
         let pingN = max(1, Int(sr * pingSec))
+        if restartFlag { restartFlag = false; pa = 0; pb = 0.3; r1 = 0b0101; r2 = 0b1100; sh = 0; d1 = 0; d2 = 0 }
         for i in 0..<frames {
             sA += (oscA - sA) * 0.002; sB += (oscB - sB) * 0.002
             gain += (want - gain) * 0.0005

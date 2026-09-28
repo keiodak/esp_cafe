@@ -4083,6 +4083,41 @@ void IRAM_ATTR multi() {
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
 
 // ==========================================
+// ZEITGEIST (k.odk, after Rob Hordijk's Zeitgeist — "heavy abuse of a PT2399 karaoke delay chip"): APP+CAFE's BLIPPOO
+// layer puts the Cafe on it. MIX turns up the wet and the feedback together (past unity: it sings by itself); TIME
+// stretches the chip's clock, so the longer the delay the fewer and coarser its samples and the darker its loop;
+// MOD: EARTH onto the time (the Zeitgeist's CV / LDR). Phone: "F 89 <0 time | 1 mix | 2 mod> <0..1000>". Tape: TD_L.
+volatile int32_t zg_T = 6000 << 8, zg_mix = 128, zg_mod = 0;
+void zg_set(int id, long v) {
+  if (v < 0) v = 0; if (v > 1000) v = 1000;
+  float q = v / 1000.0f;
+  if (id == 0) { float t = 64.0f * powf(500.0f, q); if (t > 32000) t = 32000; zg_T = (int32_t)(t * 256.0f); }
+  else if (id == 1) zg_mix = (int32_t)(q * 256.0f);
+  else if (id == 2) zg_mod = (int32_t)(q * 256.0f);
+}
+static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool hold) {
+  static uint32_t w = 0;
+  static int32_t Ts = 6000 << 8, held = 0, hc = 0, lp = 0, lp2 = 0;
+  int32_t tgt = zg_T + (int32_t)(((int64_t)zg_T * pc_emod * zg_mod) >> 15);    // MOD: EARTH onto the time
+  if (tgt < (64 << 8)) tgt = 64 << 8;
+  if (tgt > (32000 << 8)) tgt = 32000 << 8;
+  Ts += (tgt - Ts) >> 11;                                                         // (the clock glides: pitch bends)
+  int32_t T = Ts >> 8;
+  // the chip's clock: a longer delay takes fewer, coarser samples
+  int n = 1 + T / 6000, sh = T / 8000;
+  int32_t rd = (int32_t)dread(TD_L + ((w - (uint32_t)T) & 0x7FFF)) - 2048;
+  if (++hc >= n) { hc = 0; held = (rd >> sh) << sh; }
+  int32_t k = 3000 - T / 12; if (k < 500) k = 500;                               // its loop filter, darker when longer
+  lp += ((held - lp) * k) >> 12;
+  lp2 += ((lp - lp2) * k) >> 12;
+  int32_t fb = hold ? 256 : (zg_mix * 300) >> 8;                                  // MIX: the feedback with the wet
+  int32_t wr = hold ? lp2 : in + ((lp2 * fb) >> 8);
+  dwrite(TD_L + (w & 0x7FFF), soft_clip(wr) + 2048);
+  w++;
+  *rout = lp2;
+  return ((in * (256 - (zg_mix >> 1))) >> 8) + ((lp2 * zg_mix) >> 8);
+}
+
 // ARP_DELAY --- NEW PRESET 11 (k.odk): MULTI's stereo tap delay on its own, for the phone's arpeggiator
 // ==========================================
 // Patch the iPhone's audio (coco duo, ARP) into the Cafe's input. The tempo is shared both ways:
@@ -4155,13 +4190,9 @@ void IRAM_ATTR arpdelay() {
     fx_rs[1] = true;                                  // the delay starts clean when ARP comes back
   } else {
     if (ad_mode == 2) {
-      // SUNDAY: the phone's folded sine into a string tuned to its note (KARPLUS, "F 7 ..") and a reverb ("F 6 ..")
-      bool r7 = fx_rs[7], r6 = fx_rs[6];
-      fx_rs[7] = fx_rs[6] = false;
+      // BLIPPOO: the phone's Blippoo Box into the ZEITGEIST delay ("F 89 ..")
       fx_rs[1] = true;
-      int32_t kr;
-      int32_t kl = sd_tick(in, &kr, hold, r7);
-      l = rb_tick((kl + kr) >> 1, &r, hold, r6);
+      l = zg_tick(in, &r, hold);
     } else {
       bool rs = fx_rs[1];
       fx_rs[1] = false;

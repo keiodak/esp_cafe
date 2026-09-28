@@ -325,23 +325,16 @@ final class Director: ObservableObject {
             sunCafe(slot: u.slot, only: -1).forEach(u.send)
         }
     }
-    /// what a Cafe on SUNDAY is told: its string (KARPLUS, "F 7") and reverb ("F 6"); only = one pad's part
+    /// what a Cafe on BLIPPOO is told: its ZEITGEIST ("F 89": 0 time · 1 mix · 2 EARTH → time); only = one pad's part
     func sunCafe(slot: Int, only pad: Int? = nil) -> [String] {
-        let a = rig.sunAxes
+        let mine = rig.sunAxes[slot == 1 ? 7 : 6]                          // (pads 7 / 8: each Cafe's TIME · MIX)
         func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
-        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].y))", damp = "F 7 2 \(v(0.3 + a[4].y * 0.7))"
-        let mine = a[slot == 1 ? 7 : 6]                                  // (pads 7 / 8: each Cafe's RING · SPACE)
-        let rg = ["F 7 6 \(v(mine.x))", "F 7 1 \(v(rig.sunDecay))"], sp = ["F 6 6 \(v(mine.y))", "F 6 0 \(v(rig.sunSize))"]
-        guard let pad else {
-            return [pitch, damp] + rg + sp + ["F 7 3 0", "F 7 4 100", "F 7 5 300", "F 7 7 1000",
-                                              "F 6 1 400", "F 6 2 500", "F 6 3 500", "F 6 4 0", "F 6 5 200", "F 6 7 1000"]
-        }
+        let zg = ["F 89 0 \(v(mine.x))", "F 89 1 \(v(mine.y))"], mod = "F 89 2 \(v(rig.sunZgMod))"
+        guard let pad else { return zg + [mod] }
         switch pad {
-        case 0: return [pitch]                                   // (OSC B tunes the string)
-        case 4: return [damp]                                    // (PEAK B brightens it)
-        case -1: return rg + sp                                  // (the card)
-        case 6: return slot == 0 ? [rg[0], sp[0]] : []
-        case 7: return slot == 1 ? [rg[0], sp[0]] : []
+        case -1: return [mod]                                    // (the card)
+        case 6: return slot == 0 ? zg : []
+        case 7: return slot == 1 ? zg : []
         default: return []
         }
     }
@@ -1318,7 +1311,7 @@ private struct HudBar: View {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
             case 2: textKey(rig.sunSync ? "S&H RUNG" : "S&H TRI B", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() }   // what the S&H takes
-            default: blank
+            default: key("arrow.triangle.2.circlepath") { d.sun.restart() }                                  // SYNC: the core from the start
             }
         case .pcoco:
             switch n {

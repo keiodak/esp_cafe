@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.05"
+#define FW_VERSION "4.06"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -793,6 +793,7 @@ void pc_line(char *s) {
                 else if (e == 93) fx_trig = true;
                 else if (e == 94 && k >= 2) fx_hold_app = id != 0;
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
+                else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
                 else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 2 ? 2 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 SUNDAY (string + reverb)
                 else if (e == 95 && k >= 2) fx_edepth = (int32_t)((id < 0 ? 0 : (id > 1000 ? 1000 : id)) * 256 / 1000);
                 else if (e == 96 && k >= 2) { float hz = clock_hz(); float q = (id < 0 ? 0 : (id > 1000 ? 1000 : id)) / 1000.0f; fx_gap = (int32_t)(hz * (0.05f + q * q * 4.95f)); }

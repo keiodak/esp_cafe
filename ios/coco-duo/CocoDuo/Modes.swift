@@ -115,11 +115,11 @@ enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
 /// string follows OSC B, PEAK B brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
 enum SunPad {
-    // the box's twelve knobs (3 × 4), two to a pad; the last two pads: each Cafe's string and reverb
+    // the box's twelve knobs (3 × 4), two to a pad; the last two pads: each Cafe's ZEITGEIST
     static let titles = ["OSC A · OSC B", "SWEEP →A · →B", "STEP →A · →B", "TIME WARP · Q",
-                         "PEAK A · PEAK B", "RUNG→PK A · PK B", "CAFE A RING · SPACE", "CAFE B RING · SPACE"]
+                         "PEAK A · PEAK B", "RUNG→PK A · PK B", "CAFE A TIME · MIX", "CAFE B TIME · MIX"]
     static let starts: [(Double, Double)] = [(0.55, 0.75), (0.2, 0.2), (0.3, 0.3), (0.2, 0.9),
-                                             (0.35, 0.6), (0.3, 0.3), (0.5, 0.4), (0.5, 0.4)]
+                                             (0.35, 0.6), (0.3, 0.3), (0.45, 0.4), (0.55, 0.4)]
     /// the Cafe's string: B brought into its four octaves from A1
     static func stringPitch(_ y: Double) -> Int {
         var semi = 12 * log2(max(1, PhoneSun.oscHz(y)) / 55)
@@ -134,6 +134,7 @@ enum SunPad {
         case 0: return "\(hz(PhoneSun.oscHz(x))) · \(hz(PhoneSun.oscHz(y))) Hz"
         case 3: return "\(pc(x)) · Q \(pc(y))"
         case 4: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
+        case 6, 7: return String(format: "%.0f ms · MIX %d%%", 64 * pow(500, x) / 32, Int(y * 100))
         default: return "\(pc(x)) · \(pc(y))"
         }
     }
@@ -461,6 +462,8 @@ final class Rig: ObservableObject {
     @Published var sunDecay: Double = 0.5
     @Published var sunSpace: Double = 0.4
     @Published var sunSize: Double = 0.6
+    /// the ZEITGEIST's MOD: EARTH onto its time
+    @Published var sunZgMod: Double = 0.3
     /// SUNDAY's MOD (S&H -> OSC, SR -> TWIN PEAK: the key in the top left pad) and SYNC (feedback: bottom right)
     @Published var sunMod = true
     @Published var sunSync = false

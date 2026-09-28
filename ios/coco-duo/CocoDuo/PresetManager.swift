@@ -448,8 +448,7 @@ private struct SunControls: View {
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
             }
             PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
-            PanelRow(label: "DECAY", value: Binding(get: { rig.sunDecay }, set: { rig.sunDecay = $0; d.sunCafeCard() }))   // the Cafes' string
-            PanelRow(label: "SIZE", value: Binding(get: { rig.sunSize }, set: { rig.sunSize = $0; d.sunCafeCard() }))     // and reverb
+            PanelRow(label: "MOD", value: Binding(get: { rig.sunZgMod }, set: { rig.sunZgMod = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: EARTH → time
         }
     }
 }
