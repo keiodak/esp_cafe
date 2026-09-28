@@ -83,9 +83,11 @@ struct PresetManagerView: View {
     @State private var wvPick = false            // WAVE: FILE (a picker of its own: this is a sheet)
     @State private var bin = false               // 🗑 on: a tap on a slot empties it, on a memory erases it
     var body: some View {
-        PanelScaffold(title: "PRESET MANAGER") {
-            PanelColumns {
-                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3) {
+        // fixed to the window: the two columns end together at its bottom (the cards on the right scroll inside
+        // their own box when they are taller than it; NOW sits at the bottom)
+        PanelScaffold(title: "PRESET MANAGER", stretch: true) {
+            PanelColumns(equalHeight: true) {
+                PanelCard(title: "PRESETS", note: "A · B = which Cafe", spacing: 3, fill: true) {
                     if design {
                         ForEach(0..<Preset.maxPlaylist, id: \.self) { i in
                             SlotRow(i: i, n: rig.design[i], picked: sel == i)
@@ -124,7 +126,7 @@ struct PresetManagerView: View {
             } right: {
                 if design {
                     DesignCard(d: d, rig: rig, sel: $sel, bin: $bin)
-                        .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
+                        .frame(maxHeight: .infinity, alignment: .top)
                     .fileImporter(isPresented: $wvPick, allowedContentTypes: [.audio]) { result in
                         if case .success(let url) = result { d.loadWaveTable(url) }
                     }
@@ -132,11 +134,13 @@ struct PresetManagerView: View {
                     // one fixed box, the height of PRESETS: the cards on top, NOW takes what is left (it may shrink
                     // to nothing). The box never changes size, whichever cards are shown: nothing moves.
                     VStack(spacing: 8) {
-                        rightCards
-                        NowCard(d: d, rig: rig, a: a, b: b).frame(maxHeight: .infinity)
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 8) { rightCards }
+                        }
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        NowCard(d: d, rig: rig, a: a, b: b)
                     }
-                    .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
-                    .clipped()
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
         }
@@ -625,7 +629,7 @@ private struct PresetsHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// NOW: what the two Cafes are on and the tempo, big (fills the right column below the cards)
+/// NOW: what the two Cafes are on (at the bottom of the right column)
 private struct NowCard: View {
     let d: Director
     @ObservedObject var rig: Rig
@@ -652,18 +656,8 @@ private struct NowCard: View {
                             .foregroundStyle(PastelTheme.textSecondary)
                     }
                 }
-                Spacer(minLength: 0)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Spacer(minLength: 0)
-                    Text("\(Int(rig.bpm.rounded()))")
-                        .font(.hudBig(34))
-                        .foregroundStyle(PastelTheme.hudBlack)
-                    Text("BPM")
-                        .font(.hud(8, .semibold))
-                        .foregroundStyle(PastelTheme.textSecondary)
-                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }
