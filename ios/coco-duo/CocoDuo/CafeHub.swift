@@ -56,6 +56,7 @@ final class CafeUnit: ObservableObject {
     @Published var hz: Double = 0
     /// the Cafe's firmware version (from its HELLO)
     @Published var fw = ""
+    fileprivate var helloAsked = 0
     @Published var ls = 0
     @Published var le = TAPE
     @Published var speed = 1000               // x1000
@@ -212,6 +213,7 @@ final class CafeUnit: ObservableObject {
         guard let c = l.first else { return }
         switch c {
         case "T":
+            if fw.isEmpty && helloAsked < 3 { helloAsked += 1; send("P") }   // (the first HELLO can come before notify is on)
             let a = l.split(separator: " ")
             guard a.count >= 13 else { return }
             let smp = UInt32(a[11]) ?? 0
@@ -509,7 +511,7 @@ final class CafeUnit: ObservableObject {
         rx = nil; peri = nil; name = nil
         out.removeAll(); inbuf.removeAll()
         waitingQ = false; lastSmp = nil; polls = 0
-        hz = 0; preset = -1; bpm = 0; fx = -1; fw = ""
+        hz = 0; preset = -1; bpm = 0; fx = -1; fw = ""; helloAsked = 0
         state = why
     }
 }
