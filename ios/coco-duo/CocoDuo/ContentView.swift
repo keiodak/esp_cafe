@@ -72,6 +72,7 @@ final class Director: ObservableObject {
             }
             if !onPc { self.pcoco.stop() }
             if !(onArp && self.rig.arpMode == 2) && self.sun.playing { self.sun.stop() }
+            self.sun.keep(); if onPc { self.pcoco.keep() }                   // (an engine the output change stopped: again)
             if !onPc && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
         for u in units {
@@ -943,22 +944,6 @@ private struct MainScreen: View {
                     PcWave(pc: d.pcoco, k: i, axis: rig.pcTop[i]).padding(.vertical, 22)
                 }
             }
-            .overlay(alignment: i == 0 ? .topTrailing : .bottomTrailing) {          // SUNDAY: MOD top left, SYNC bottom right
-                if rig.padSet == .sun && (i == 0 || i == 7) {
-                    let on = i == 0 ? rig.sunMod : rig.sunSync
-                    Button {
-                        if i == 0 { rig.sunMod.toggle() } else { rig.sunSync.toggle() }
-                        director.applySun()
-                    } label: {
-                        Text(i == 0 ? "MOD" : "SYNC")
-                            .font(.hud(8, .semibold)).tracking(0.5)
-                            .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
-                            .frame(width: 38, height: 18)
-                            .background(IconSquare(filled: on))
-                    }
-                    .padding(6)
-                }
-            }
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
         }
     }
@@ -1325,7 +1310,8 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
-            default: blank
+            case 2: textKey("MOD", on: rig.sunMod) { rig.sunMod.toggle(); d.applySun() }     // S&H -> OSC, SR -> TWIN PEAK
+            default: textKey("SYNC", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() } // the output back as hard sync
             }
         case .pcoco:
             switch n {

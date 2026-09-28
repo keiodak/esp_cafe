@@ -59,7 +59,7 @@ final class PhoneCoco: NSObject, ObservableObject {
     func start() {
         if node == nil {
             let s = AVAudioSession.sharedInstance()
-            if recording < 0 { try? s.setCategory(.playback, options: [.mixWithOthers]) }
+            if recording < 0 && s.category != .playback && s.category != .playAndRecord { try? s.setCategory(.playback, options: [.mixWithOthers]) }
             try? s.setActive(true)
             let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
             sr = hw > 1000 ? hw : (s.sampleRate > 0 ? s.sampleRate : 48000)
@@ -74,10 +74,23 @@ final class PhoneCoco: NSObject, ObservableObject {
             node = n
         }
         if !engine.isRunning { try? engine.start() }
+        running = true
     }
     func stop() {
         if recording >= 0 { stopRec() }
+        running = false
         engine.pause()
+    }
+    private var running = false
+    /// kept running: an engine stops by itself whenever the output changes; called ~30x a second while it is on
+    func keep() {
+        guard running, node != nil, !engine.isRunning else { return }
+        let out = engine.outputNode.outputFormat(forBus: 0), mix = engine.outputNode.inputFormat(forBus: 0)
+        if out.channelCount != mix.channelCount || abs(out.sampleRate - mix.sampleRate) > 1 {
+            engine.disconnectNodeOutput(engine.mainMixerNode)
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+        }
+        try? engine.start()
     }
 
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {

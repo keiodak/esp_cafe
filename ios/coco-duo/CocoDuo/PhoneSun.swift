@@ -35,10 +35,22 @@ final class PhoneSun: ObservableObject {
         if on { start() }
     }
 
+    /// started, and kept running: an engine stops by itself whenever the output changes (a USB interface, another
+    /// engine setting the session up) — it was left stopped, silent. Called again ~30x a second while it plays.
+    func keep() {
+        guard playing, node != nil, !engine.isRunning else { return }
+        let out = engine.outputNode.outputFormat(forBus: 0), mix = engine.outputNode.inputFormat(forBus: 0)
+        if out.channelCount != mix.channelCount || abs(out.sampleRate - mix.sampleRate) > 1 {
+            engine.disconnectNodeOutput(engine.mainMixerNode)
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+        }
+        try? engine.start()
+    }
+
     private func start() {
         if node == nil {
             let s = AVAudioSession.sharedInstance()
-            try? s.setCategory(.playback, options: [.mixWithOthers])
+            if s.category != .playback && s.category != .playAndRecord { try? s.setCategory(.playback, options: [.mixWithOthers]) }
             try? s.setActive(true)
             let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
             sr = hw > 1000 ? hw : (s.sampleRate > 0 ? s.sampleRate : 48000)
