@@ -131,7 +131,7 @@ private struct CafeWaveCard: View {
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
             if unit.preset == Preset.ble && unit.mode == 6 {                  // HABIT: the link
-                Text(String(format: "HABIT  ↑%.1f  ↓%.1f kB/s  ·  made %d sent %d  ·  mtu %d/%d", unit.hbUp, unit.hbDown, unit.hbMade, unit.hbSent, unit.cafeMtu, unit.mtu))
+                Text(String(format: "HABIT  ↑%.1f kB/s  ·  made %d sent %d  ·  mtu %d/%d", unit.hbUp, unit.hbMade, unit.hbSent, unit.cafeMtu, unit.mtu))
                     .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                     .foregroundStyle(PastelTheme.hudOrange)
                     .lineLimit(1)

@@ -1047,7 +1047,7 @@ private struct HudBar: View {
         var info = ""
         if p == Preset.ble { info = Preset.modeNames[min(max(m, 0), Preset.modeNames.count - 1)] }
         if p == Preset.ble && m == 6 {                                              // HABIT: kB/s — or, while nothing
-            info = unit.hbUp > 0 ? String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown)  // comes: the Cafe's made / sent / MTU
+            info = unit.hbUp > 0 ? String(format: "↑%.1fKB/S", unit.hbUp)  // comes: the Cafe's made / sent / MTU
                                  : "M\(unit.hbMade % 1000)S\(unit.hbSent % 1000)U\(unit.cafeMtu)"
         }
         if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
@@ -1334,7 +1334,7 @@ private struct CafeLine: View {
             }
             Text("v\(unit.fw.isEmpty ? "?" : unit.fw)\(unit.flashes > 0 ? " #\(unit.flashes)" : "")  ·  " + "\(unit.hz > 0 ? String(format: "%.1f kHz", unit.hz / 1000) : "—")  ·  \(unit.preset < 0 ? "—" : Preset.tag(unit.preset))"
                  + (unit.preset == Preset.ble && unit.mode == 6
-                    ? String(format: "  ·  ↑%.1f ↓%.1f kB/s  made %d sent %d  mtu %d/%d", unit.hbUp, unit.hbDown, unit.hbMade, unit.hbSent, unit.cafeMtu, unit.mtu) : ""))
+                    ? String(format: "  ·  ↑%.1f kB/s  made %d sent %d  mtu %d/%d", unit.hbUp, unit.hbMade, unit.hbSent, unit.cafeMtu, unit.mtu) : ""))
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
