@@ -311,7 +311,8 @@ final class Director: ObservableObject {
 
     func applySun() {
         let a = rig.sunAxes, s = sun
-        s.freq = SunPad.freq(a[0].x); s.spread = SunPad.cents(a[0].y)
+        s.freq = SunPad.freq(a[0].x); s.spread = 6; s.rate = SunPad.rate(a[0].y)
+        s.mod = rig.sunMod; s.sync = rig.sunSync
         s.fold1 = a[3].x; s.fold2 = a[3].y
         s.fold3 = a[4].x; s.feedback = a[4].y
         s.peak1 = a[7].x; s.peak2 = a[7].y
@@ -940,6 +941,22 @@ private struct MainScreen: View {
                 }
                 if rig.padSet == .pcoco && i < 2 {                                // COCO: the sampler's sound, under its pad
                     PcWave(pc: d.pcoco, k: i, axis: rig.pcTop[i]).padding(.vertical, 22)
+                }
+            }
+            .overlay(alignment: i == 0 ? .topTrailing : .bottomTrailing) {          // SUNDAY: MOD top left, SYNC bottom right
+                if rig.padSet == .sun && (i == 0 || i == 7) {
+                    let on = i == 0 ? rig.sunMod : rig.sunSync
+                    Button {
+                        if i == 0 { rig.sunMod.toggle() } else { rig.sunSync.toggle() }
+                        director.applySun()
+                    } label: {
+                        Text(i == 0 ? "MOD" : "SYNC")
+                            .font(.hud(8, .semibold)).tracking(0.5)
+                            .foregroundStyle(on ? PastelTheme.selectionText : PastelTheme.hudBlack)
+                            .frame(width: 38, height: 18)
+                            .background(IconSquare(filled: on))
+                    }
+                    .padding(6)
                 }
             }
             .id("\(rig.padSet)\(i)-\(rig.padSet == .multi ? rig.fxLocal[i / 4] : 0)")
