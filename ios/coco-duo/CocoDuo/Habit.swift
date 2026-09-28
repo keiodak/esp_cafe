@@ -95,15 +95,18 @@ enum Adpcm {
 }
 
 /// HABIT's pads, one set per side: the left half plays Cafe A's memory (L), the right half Cafe B's (R).
-/// WHERE · JUMP (how far back · how often it jumps somewhere else), PITCH · WOW, GLITCH · STARVE. The sound itself
+/// WHERE · JUMP (how far back · how often it jumps somewhere else), PITCH · WOW, GLITCH · STARVE, LOOP · DRIFT (a
+/// short loop where it plays · the loop sliding on through the memory). The sound itself
 /// comes out plain: clean, dry, at full level.
 enum HabitPad {
     static let titles = ["L WHERE · JUMP", "L PITCH · WOW", "R PITCH · WOW", "R WHERE · JUMP",
-                         "L GLITCH · STARVE", "—", "—", "R GLITCH · STARVE"]
+                         "L GLITCH · STARVE", "L LOOP · DRIFT", "R LOOP · DRIFT", "R GLITCH · STARVE"]
     static let starts: [(Double, Double)] = [(0.0, 0.0), (0.5, 0.0), (0.5, 0.0), (0.0, 0.0),
                                              (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
-    /// each side's pads: WHERE, PITCH, GLITCH
-    static let pads = [[0, 1, 4], [3, 2, 7]]
+    /// each side's pads: WHERE, PITCH, GLITCH, LOOP
+    static let pads = [[0, 1, 4, 5], [3, 2, 7, 6]]
+    /// LOOP: off at the left, then 50 ms … 4 s
+    static func loop(_ x: Double) -> Double { x < 0.03 ? 0 : 0.05 * pow(80, (x - 0.03) / 0.97) }
     /// PITCH: -12 … +12 semitones, a catch at 0
     static func semis(_ x: Double) -> Double { abs(x - 0.5) < 0.03 ? 0 : ((x - 0.5) * 24).rounded() }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
@@ -111,6 +114,7 @@ enum HabitPad {
         case 0, 3: return String(format: "%.0f s LATER · JUMP %d%%", HabitEngine.shownSeconds * (1 - x * 0.95), Int(y * 100))
         case 1, 2: let st = Int(semis(x)); return "\(st > 0 ? "+" : "")\(st) st · WOW \(Int(y * 100))%"
         case 4, 7: return "GLITCH \(Int(x * 100))% · STARVE \(Int(y * 100))%"
+        case 5, 6: let l = loop(x); return (l == 0 ? "LOOP OFF" : String(format: "%.2f s", l)) + " · DRIFT \(Int(y * 100))%"
         default: return ""
         }
     }
@@ -317,6 +321,7 @@ final class HabitEngine {
     /// now and then; PITCH shifts it without moving it (two overlapping heads); then GLITCH · STARVE; full level
     private var pos: Double = -1                 // the play head (memory samples, ever)
     private var jumpOff: Double = 0, jumpNow = false
+    private var loopStart: Double = -1
     private var fadeIn: Double = 1
     private var pd: Double = 0, wow: Double = 0
     private func next() -> Double {
@@ -324,7 +329,7 @@ final class HabitEngine {
         guard have > Int(rate * 0.2) else { return 0 }
         let r = rate
         let side = HabitPad.pads[unit.slot == 1 ? 1 : 0]
-        let wh = axes[side[0]], pt = axes[side[1]], gl = axes[side[2]]
+        let wh = axes[side[0]], pt = axes[side[1]], gl = axes[side[2]], lp = axes[side[3]]
         let lo = Double(mw - have + 2), hi = Double(mw - 2)
         let delay = seconds * r * (1 - wh.x * 0.95)
         if !hold && Double(mw) < delay { return 0 }                                           // (not yet: still taking)
@@ -337,8 +342,16 @@ final class HabitEngine {
         if pull, let o = other { back = max(r * 0.05, o.age * r) }                                // SKIP: the other's
         back = min(Double(have) - r * 0.1, back)
         let target = Double(mw) - back
-        if pos < 0 || jump || jumpNow || pos < lo { pos = max(lo, target); fadeIn = 0; jump = false; jumpNow = false }
-        if flip {                                                                                // FLIP: backwards, freely
+        if pos < 0 || jump || jumpNow || pos < lo { pos = max(lo, target); fadeIn = 0; jump = false; jumpNow = false; loopStart = -1 }
+        let L = HabitPad.loop(lp.x) * r
+        if L > 0 {                                                                               // LOOP: round a short piece
+            if loopStart < 0 { loopStart = max(lo, pos - L) }
+            loopStart += lp.y * 0.5                                                              // DRIFT: the piece slides on
+            loopStart = min(max(lo, loopStart), max(lo, hi - L))
+            pos += flip ? -1 : 1
+            if pos >= loopStart + L { pos = loopStart; fadeIn = 0 }
+            if pos < loopStart { pos = loopStart + L - 1; fadeIn = 0 }
+        } else if flip {                                                                         // FLIP: backwards, freely
             pos -= 1
             if pos < lo { pos = hi - 1 }
         } else if hold {                                                                         // frozen: round and round
@@ -349,6 +362,7 @@ final class HabitEngine {
             pos += 1 + max(-0.03, min(0.03, (target - pos) / (r * 2)))                           // (kept on its place)
             pos = min(hi, max(lo, pos))
         }
+        if L <= 0 { loopStart = -1 }
         age = (Double(mw) - pos) / r
         // PITCH (+ WOW): two heads behind the play head, sliding, crossfaded — the place stays, the pitch moves
         wow += 2 * .pi * 0.6 / r; if wow > 2 * .pi { wow -= 2 * .pi }
