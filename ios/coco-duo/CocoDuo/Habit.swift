@@ -383,8 +383,9 @@ final class HabitEngine {
         }
         if fadeIn < 1 { fadeIn = min(1, fadeIn + 1 / (r * 0.006)); out *= fadeIn }            // (no click on a jump)
         out = effects(out, r, glitch: gl.x, starve: gl.y)
-        // straight: one fixed gain (no riding of the level, no tone lift — what was recorded, as it was)
-        out *= 2
+        // straight: one fixed gain (no riding of the level, no tone lift — what was recorded, as it was; the Cafe now
+        // sends it ×4 hotter, so the link's noise sits further under it)
+        out *= 1
         return max(-1, min(1, out))
     }
 

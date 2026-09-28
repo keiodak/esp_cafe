@@ -2317,7 +2317,10 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   // up: the input, averaged over RATE samples, into packets for the phone
   acc += in;
   if (++accn >= hb_div) {
-    int32_t x = (acc << 4) / accn;                           // 12 -> 16 bits
+    int32_t x = (acc << 6) / accn;                           // 12 -> 16 bits, ×4 hotter: the 4-bit link's noise
+    if (x > 24000) x = 24000 + ((x - 24000) >> 3);            //   sits that much further under the sound (a soft top)
+    if (x < -24000) x = -24000 + ((x + 24000) >> 3);
+    if (x > 32767) x = 32767; if (x < -32767) x = -32767;
     acc = 0; accn = 0;
     uint8_t *pk = hb_q[hb_qw & (HB_Q - 1)];
     if (pkn == 0) {
@@ -2737,14 +2740,16 @@ void IRAM_ATTR harmony() {
   if (!hold) {
     int32_t base = rb * HD_STRIDE;
     int32_t old = hd_keep ? dread(base + t) - 2048 : 0;
-    int32_t w = in + ((((v[0] + v[1]) >> 1) * hd_fb) >> 8) + ((old * hd_keep) >> 8);
+    // (recorded ×3 hotter — the tape's and the voices' own noise stays that much further under the sound; the voices
+    //  come out at a half, so turning them up no longer turns up hiss)
+    int32_t w = in * 3 + ((((v[0] + v[1]) >> 1) * hd_fb) >> 8) + ((old * hd_keep) >> 8);
     dwrite(base + t, soft_clip(w) + 2048);
   }
   if (++t >= S) t = 0;
 
   int32_t dry = (in * hd_dry) >> 8;
-  int32_t l = soft_clip(dry + ((v[0] * hd_lvl) >> 8));        // main = VOICE 1, ASH = VOICE 2 (not both on both)
-  int32_t r = soft_clip(dry + ((v[1] * hd_lvl) >> 8));        // (a soft ceiling: louder voices don't crack)
+  int32_t l = soft_clip(dry + ((v[0] * hd_lvl) >> 9));        // main = VOICE 1, ASH = VOICE 2 (not both on both)
+  int32_t r = soft_clip(dry + ((v[1] * hd_lvl) >> 9));        // (a soft ceiling: louder voices don't crack)
   int32_t o = l + 2048;
   if (o > 4095) o = 4095;
   if (o < 0) o = 0;
@@ -4139,10 +4144,13 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
   int32_t x = (in * zg_in) >> 8;
   int32_t fb = hold ? 256 : zg_mix;
   int32_t sum = x - ((wet * fb) >> 8);
+  // (the chip is driven ×2 hotter and its return taken back ×½: its grit stays under the sound, the loop gain is the
+  //  same)
   if (hold) sum = -((wet * fb) >> 8);
   if (sum > 2047) sum = 2047; if (sum < -2047) sum = -2047;
   // into the chip: four poles at ~5 kHz
-  i1 += ((sum - i1) * kf) >> 12; i2 += ((i1 - i2) * kf) >> 12;
+  int32_t hot = sum * 2;
+  i1 += ((hot - i1) * kf) >> 12; i2 += ((i1 - i2) * kf) >> 12;
   i3 += ((i2 - i3) * kf) >> 12; i4 += ((i3 - i4) * kf) >> 12;
   // the chip: 44 kbit of RAM, so 44000 / T bits for every sample of delay — a 1-bit adaptive delta modulator
   acc += (44000 << 8) / T;
@@ -4161,7 +4169,7 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
   // out of the chip: four poles at ~5 kHz, the diodes on U2D's node
   o1 += ((rd - o1) * kf) >> 12; o2 += ((o1 - o2) * kf) >> 12;
   o3 += ((o2 - o3) * kf) >> 12; o4 += ((zg_diodes(o3) - o4) * kf) >> 12;
-  wet = o4;
+  wet = o4 >> 1;
   *rout = wet;                                               // ASH: the return (POST)
   return -sum;                                               // main: the summer (PRE), the right way up
 }
