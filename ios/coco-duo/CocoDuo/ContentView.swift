@@ -72,6 +72,7 @@ final class Director: ObservableObject {
             }
             if !onPc { self.pcoco.stop() }
             if !(onArp && self.rig.arpMode == 2) && self.sun.playing { self.sun.stop() }
+            if onArp && self.rig.arpMode == 2 { self.sendSunCV(on) }
             self.sun.keep(); if onPc { self.pcoco.keep() }                   // (an engine the output change stopped: again)
             if !onPc && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
@@ -319,6 +320,25 @@ final class Director: ObservableObject {
         s.shRung = rig.sunSync
         s.level = rig.sunLevel
     }
+    /// BLIPPOO → the Cafes: the chosen signal as a CV (~30x a second, only when it changes): S&H to both, the runglers
+    /// (1 to Cafe A, 2 to Cafe B), or the squares' XOR
+    private var sunCVSent = [-1, -1]
+    func sendSunCV(_ on: [CafeUnit]) {
+        for u in on {
+            let s = u.slot == 1 ? 1 : 0
+            let v: Double
+            switch rig.sunSend {
+            case 1: v = sun.cvSH
+            case 2: v = s == 0 ? sun.cvRung1 : sun.cvRung2
+            case 3: v = sun.cvXor
+            default: v = 0
+            }
+            let n = Int(((max(-1, min(1, v)) * 0.5 + 0.5) * 1000).rounded())
+            if n != sunCVSent[s] { sunCVSent[s] = n; u.send("F 89 4 \(n)") }
+        }
+    }
+    func cycleSunSend() { rig.sunSend = (rig.sunSend + 1) % Rig.sunSendNames.count }
+
     /// the card's RING / DECAY / SPACE / SIZE -> the Cafes on BLIPPOO
     func sunCafeCard() {
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp && rig.arpMode == 2 {
@@ -329,10 +349,11 @@ final class Director: ObservableObject {
     func sunCafe(slot: Int, only pad: Int? = nil) -> [String] {
         let mine = rig.sunAxes[slot == 1 ? 7 : 6]                          // (pads 7 / 8: each Cafe's TIME · MIX)
         func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
-        let zg = ["F 89 0 \(v(mine.x))", "F 89 1 \(v(mine.y))"], mod = "F 89 2 \(v(rig.sunZgMod))"
-        guard let pad else { return zg + [mod] }
+        let zg = ["F 89 0 \(v(mine.x))", "F 89 1 \(v(mine.y))"]
+        let card = ["F 89 2 \(v(rig.sunZgMod))", "F 89 3 \(v(rig.sunZgIn))"]
+        guard let pad else { return zg + card }
         switch pad {
-        case -1: return [mod]                                    // (the card)
+        case -1: return card                                     // (the card)
         case 6: return slot == 0 ? zg : []
         case 7: return slot == 1 ? zg : []
         default: return []
@@ -1309,7 +1330,7 @@ private struct HudBar: View {
         case .sun:
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
-            case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
+            case 1: textKey(Rig.sunSendNames[rig.sunSend], on: rig.sunSend > 0) { d.cycleSunSend() }       // what the Cafes are sent
             case 2: textKey(rig.sunSync ? "S&H RUNG" : "S&H TRI B", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() }   // what the S&H takes
             default: key("arrow.triangle.2.circlepath") { d.sun.restart() }                                  // SYNC: the core from the start
             }

@@ -32,6 +32,11 @@ final class PhoneSun: ObservableObject {
     private let dist = 0.15, pingSec = 0.00025
     var level = 0.7
     @Published private(set) var playing = false
+    /// what the Cafes can be sent (read ~30x a second): the S&H, the two runglers (−1…1), the squares' XOR (±1)
+    var cvSH: Double { sh }
+    var cvRung1: Double { d1 * 2 - 1 }
+    var cvRung2: Double { d2 * 2 - 1 }
+    private(set) var cvXor = -1.0
 
     private let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?
@@ -121,6 +126,7 @@ final class PhoneSun: ObservableObject {
             if nB && !sqB { r1 = ((r1 << 1) | (nA ? 1 : 0)) & 0xF; d1 = Double((r1 >> 1) & 0b111) / 7 }   // B clocks, A in
             if nA && !sqA { r2 = ((r2 << 1) | (nB ? 1 : 0)) & 0xF; d2 = Double((r2 >> 1) & 0b111) / 7 }   // A clocks, B in
             sqA = nA; sqB = nB
+            cvXor = nA != nB ? 1 : -1                        // (for the Cafes: the two squares XOR'd)
             // the triangles meet: a pulse (it pings the resonator) and the S&H takes its value
             let dlt = triA - triB
             if (dlt >= 0) != (prevD >= 0) {

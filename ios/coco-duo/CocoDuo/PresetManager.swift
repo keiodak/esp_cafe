@@ -445,9 +445,10 @@ private struct SunControls: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: sun.playing ? "STOP" : "PLAY", filled: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
-                ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+                ChipButton(title: Rig.sunSendNames[rig.sunSend], filled: rig.sunSend > 0) { d.cycleSunSend() }
             }
             PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
+            PanelRow(label: "INPUT", value: Binding(get: { rig.sunZgIn }, set: { rig.sunZgIn = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: INPUT
             PanelRow(label: "MOD", value: Binding(get: { rig.sunZgMod }, set: { rig.sunZgMod = $0; d.sunCafeCard() }))   // the Cafes' ZEITGEIST: EARTH → time
         }
     }

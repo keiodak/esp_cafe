@@ -4083,39 +4083,77 @@ void IRAM_ATTR multi() {
 /////////////////////////////////////////////////////////END//////////////////////////////////////////////////////
 
 // ==========================================
-// ZEITGEIST (k.odk, after Rob Hordijk's Zeitgeist — "heavy abuse of a PT2399 karaoke delay chip"): APP+CAFE's BLIPPOO
-// layer puts the Cafe on it. MIX turns up the wet and the feedback together (past unity: it sings by itself); TIME
-// stretches the chip's clock, so the longer the delay the fewer and coarser its samples and the darker its loop;
-// MOD: EARTH onto the time (the Zeitgeist's CV / LDR). Phone: "F 89 <0 time | 1 mix | 2 mod> <0..1000>". Tape: TD_L.
-volatile int32_t zg_T = 6000 << 8, zg_mix = 128, zg_mod = 0;
+// ZEITGEIST (k.odk) — Rob Hordijk's Zeitgeist, from its schematic (R.H. ZEITGEIST V0.1, F. Pietruszewski / cctv.fm):
+//   INPUT (P4) -> an inverting summer (U2B, R9 33k / R10 33k) that also takes the delay's return through R21 30k via
+//   the MIX pot (P3): one knob sets the feedback AND how much of the return is in the output (the summer's output is
+//   the out, "PRE"); at the top 33k/30k ≈ 1.1: past unity, it sings by itself -> a Sallen-Key low-pass (U2C, ~5 kHz)
+//   -> the PT2399 (its own ~5 kHz filter in, a 1-bit adaptive delta modulator through 44 kbit of RAM, ~5 kHz filter
+//   out) -> a second ~5 kHz low-pass (U2D) whose node two anti-parallel diodes hold (the loop's soft limit) -> R21 back.
+//   The loop inverts once (U2B), so each repeat flips. TIME drives the chip's clock through a transistor: the RAM is
+//   fixed, so a longer delay means fewer bits a second — the grit, the slurring and the noise of the "abused" PT2399;
+//   moving TIME bends the pitch of what is inside. MOD (P2): a CV onto the time (here EARTH).
+// Phone: "F 89 <0 time | 1 mix | 2 mod | 3 input | 4 CV (500 = none)> <0..1000>"; the CV joins EARTH at MOD. Main out = the summer (PRE), ASH = the return (POST).
+// Tape: TD_L (32768 samples).
+volatile int32_t zg_T = 6000 << 8, zg_mix = 128, zg_mod = 0, zg_in = 256;
+volatile int32_t zg_ext = 0;   // the phone's CV (BLIPPOO's S&H / rungler / comparator), -128..127, added to EARTH
+static inline float clock_hz();   // (in the sketch)
 void zg_set(int id, long v) {
   if (v < 0) v = 0; if (v > 1000) v = 1000;
   float q = v / 1000.0f;
-  if (id == 0) { float t = 64.0f * powf(500.0f, q); if (t > 32000) t = 32000; zg_T = (int32_t)(t * 256.0f); }
-  else if (id == 1) zg_mix = (int32_t)(q * 256.0f);
+  float hz = clock_hz();
+  if (id == 0) { float t = hz * 0.02f * powf(50.0f, q); if (t > 32000) t = 32000; zg_T = (int32_t)(t * 256.0f); }   // 20 ms .. 1 s
+  else if (id == 1) zg_mix = (int32_t)(q * 282.0f);                                // (33k / 30k at the top)
   else if (id == 2) zg_mod = (int32_t)(q * 256.0f);
+  else if (id == 3) zg_in = (int32_t)(q * 512.0f);                                 // (×2 at the top: the BOOST)
+  else if (id == 4) zg_ext = (int32_t)((v - 500) * 128 / 500);                     // the phone's CV (500 = none)
+}
+static inline int32_t IRAM_ATTR zg_diodes(int32_t v) {       // two 1N4148s across U2D's node, through 22k: soft
+  if (v > 700) v = 700 + ((v - 700) >> 3);
+  if (v < -700) v = -700 + ((v + 700) >> 3);
+  return v;
 }
 static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool hold) {
   static uint32_t w = 0;
-  static int32_t Ts = 6000 << 8, held = 0, hc = 0, lp = 0, lp2 = 0;
-  int32_t tgt = zg_T + (int32_t)(((int64_t)zg_T * pc_emod * zg_mod) >> 15);    // MOD: EARTH onto the time
-  if (tgt < (64 << 8)) tgt = 64 << 8;
+  static int32_t Ts = 6000 << 8, wet = 0;
+  static int32_t i1 = 0, i2 = 0, i3 = 0, i4 = 0;             // U2C + the chip's input filter (~5 kHz, 4 poles)
+  static int32_t o1 = 0, o2 = 0, o3 = 0, o4 = 0;             // the chip's output filter + U2D (~5 kHz, 4 poles)
+  static int32_t integ = 0, step = 16, acc = 0, lastb = 0, sameb = 0;   // the delta modulator
+  const int32_t kf = 2400;                                   // (Q12: ~5 kHz one-poles at the Cafe's rate)
+  // TIME (+ MOD: EARTH), gliding like the chip's clock
+  int32_t tgt = zg_T + (int32_t)(((int64_t)zg_T * (pc_emod + zg_ext) * zg_mod) >> 15);
+  if (tgt < (256 << 8)) tgt = 256 << 8;
   if (tgt > (32000 << 8)) tgt = 32000 << 8;
-  Ts += (tgt - Ts) >> 11;                                                         // (the clock glides: pitch bends)
+  Ts += (tgt - Ts) >> 11;
   int32_t T = Ts >> 8;
-  // the chip's clock: a longer delay takes fewer, coarser samples
-  int n = 1 + T / 6000, sh = T / 8000;
+  // the summer: the input, and the return through MIX (the loop inverts: each repeat flips)
+  int32_t x = (in * zg_in) >> 8;
+  int32_t fb = hold ? 256 : zg_mix;
+  int32_t sum = x - ((wet * fb) >> 8);
+  if (hold) sum = -((wet * fb) >> 8);
+  if (sum > 2047) sum = 2047; if (sum < -2047) sum = -2047;
+  // into the chip: four poles at ~5 kHz
+  i1 += ((sum - i1) * kf) >> 12; i2 += ((i1 - i2) * kf) >> 12;
+  i3 += ((i2 - i3) * kf) >> 12; i4 += ((i3 - i4) * kf) >> 12;
+  // the chip: 44 kbit of RAM, so 44000 / T bits for every sample of delay — a 1-bit adaptive delta modulator
+  acc += (44000 << 8) / T;
+  while (acc >= 256) {
+    acc -= 256;
+    int32_t b = i4 > integ ? 1 : -1;
+    integ += b * step;
+    if (b == lastb) { if (++sameb >= 2) { step += step >> 1; if (step > 600) step = 600; } }
+    else { sameb = 0; step -= step >> 2; if (step < 6) step = 6; }
+    lastb = b;
+    integ -= integ >> 9;                                     // (its leak)
+  }
+  dwrite(TD_L + (w & 0x7FFF), soft_clip(integ) + 2048);
   int32_t rd = (int32_t)dread(TD_L + ((w - (uint32_t)T) & 0x7FFF)) - 2048;
-  if (++hc >= n) { hc = 0; held = (rd >> sh) << sh; }
-  int32_t k = 3000 - T / 12; if (k < 500) k = 500;                               // its loop filter, darker when longer
-  lp += ((held - lp) * k) >> 12;
-  lp2 += ((lp - lp2) * k) >> 12;
-  int32_t fb = hold ? 256 : (zg_mix * 300) >> 8;                                  // MIX: the feedback with the wet
-  int32_t wr = hold ? lp2 : in + ((lp2 * fb) >> 8);
-  dwrite(TD_L + (w & 0x7FFF), soft_clip(wr) + 2048);
   w++;
-  *rout = lp2;
-  return ((in * (256 - (zg_mix >> 1))) >> 8) + ((lp2 * zg_mix) >> 8);
+  // out of the chip: four poles at ~5 kHz, the diodes on U2D's node
+  o1 += ((rd - o1) * kf) >> 12; o2 += ((o1 - o2) * kf) >> 12;
+  o3 += ((o2 - o3) * kf) >> 12; o4 += ((zg_diodes(o3) - o4) * kf) >> 12;
+  wet = o4;
+  *rout = wet;                                               // ASH: the return (POST)
+  return -sum;                                               // main: the summer (PRE), the right way up
 }
 
 // ARP_DELAY --- NEW PRESET 11 (k.odk): MULTI's stereo tap delay on its own, for the phone's arpeggiator

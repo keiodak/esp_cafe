@@ -464,6 +464,10 @@ final class Rig: ObservableObject {
     @Published var sunSize: Double = 0.6
     /// the ZEITGEIST's MOD: EARTH onto its time
     @Published var sunZgMod: Double = 0.3
+    @Published var sunZgIn: Double = 0.5
+    /// what goes to the Cafes as a CV (onto the ZEITGEIST's time, with EARTH, at MOD): OFF · S&H · RUNG · XOR
+    @Published var sunSend = 0
+    static let sunSendNames = ["→ OFF", "→ S&H", "→ RUNG", "→ XOR"]
     /// SUNDAY's MOD (S&H -> OSC, SR -> TWIN PEAK: the key in the top left pad) and SYNC (feedback: bottom right)
     @Published var sunMod = true
     @Published var sunSync = false
