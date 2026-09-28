@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "ARP_DELAY",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -110,7 +110,36 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, pcoco, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, pcoco, sun, knob }
+
+/// APP+CAFE's SUNDAY (PhoneSun.swift): the four outer pads play the phone's small Sunnandæg (and reach the Cafes: the
+/// string follows FREQ, PEAK 2 brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
+enum SunPad {
+    static let titles = ["FREQ · SPREAD", "L RING · DECAY", "R RING · DECAY", "FOLD 1 · FOLD 2",
+                         "FOLD 3 · FEEDBACK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK 1 · PEAK 2"]
+    static let starts: [(Double, Double)] = [(0.35, 0.1), (0.5, 0.5), (0.5, 0.5), (0.3, 0.2),
+                                             (0.0, 0.0), (0.4, 0.6), (0.4, 0.6), (0.3, 0.7)]
+    static func freq(_ x: Double) -> Double { 30 * pow(50, x) }            // 30 Hz … 1.5 kHz
+    static func cents(_ y: Double) -> Double { y * 30 }
+    /// the Cafe's string: the phone's note brought into its four octaves from A1
+    static func stringPitch(_ x: Double) -> Int {
+        var semi = 12 * log2(freq(x) / 55)
+        while semi < 0 { semi += 12 }
+        while semi > 48 { semi -= 12 }
+        return Int((semi / 48 * 1000).rounded())
+    }
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        switch i {
+        case 0: return String(format: "%.0f Hz · %.0f ct", freq(x), cents(y))
+        case 1, 2: return "RING \(Int(x * 100))% · DECAY \(Int(y * 100))%"
+        case 3: return "\(Int(x * 100))% · \(Int(y * 100))%"
+        case 4: return "\(Int(x * 100))% · FB \(Int(y * 100))%"
+        case 5, 6: return "SPACE \(Int(x * 100))% · SIZE \(Int(y * 100))%"
+        case 7: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
+        default: return ""
+        }
+    }
+}
 
 /// PHONE_COCO's COCO (PhoneCoco.swift): top row = the phone's two samplers, bottom row = the Cafe's COCO (as SPEECH)
 enum PcPad {
@@ -426,6 +455,9 @@ final class Rig: ObservableObject {
     var pcSlot = 0
     /// ARP_DELAY's layer: 0 = ARP (arpeggio -> tap delay) · 1 = SPEECH (voice -> COCO)
     @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
+    /// APP+CAFE's SUNDAY
+    let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
+    @Published var sunLevel: Double = 0.7
     @Published var speechText: String = Rig.d.string(forKey: "rig.speechText") ?? "" { didSet { Self.d.set(speechText, forKey: "rig.speechText") } }
     @Published var speechVoice: Int = (Rig.d.object(forKey: "rig.speechVoice") as? Int) ?? SpeechRenderer.homeVoice { didSet { Self.d.set(speechVoice, forKey: "rig.speechVoice") } }
     @Published var speechRate = 0.35
@@ -455,7 +487,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         if ctxPreset == Preset.multi { return .multi }
-        if ctxPreset == Preset.arp { return arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO
+        if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
     }

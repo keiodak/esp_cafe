@@ -399,10 +399,11 @@ private struct ArpCard: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
-        PanelCard(title: "ARP_DELAY", note: "phone audio -> Cafe input") {
+        PanelCard(title: "APP+CAFE", note: "phone audio -> Cafe input") {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
+                ChipButton(title: "SUNDAY", filled: rig.arpMode == 2) { d.setArpMode(2) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -426,7 +427,27 @@ private struct ArpCard: View {
                 PcControls(d: d, rig: rig, pc: d.pcoco)
                     .opacity(rig.arpMode == 1 ? 1 : 0)
                     .allowsHitTesting(rig.arpMode == 1)
+                SunControls(d: d, rig: rig, sun: d.sun)
+                    .opacity(rig.arpMode == 2 ? 1 : 0)
+                    .allowsHitTesting(rig.arpMode == 2)
             }
+        }
+    }
+}
+
+/// APP+CAFE · SUNDAY: the phone's small Sunnandæg (play, level); the Cafes' HOLD
+private struct SunControls: View {
+    let d: Director
+    @ObservedObject var rig: Rig
+    @ObservedObject var sun: PhoneSun
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: sun.playing ? "STOP" : "PLAY", filled: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
+                ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
+            }
+            PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
         }
     }
 }

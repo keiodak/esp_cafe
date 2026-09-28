@@ -4094,7 +4094,7 @@ void IRAM_ATTR multi() {
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
-  if (ad_mode) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
+  if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;
@@ -4138,7 +4138,7 @@ void IRAM_ATTR arpdelay() {
   bool hold = FLIPPERAT || audio_frozen_state || fx_hold_app;
   int32_t in = gyo - 2048, l, r;
   // which of the two, with a short fade when it changes
-  int want = ad_mode ? 1 : 0;
+  int want = 0;                                       // (COCO returned above)
   if (cur < 0) { cur = want; if (cur) co_reset = true; else fx_rs[1] = true; }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -4154,10 +4154,21 @@ void IRAM_ATTR arpdelay() {
     r = l;
     fx_rs[1] = true;                                  // the delay starts clean when ARP comes back
   } else {
-    bool rs = fx_rs[1];
-    fx_rs[1] = false;
-    td_clean = true;  // ARP_DELAY: the light, clean digital delay
-    l = td_tick(in, &r, hold, rs);
+    if (ad_mode == 2) {
+      // SUNDAY: the phone's folded sine into a string tuned to its note (KARPLUS, "F 7 ..") and a reverb ("F 6 ..")
+      bool r7 = fx_rs[7], r6 = fx_rs[6];
+      fx_rs[7] = fx_rs[6] = false;
+      fx_rs[1] = true;
+      int32_t kr;
+      int32_t kl = sd_tick(in, &kr, hold, r7);
+      l = rb_tick((kl + kr) >> 1, &r, hold, r6);
+    } else {
+      bool rs = fx_rs[1];
+      fx_rs[1] = false;
+      fx_rs[7] = fx_rs[6] = true;
+      td_clean = true;  // ARP_DELAY: the light, clean digital delay
+      l = td_tick(in, &r, hold, rs);
+    }
   }
   l = (l * mg) >> 12;
   r = (r * mg) >> 12;

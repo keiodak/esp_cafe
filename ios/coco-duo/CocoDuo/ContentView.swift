@@ -36,6 +36,8 @@ final class Director: ObservableObject {
     let arp = ArpEngine()
     /// ARP_DELAY's COCO: the phone's two samplers
     let pcoco = PhoneCoco()
+    /// APP+CAFE's SUNDAY: the phone's small Sunnandæg
+    let sun = PhoneSun()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -69,6 +71,7 @@ final class Director: ObservableObject {
                 }
             }
             if !onPc { self.pcoco.stop() }
+            if !(onArp && self.rig.arpMode == 2) && self.sun.playing { self.sun.stop() }
             if !onPc && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
         for u in units {
@@ -110,6 +113,7 @@ final class Director: ObservableObject {
         case .arp: return rig.arpAxes
         case .speech: return rig.spAxes
         case .pcoco: return rig.pcAxes
+        case .sun: return rig.sunAxes
         case .knob: return []
         }
     }
@@ -149,8 +153,11 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(rig.arpMode == 1 ? 1 : 0)")               // ARP: the tap delay · PHONE_COCO: the Cafe is COCO
-            if rig.arpMode == 1 {
+            u.send("F 97 \(rig.arpMode)")                            // ARP: the tap delay · PHONE_COCO: COCO · SUNDAY: string + reverb
+            if rig.arpMode == 2 {
+                sunCafe(slot: s).forEach(u.send)
+                applySun(); sun.play(true)
+            } else if rig.arpMode == 1 {
                 rig.coAll(slot: s).forEach(u.send)
                 if rig.pcMode == 0 { applyPc(); pcoco.start() } else { arp.speechOn = true; arp.startAudio() }
             } else { rig.arpDelayAll().forEach(u.send) }
@@ -195,8 +202,9 @@ final class Director: ObservableObject {
     func cycleMode() {
         if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
         else if rig.ctxPreset == Preset.arp {                                        // ARP -> COCO -> SPEECH -> ARP
-            if rig.arpMode == 0 { rig.pcMode = 0; setArpMode(1) }
-            else if rig.pcMode == 0 { setPcMode(1) }
+            if rig.arpMode == 0 { rig.pcMode = 0; setArpMode(1) }                      //   -> SUNDAY -> ARP
+            else if rig.arpMode == 1 && rig.pcMode == 0 { setPcMode(1) }
+            else if rig.arpMode == 1 { setArpMode(2) }
             else { setArpMode(0) }
         }
     }
@@ -281,6 +289,13 @@ final class Director: ObservableObject {
         case .speech:
             if i < 4 { applySpeech() }
             else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
+        case .sun:
+            if [0, 3, 4, 7].contains(i) { applySun() }                               // (the outer: the phone)
+            for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
+                if (i == 1 || i == 5) && u.slot != 0 { continue }                    // (the inner: L = A, R = B)
+                if (i == 2 || i == 6) && u.slot != 1 { continue }
+                sunCafe(slot: u.slot, only: i).forEach(u.send)
+            }
         case .pcoco:
             if i < 4 { applyPc() }
             else { for u in ctxUnits() { rig.coCommands(pad: SpPad.coPad[i - 4], slot: u.slot).forEach(u.send) } }
@@ -289,6 +304,36 @@ final class Director: ObservableObject {
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .knob:
             break
+        }
+    }
+
+    // MARK: SUNDAY (APP+CAFE): the outer pads play the phone, the inner ones move the Cafes (L = A, R = B)
+
+    func applySun() {
+        let a = rig.sunAxes, s = sun
+        s.freq = SunPad.freq(a[0].x); s.spread = SunPad.cents(a[0].y)
+        s.fold1 = a[3].x; s.fold2 = a[3].y
+        s.fold3 = a[4].x; s.feedback = a[4].y
+        s.peak1 = a[7].x; s.peak2 = a[7].y
+        s.level = rig.sunLevel
+    }
+    /// what a Cafe on SUNDAY is told: its string (KARPLUS, "F 7") and reverb ("F 6"); only = one pad's part
+    func sunCafe(slot: Int, only pad: Int? = nil) -> [String] {
+        let a = rig.sunAxes
+        let ring = a[slot == 1 ? 2 : 1], space = a[slot == 1 ? 6 : 5]
+        func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
+        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].x))", damp = "F 7 2 \(v(0.3 + a[7].y * 0.7))"
+        let rg = ["F 7 6 \(v(ring.x))", "F 7 1 \(v(ring.y))"], sp = ["F 6 6 \(v(space.x))", "F 6 0 \(v(space.y))"]
+        guard let pad else {
+            return [pitch, damp] + rg + sp + ["F 7 3 0", "F 7 4 100", "F 7 5 300", "F 7 7 1000",
+                                              "F 6 1 400", "F 6 2 500", "F 6 3 500", "F 6 4 0", "F 6 5 200", "F 6 7 1000"]
+        }
+        switch pad {
+        case 0: return [pitch]
+        case 7: return [damp]
+        case 1, 2: return rg
+        case 5, 6: return sp
+        default: return []
         }
     }
 
@@ -330,18 +375,21 @@ final class Director: ObservableObject {
     // MARK: ARP_DELAY: ARP or PHONE_COCO — PHONE_COCO = COCO (the phone's samplers) or SPEECH, the Cafe on COCO in both
 
     func setArpMode(_ m: Int) {
-        rig.arpMode = m == 1 ? 1 : 0
-        if rig.arpMode == 1 {
-            if arp.playing { arp.stop(); rig.arpPlaying = false }
-        } else {
+        rig.arpMode = min(max(m, 0), 2)
+        if rig.arpMode != 0 { if arp.playing { arp.stop(); rig.arpPlaying = false } }
+        if rig.arpMode != 1 {
             pcoco.stop()
             arp.speech.playing = false; rig.speechPlaying = false
             arp.speechOn = false
         }
+        if rig.arpMode != 2 { sun.stop() }
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.arp {
             u.send("F 97 \(rig.arpMode)")
-            if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) } else { rig.arpDelayAll().forEach(u.send) }
+            if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) }
+            else if rig.arpMode == 2 { sunCafe(slot: u.slot).forEach(u.send) }
+            else { rig.arpDelayAll().forEach(u.send) }
         }
+        if rig.arpMode == 2 { applySun(); sun.play(true) }
         if rig.arpMode == 1 { setPcMode(rig.pcMode) } else { refresh() }
     }
     /// the Cafe's COCO recording on / off — the same as a short press of its BUTTON
@@ -722,14 +770,14 @@ private struct MainScreen: View {
 
     var body: some View {
         VStack(spacing: 7) {
-            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera, pc: d.pcoco,
+            HudBar(d: d, unit: hub.units[0], rig: rig, grain: grain, camera: camera, pc: d.pcoco, sun: d.sun,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
             pads
                 .frame(maxWidth: .infinity)
                 .zIndex(1)
-            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera, pc: d.pcoco,
+            HudBar(d: d, unit: hub.units[1], rig: rig, grain: grain, camera: camera, pc: d.pcoco, sun: d.sun,
                    showCafes: $showCafes, showWave: $showWave, showPresets: $showPresets)
                 .frame(maxWidth: .infinity)                  // (never wider than the screen: the pads keep off the camera)
                 .frame(height: barHeight)
@@ -814,6 +862,7 @@ private struct MainScreen: View {
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
+        case .sun: return (rig.sunAxes[i], SunPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -833,6 +882,8 @@ private struct MainScreen: View {
         case .pcoco:
             if i >= 4 { return nil }
             return { x, y in PcPad.caption(i, x, y) }
+        case .sun:
+            return { x, y in SunPad.caption(i, x, y) }
         case .habit:
             return { x, y in HabitPad.caption(i, x, y) }
         case .byte:
@@ -1070,6 +1121,7 @@ private struct HudBar: View {
     @ObservedObject var grain: GrainMode
     @ObservedObject var camera: CameraRig
     @ObservedObject var pc: PhoneCoco
+    @ObservedObject var sun: PhoneSun
     @Binding var showCafes: Bool
     @Binding var showWave: Bool
     @Binding var showPresets: Bool
@@ -1085,7 +1137,7 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
+                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
@@ -1252,6 +1304,12 @@ private struct HudBar: View {
             case 2: key("hand.tap") { d.tapTempo() }
             default: key("arrow.triangle.2.circlepath") { d.arpSync() }
             }
+        case .sun:
+            switch n {
+            case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
+            case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
+            default: blank
+            }
         case .pcoco:
             switch n {
             case 0: textKey(pc.loading[0] ? "LOAD…" : "FILE A", on: rig.pcPicking == 0 || pc.loading[0]) { rig.pcSlot = 0; rig.pcPicking = 0 }
@@ -1291,7 +1349,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "SUNDAY", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]
