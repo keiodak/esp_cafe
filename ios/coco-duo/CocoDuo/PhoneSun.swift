@@ -1,7 +1,7 @@
 // PhoneSun.swift — coco duo (k.odk)
 // APP+CAFE's SUNDAY: a small Sunnandæg on the phone, made the way Sunnandæg makes it —
 //   sine -> FOLD 1 (soft clip) -> FOLD 2 (triangle fold) -> FOLD 3 (rectifier); the folds' output back into the sine
-//   (FEEDBACK: as FM, or with SYNC as a pull of the phase to 0 where it rises past 1 − FEEDBACK);
+//   (FEEDBACK: as FM; with SYNC the twin peak's output restarts the sine where it rises past 0.9 × (1 − FEEDBACK));
 //   S&H: FOLD 2 rising through 0 is the gate (÷ DIV), FOLD 1 the data -> the pitch (±1 oct);
 //   SHIFT REGISTER: FOLD 3 the gate (÷ DIV), FOLD 1 the data, 8 steps -> both twin peak positions;
 //   TWIN PEAK: two resonant band-passes, peak 1 riding FOLD 2, peak 2 riding FOLD 3 around PEAK 1 / PEAK 2 — that is
@@ -31,7 +31,7 @@ final class PhoneSun: ObservableObject {
 
     /// one side's circuit
     private struct Side {
-        var phase = 0.0, prev = 0.0, syncPrev = 0.0
+        var phase = 0.0, prev = 0.0, syncPrev = 0.0, tw = 0.0
         var s1 = 0.0, s2 = 0.0, s3 = 0.0
         var shGate = 0.0, shCount = 0, sh = 0.0, shFactor = 1.0
         var srGate = 0.0, srCount = 0, reg = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), srOut = 0.0
@@ -107,9 +107,12 @@ final class PhoneSun: ObservableObject {
         let f = fs * pow(2, (c == 0 ? -spread : spread) / 2400)
         s.phase += f / sr * (md ? s.shFactor : 1)
         s.phase -= floor(s.phase)
-        let th = 1 - fb
-        if s.syncPrev < th && prev >= th { s.phase *= 1 - wSync }
-        s.syncPrev = prev
+        // SYNC: the twin peak's ringing (not the folds', which run at the sine's own speed: resetting on those changed
+        // nothing) restarts the sine each time it rises past a threshold that FEEDBACK lowers — a hard sync at the
+        // peaks' pitch
+        let th = 0.9 - fb * 0.9
+        if s.syncPrev < th && s.tw >= th { s.phase *= 1 - wSync }
+        s.syncPrev = s.tw
         let sine = sin(2 * .pi * (s.phase + prev * fb * 2 * wFM))
         // the three folds
         s.s1 = Self.stage1(sine, fold1)
@@ -157,8 +160,10 @@ final class PhoneSun: ObservableObject {
         var y = (p1 * at1 + p2 * at2) * 0.5
         if !y.isFinite { s.low1 = 0; s.band1 = 0; s.low2 = 0; s.band2 = 0; y = 0 }
         else if abs(y) > 2 { let e = abs(y) - 2; y = (y >= 0 ? 1 : -1) * (2 + tanh(e / 2) * 2) }
+        let o = tanh(y * 0.9)
+        s.tw = o
         side[c] = s
-        return tanh(y * 0.9)
+        return o
     }
 
     /// Sunnandæg's band-pass (Chamberlin, held below its unstable corner)
