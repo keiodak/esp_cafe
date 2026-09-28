@@ -180,8 +180,8 @@ private struct DesignCard: View {
 
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
-            // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
-            grid([2, 9, 10])
+            // the ones that sound from the phone (BLE, MULTI, ARP_DELAY, PHONE_COCO): fixed on top; the rest scroll under it
+            grid([2, 9, 10, Preset.pcoco])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)
