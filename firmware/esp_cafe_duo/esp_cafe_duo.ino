@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "3.88"
+#define FW_VERSION "3.89"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -882,6 +882,12 @@ void pc_line(char *s) {
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
 void hb_service() {
   if (pc_mode == 6 && !hb_q && !hb_off) hb_q = (uint8_t (*)[HB_PK])malloc(HB_Q * HB_PK);   // (HABIT's packets: made on first use)
+  static uint32_t mt = 0;                           // the MTU as the link has it now (the callback may not have told us)
+  if (pc_mode == 6 && ble_conn && millis() - mt > 1000) {
+    mt = millis();
+    NimBLEServer *srv = NimBLEDevice::getServer();
+    if (srv && srv->getConnectedCount()) { uint16_t m = srv->getPeerInfo(0).getMTU(); if (m > ble_mtu) ble_mtu = m; }
+  }
   if (!hb_q || !ble_conn || !ble_tx || pc_mode != 6 || hb_off || ble_mtu < HB_PK + 3) { hb_qr = hb_qw; return; }
   int sent = 0;
   while (hb_qr != hb_qw && sent < 8) {
