@@ -31,8 +31,7 @@ enum Preset {
     static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "ARP_DELAY",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
-                        "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM",
-                        "PHONE_COCO"]
+                        "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
     static let notes = [
         "coco looper · knobs + EARTH / FLIP / SKIP on the Cafe",
         "four-tap echo · organ on YELLOW · FLIP deeper · SKIP wobble",
@@ -70,13 +69,12 @@ enum Preset {
         "Apple π · drone voices",
         "Apple π · drum machine",
         "Apple π · polyrhythmic drums",
-        "the phone's two samplers or SPEECH into the Cafe's COCO · FLIP / SKIP / EARTH play both",
     ]
     /// how many the firmware has (the pool) and how many the playlist may hold
-    static let poolCount = 37
+    static let poolCount = 36
     static let maxPlaylist = 11
     /// the presets played from the phone over Bluetooth (their rows are tinted)
-    static let phonePlayed: Set<Int> = [2, 9, 10, 36]
+    static let phonePlayed: Set<Int> = [2, 9, 10]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
@@ -87,8 +85,6 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    /// PHONE_COCO (pool 36): the phone's samplers (COCO) or SPEECH, the Cafe on COCO
-    static let pcoco = 36
     static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
@@ -423,7 +419,7 @@ final class Rig: ObservableObject {
     var spAxes: [PadAxis] { spTop + SpPad.coPad.map { coAxes[$0] } }
     let pcTop: [PadAxis] = PcPad.starts.map { PadAxis($0) }
     var pcAxes: [PadAxis] { pcTop + SpPad.coPad.map { coAxes[$0] } }       // (bottom row: the Cafe's COCO, as SPEECH)
-    /// PHONE_COCO: 0 = COCO (the samplers) · 1 = SPEECH
+    /// ARP_DELAY's PHONE_COCO: 0 = COCO (the samplers) · 1 = SPEECH
     @Published var pcMode: Int = Rig.d.integer(forKey: "rig.pcMode") { didSet { Self.d.set(pcMode, forKey: "rig.pcMode") } }
     /// COCO's FILE: which sampler the file picker is for (-1 = closed)
     @Published var pcPicking = -1
@@ -459,8 +455,7 @@ final class Rig: ObservableObject {
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
         if ctxPreset == Preset.multi { return .multi }
-        if ctxPreset == Preset.arp { return .arp }
-        if ctxPreset == Preset.pcoco { return pcMode == 1 ? .speech : .pcoco }
+        if ctxPreset == Preset.arp { return arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
     }

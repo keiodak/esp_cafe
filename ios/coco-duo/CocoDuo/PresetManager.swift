@@ -78,9 +78,6 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
-                if rig.preset.contains(Preset.pcoco) {
-                    PcCard(d: d, rig: rig, pc: d.pcoco)
-                }
     }
     @State private var presetsH: CGFloat = 0
     @State private var wvPick = false            // WAVE: FILE (a picker of its own: this is a sheet)
@@ -180,8 +177,8 @@ private struct DesignCard: View {
 
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
-            // the ones that sound from the phone (BLE, MULTI, ARP_DELAY, PHONE_COCO): fixed on top; the rest scroll under it
-            grid([2, 9, 10, Preset.pcoco])
+            // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
+            grid([2, 9, 10])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)
@@ -403,6 +400,12 @@ private struct ArpCard: View {
 
     var body: some View {
         PanelCard(title: "ARP_DELAY", note: "phone audio -> Cafe input") {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
+                ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
+            }
+            // both laid over each other: the card keeps one size whichever is shown
+            ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: PanelMetrics.chipSpacing) {
                         ChipButton(title: rig.arpPlaying ? "STOP" : "PLAY", filled: rig.arpPlaying) { d.arpToggle() }
@@ -418,12 +421,18 @@ private struct ArpCard: View {
                     PanelRow(label: "LEVEL", value: Binding(get: { rig.arpLevel }, set: { rig.arpLevel = $0; d.applyArp() }))
                     PanelRow(label: "LOW", value: Binding(get: { rig.arpLow }, set: { rig.arpLow = $0; d.applyArp() }))
                 }
+                .opacity(rig.arpMode == 0 ? 1 : 0)
+                .allowsHitTesting(rig.arpMode == 0)
+                PcControls(d: d, rig: rig, pc: d.pcoco)
+                    .opacity(rig.arpMode == 1 ? 1 : 0)
+                    .allowsHitTesting(rig.arpMode == 1)
+            }
         }
     }
 }
 
-/// PHONE_COCO: COCO (the phone's two samplers) or SPEECH — the Cafe is COCO in both
-private struct PcCard: View {
+/// ARP_DELAY · PHONE_COCO: COCO (the phone's two samplers) or SPEECH — the Cafe is COCO in both
+private struct PcControls: View {
     let d: Director
     @ObservedObject var rig: Rig
     @ObservedObject var pc: PhoneCoco
@@ -431,7 +440,7 @@ private struct PcCard: View {
     @State private var picking = false
 
     var body: some View {
-        PanelCard(title: "PHONE_COCO", note: "phone audio -> Cafe input") {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "COCO", filled: rig.pcMode == 0) { d.setPcMode(0) }
                 ChipButton(title: "SPEECH", filled: rig.pcMode == 1) { d.setPcMode(1) }
