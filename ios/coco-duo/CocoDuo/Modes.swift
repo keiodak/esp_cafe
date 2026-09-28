@@ -112,29 +112,28 @@ enum Preset {
 /// what the 8 pads are right now
 enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, pcoco, sun, knob }
 
-/// APP+CAFE's SUNDAY (PhoneSun.swift): the four outer pads play the phone's small Sunnandæg (and reach the Cafes: the
-/// string follows FREQ, PEAK 2 brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
+/// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
+/// string follows OSC B, PEAK B brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
 enum SunPad {
-    static let titles = ["FREQ · DIV", "L RING · DECAY", "R RING · DECAY", "FOLD 1 · FOLD 2",
-                         "FOLD 3 · FEEDBACK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK 1 · PEAK 2"]
-    static let starts: [(Double, Double)] = [(0.35, 0.3), (0.5, 0.5), (0.5, 0.5), (0.3, 0.2),
-                                             (0.0, 0.0), (0.4, 0.6), (0.4, 0.6), (0.2, 0.45)]
-    static func freq(_ x: Double) -> Double { 20 * pow(40, x) }            // 20 Hz … 800 Hz
-    /// DIV: how many gates (the folds rising through 0) make one step of the S&H and the shift register
-    static func div(_ y: Double) -> Int { min(5000, max(1, Int(1 / max(1 - min(y, 0.9995), 0.0002)))) }
-    /// the Cafe's string: the phone's note brought into its four octaves from A1
-    static func stringPitch(_ x: Double) -> Int {
-        var semi = 12 * log2(freq(x) / 55)
+    static let titles = ["OSC A · OSC B", "L RING · DECAY", "R RING · DECAY", "FM B→A · FM A→B",
+                         "RUN→OSC · RUN→PEAK", "L SPACE · SIZE", "R SPACE · SIZE", "PEAK A · PEAK B"]
+    static let starts: [(Double, Double)] = [(0.3, 0.6), (0.5, 0.5), (0.5, 0.5), (0.2, 0.2),
+                                             (0.4, 0.4), (0.4, 0.6), (0.4, 0.6), (0.3, 0.6)]
+    static func oscA(_ x: Double) -> Double { 0.1 * pow(8000, x) }          // 0.1 Hz … 800 Hz
+    static func oscB(_ y: Double) -> Double { 5 * pow(800, y) }             // 5 Hz … 4 kHz
+    /// the Cafe's string: B brought into its four octaves from A1
+    static func stringPitch(_ y: Double) -> Int {
+        var semi = 12 * log2(oscB(y) / 55)
         while semi < 0 { semi += 12 }
         while semi > 48 { semi -= 12 }
         return Int((semi / 48 * 1000).rounded())
     }
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        func hz(_ f: Double) -> String { f < 10 ? String(format: "%.2f", f) : String(format: "%.0f", f) }
         switch i {
-        case 0: return String(format: "%.0f Hz · ÷%d", freq(x), div(y))
+        case 0: return "\(hz(oscA(x))) · \(hz(oscB(y))) Hz"
         case 1, 2: return "RING \(Int(x * 100))% · DECAY \(Int(y * 100))%"
-        case 3: return "\(Int(x * 100))% · \(Int(y * 100))%"
-        case 4: return "\(Int(x * 100))% · FB \(Int(y * 100))%"
+        case 3, 4: return "\(Int(x * 100))% · \(Int(y * 100))%"
         case 5, 6: return "SPACE \(Int(x * 100))% · SIZE \(Int(y * 100))%"
         case 7: return String(format: "%.0f · %.0f Hz", PhoneSun.hz(x), PhoneSun.hz(y))
         default: return ""
@@ -459,8 +458,9 @@ final class Rig: ObservableObject {
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
     @Published var sunLevel: Double = 0.7
+    @Published var sunRes: Double = 0.85
     /// SUNDAY's MOD (S&H -> OSC, SR -> TWIN PEAK: the key in the top left pad) and SYNC (feedback: bottom right)
-    @Published var sunMod = false
+    @Published var sunMod = true
     @Published var sunSync = false
     @Published var speechText: String = Rig.d.string(forKey: "rig.speechText") ?? "" { didSet { Self.d.set(speechText, forKey: "rig.speechText") } }
     @Published var speechVoice: Int = (Rig.d.object(forKey: "rig.speechVoice") as? Int) ?? SpeechRenderer.homeVoice { didSet { Self.d.set(speechVoice, forKey: "rig.speechVoice") } }

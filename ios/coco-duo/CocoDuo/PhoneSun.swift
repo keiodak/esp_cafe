@@ -1,47 +1,44 @@
 // PhoneSun.swift — coco duo (k.odk)
-// APP+CAFE's SUNDAY: a small Sunnandæg on the phone, made the way Sunnandæg makes it —
-//   sine -> FOLD 1 (soft clip) -> FOLD 2 (triangle fold) -> FOLD 3 (rectifier); the folds' output back into the sine
-//   (FEEDBACK: as FM; with SYNC the twin peak's output restarts the sine where it rises past 0.9 × (1 − FEEDBACK));
-//   S&H: FOLD 2 rising through 0 is the gate (÷ DIV), FOLD 1 the data -> the pitch (±1 oct);
-//   SHIFT REGISTER: FOLD 3 the gate (÷ DIV), FOLD 1 the data, 8 steps -> both twin peak positions;
-//   TWIN PEAK: two resonant band-passes, peak 1 riding FOLD 2, peak 2 riding FOLD 3 around PEAK 1 / PEAK 2 — that is
-//   the output (as Sunnandæg's, no dry). No random anywhere: it all comes from the sound itself.
-// L goes to Cafe A, R to Cafe B (a few cents apart: the two run their own way). The Cafes answer with a string
-// tuned to the phone's note (KARPLUS) into a reverb (see Director.sunCafe).
+// APP+CAFE's BLIPPOO: a Blippoo Box on the phone (after Rob Hordijk's instrument, from its public descriptions):
+//   two triangle oscillators, A and B, that bend each other's pitch (FM B→A, FM A→B);
+//   the RUNGLER: an 8-step shift register clocked by A's square, fed with B's square (XOR its own last step; LOOP
+//     = its own last step only, the pattern held), read by a 3-bit DAC from its last three steps — back onto both
+//     oscillators' pitch and onto the filter's peaks;
+//   S&H: B's triangle sampled on A's clock, onto the peaks;
+//   the sound: the COMPARATOR (A's triangle against B's) into the TWIN PEAK — two resonant 18 dB low-passes whose
+//     outputs are subtracted, so two peaks stand at their cutoffs with the band between.
+// L = the twin peak's band (→ Cafe A), R = its low side (→ Cafe B). No random anywhere: it all comes from the circuit.
+// The Cafes answer with a string tuned to B (KARPLUS) into a reverb (see Director.sunCafe).
 
 import AVFoundation
 
 final class PhoneSun: ObservableObject {
     // settings: written on the main thread, read by the audio thread (plain numbers, no locks)
-    var freq = 110.0, spread = 6.0               // Hz · cents between L and R
-    var fold1 = 0.0, fold2 = 0.0, fold3 = 0.0, feedback = 0.0
-    var peak1 = 0.2, peak2 = 0.45                // twin peak positions (0…1 over ~80 Hz … 4 kHz)
+    var freqA = 3.0, freqB = 180.0               // Hz
+    var fmBA = 0.2, fmAB = 0.2                   // cross FM (0…1)
+    var runOsc = 0.4, runPeak = 0.4              // RUNGLER → both oscillators · → the peaks
+    var peakA = 0.3, peakB = 0.6                 // the two cutoffs (0…1 over 40 Hz … 6 kHz)
+    var res = 0.85                               // resonance
     var level = 0.7
-    /// MOD: the S&H into the pitch and the shift register into the twin peak (off: neither moves anything)
-    var mod = false
-    /// DIV: how many gates make one step of the S&H and the shift register (0 … 0.9995 -> ÷1 … ÷2000)
-    var div = 0.5
-    /// SYNC: the feedback goes back as sync instead of FM
-    var sync = false
+    /// S&H onto the peaks
+    var mod = true
+    /// LOOP: the rungler takes only its own last step (the pattern goes round, held)
+    var loop = false
     @Published private(set) var playing = false
 
     private let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?
     private var sr = 48000.0
 
-    /// one side's circuit
-    private struct Side {
-        var phase = 0.0, prev = 0.0, syncPrev = 0.0, tw = 0.0
-        var s1 = 0.0, s2 = 0.0, s3 = 0.0
-        var shGate = 0.0, shCount = 0, sh = 0.0, shFactor = 1.0
-        var srGate = 0.0, srCount = 0, reg = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), srOut = 0.0
-        var low1 = 0.0, band1 = 0.0, low2 = 0.0, band2 = 0.0
-        var held1 = 300.0, held2 = 3000.0, cut1 = 300.0, cut2 = 3000.0, ctl = 0
-    }
-    private var side = [Side(), Side()]
-    private var fs = 110.0, gain = 0.0
-    private let q = 20.0, depth = 0.35, dataGain = 1.8, boost = 2.5
-    private let loNorm = 0.05, hiNorm = 0.75         // (the peaks' range: ~80 Hz … ~4 kHz — higher only shrieked)
+    // the circuit (audio thread)
+    private var pa = 0.0, pb = 0.25
+    private var sqA = false, sqB = false
+    private var reg: UInt8 = 0b1011_0010
+    private var rung = 0.0, rungS = 0.0
+    private var sh = 0.0, shS = 0.0
+    private var la = [0.0, 0.0, 0.0], lb = [0.0, 0.0, 0.0]   // two three-pole ladders
+    private var gain = 0.0, dcL = 0.0, dcR = 0.0
+    private var fA = 3.0, fB = 180.0
 
     func play(_ on: Bool) {
         playing = on
@@ -86,117 +83,64 @@ final class PhoneSun: ObservableObject {
         engine.pause()
     }
 
+    /// 40 Hz … 6 kHz
+    static func hz(_ p: Double) -> Double { 40 * pow(150, min(1, max(0, p))) }
+
     private func render(_ frames: Int, _ abl: UnsafeMutableAudioBufferListPointer) {
         let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let want = playing ? level : 0
+        let k = res * 7.5                                   // (three poles ring at 8)
         for i in 0..<frames {
-            fs += (freq - fs) * 0.002                                   // (glides: no zipper)
+            fA += (freqA - fA) * 0.002; fB += (freqB - fB) * 0.002
             gain += (want - gain) * 0.0005
-            let a = tick(0), b = tick(1)
-            l[i] = Float(a * gain); r[i] = Float(b * gain)
-        }
-    }
-
-    private func tick(_ c: Int) -> Double {
-        var s = side[c]
-        let fb = feedback, md = mod
-        let wSync = sync ? 1.0 : 0.0, wFM = sync ? 0.0 : 1.0
-        let prev = s.prev
-        // the sine: S&H on its speed, the feedback as FM or as sync
-        let f = fs * pow(2, (c == 0 ? -spread : spread) / 2400)
-        s.phase += f / sr * (md ? s.shFactor : 1)
-        s.phase -= floor(s.phase)
-        // SYNC: the twin peak's ringing (not the folds', which run at the sine's own speed: resetting on those changed
-        // nothing) restarts the sine each time it rises past a threshold that FEEDBACK lowers — a hard sync at the
-        // peaks' pitch
-        let th = 0.9 - fb * 0.9
-        if s.syncPrev < th && s.tw >= th { s.phase *= 1 - wSync }
-        s.syncPrev = s.tw
-        let sine = sin(2 * .pi * (s.phase + prev * fb * 2 * wFM))
-        // the three folds
-        s.s1 = Self.stage1(sine, fold1)
-        s.s2 = Self.stage2(s.s1, fold2)
-        s.s3 = Self.stage3(s.s2, fold3)
-        let mx = max(max(fold1, fold2), max(fold3, fb))
-        let out = mx <= 0 ? s.s3 : (mx >= 0.05 ? tanh(s.s3) : s.s3 * (1 - mx / 0.05) + tanh(s.s3) * (mx / 0.05))
-        s.prev = out
-        let ratio = min(5000, max(1, Int(1 / max(1 - min(div, 0.9995), 0.0002))))
-        // SHIFT REGISTER: FOLD 3 rising through 0, ÷ DIV -> FOLD 1 in; its last step out
-        if s.srGate < 0 && s.s3 >= 0 {
-            s.srCount += 1
-            if s.srCount >= ratio {
-                s.srCount = 0
-                let g = s.reg
-                s.reg = (tanh(s.s1 * dataGain), g.0, g.1, g.2, g.3, g.4, g.5, g.6)
-                s.srOut = s.reg.7
+            // the two triangles (−1…1) and their squares
+            let triA = 1 - 4 * abs(pa - 0.5), triB = 1 - 4 * abs(pb - 0.5)
+            rungS += (rung - rungS) * 0.02                       // (the DAC's steps, a hair rounded)
+            shS += (sh - shS) * 0.02
+            // pitch: the other's triangle (cross FM) and the rungler, in octaves
+            let ra = (rungS - 0.5) * 4 * runOsc
+            let a = fA * pow(2, triB * fmBA * 3 + ra)
+            let b = fB * pow(2, triA * fmAB * 3 + ra * 0.75)
+            pa += min(0.45, a / sr); pa -= floor(pa)
+            pb += min(0.45, b / sr); pb -= floor(pb)
+            let nA = triA > 0, nB = triB > 0
+            // A's square rising: the rungler steps (data = B's square XOR its last step; LOOP = its last step) and
+            // the S&H takes B's triangle
+            if nA && !sqA {
+                let last = (reg >> 7) & 1
+                let bit: UInt8 = loop ? last : (last ^ (nB ? 1 : 0))
+                reg = (reg << 1) | bit
+                rung = Double((reg >> 5) & 0b111) / 7                  // 3-bit DAC of the last three steps
+                sh = triB
             }
+            sqA = nA; sqB = nB
+            // the comparator: A's triangle against B's
+            let cmp = triA > triB ? 0.8 : -0.8
+            // the peaks: their base, the rungler, the S&H
+            var ca = peakA + (rungS - 0.5) * runPeak * 0.8
+            var cb = peakB + (rungS - 0.5) * runPeak * 0.8
+            if mod { ca += shS * 0.25; cb += shS * 0.25 }
+            let fa = Self.hz(ca), fb = Self.hz(cb)
+            let lo = min(fa, fb), hi = max(fa, fb)
+            let low = ladder(cmp, lo, k, &la), high = ladder(cmp, hi, k, &lb)
+            var band = high - low                               // TWIN PEAK: the two subtracted
+            var side = low
+            dcL += (band - dcL) * 0.001; band -= dcL
+            dcR += (side - dcR) * 0.001; side -= dcR
+            l[i] = Float(tanh(band * 1.4) * gain)
+            r[i] = Float(tanh(side * 1.2) * gain)
         }
-        s.srGate = s.s3
-        // S&H: FOLD 2 rising through 0, ÷ DIV -> FOLD 1 held -> the pitch (±1 oct)
-        if s.shGate < 0 && s.s2 >= 0 {
-            s.shCount += 1
-            if s.shCount >= ratio {
-                s.shCount = 0
-                s.sh = tanh(s.s1 * dataGain)
-                s.shFactor = pow(2, s.sh)
-            }
-        }
-        s.shGate = s.s2
-        // TWIN PEAK: peak 1 rides FOLD 2, peak 2 FOLD 3, around PEAK 1 / 2; the shift register moves both
-        if s.ctl % 8 == 0 {
-            let lr = log(250.0), lo = 60 * exp(loNorm * lr), hi = 60 * exp(hiNorm * lr), span = log(hi / lo)
-            func n(_ v: Double) -> Double { min(1, max(0, 0.5 + (min(1, max(0, (v + 1) / 2)) - 0.5) * boost)) }
-            var c1 = min(1, max(0, peak1 + (n(s.s2) - 0.5) * depth * 2))
-            var c2 = min(1, max(0, peak2 + (n(s.s3) - 0.5) * depth * 2))
-            if md { c1 = min(1, max(0, c1 + s.srOut * 0.5)); c2 = min(1, max(0, c2 + s.srOut * 0.5)) }
-            s.held1 = lo * exp(c1 * span); s.held2 = lo * exp(c2 * span)
-        }
-        s.ctl &+= 1
-        s.cut1 += (s.held1 - s.cut1) * 0.25
-        s.cut2 += (s.held2 - s.cut2) * 0.25
-        let p1 = bp(out, s.cut1, &s.low1, &s.band1), p2 = bp(out, s.cut2, &s.low2, &s.band2)
-        let at1 = min(1, max(0, (s.cut1 - 80) / 70)) * 0.6 + 0.4, at2 = min(1, max(0, (s.cut2 - 80) / 70)) * 0.6 + 0.4
-        var y = (p1 * at1 + p2 * at2) * 0.5
-        if !y.isFinite { s.low1 = 0; s.band1 = 0; s.low2 = 0; s.band2 = 0; y = 0 }
-        else if abs(y) > 2 { let e = abs(y) - 2; y = (y >= 0 ? 1 : -1) * (2 + tanh(e / 2) * 2) }
-        let o = tanh(y * 0.9)
-        s.tw = o
-        side[c] = s
-        return o
     }
 
-    /// Sunnandæg's band-pass (Chamberlin, held below its unstable corner)
-    private func bp(_ x: Double, _ cutoff: Double, _ low: inout Double, _ band: inout Double) -> Double {
-        let f = 2 * sin(.pi * min(cutoff, sr / 6) / sr)
-        let qInv = max(1 / max(q, 0.5), max(0, f - 0.92))
-        let high = x - low - qInv * band
-        band += f * high
-        low += f * band
-        return band
-    }
-
-    /// twin peak's positions in Hz (for the captions): 0…1 over ~80 Hz … 4 kHz
-    static func hz(_ p: Double) -> Double {
-        let lr = log(250.0), lo = 60 * exp(0.05 * lr), hi = 60 * exp(0.75 * lr)
-        return lo * exp(min(1, max(0, p)) * log(hi / lo))
-    }
-
-    // Sunnandæg's three stages
-    static func stage1(_ x: Double, _ a: Double) -> Double {
-        guard a > 0 else { return x }
-        let d = 1 + a * 8, s = tanh(x * d) / tanh(d)
-        return a >= 0.1 ? s : x * (1 - a / 0.1) + s * (a / 0.1)
-    }
-    static func stage2(_ x: Double, _ a: Double) -> Double {
-        guard a > 0 else { return x }
-        var f = (x * (1 + a * 6)).truncatingRemainder(dividingBy: 4)
-        if f < -2 { f += 4 } else if f > 2 { f -= 4 }
-        if f > 1 { f = 2 - f } else if f < -1 { f = -2 - f }
-        return x * (1 - a) + f * a
-    }
-    static func stage3(_ x: Double, _ a: Double) -> Double {
-        guard a > 0 else { return x }
-        return x * (1 - a) + (abs(x) * 2 - 1) * a
+    /// a three-pole low-pass (18 dB) with resonance fed back from its last pole
+    private func ladder(_ x: Double, _ fc: Double, _ k: Double, _ s: inout [Double]) -> Double {
+        let g = 1 - exp(-2 * .pi * min(fc, sr * 0.3) / sr)
+        let u = tanh(x - k * s[2])
+        s[0] += g * (u - s[0])
+        s[1] += g * (s[0] - s[1])
+        s[2] += g * (s[1] - s[2])
+        if !s[2].isFinite { s = [0, 0, 0] }
+        return s[2] * (1 + k * 0.5)                               // (the resonance's loss made up)
     }
 }

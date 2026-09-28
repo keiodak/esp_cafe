@@ -312,19 +312,19 @@ final class Director: ObservableObject {
 
     func applySun() {
         let a = rig.sunAxes, s = sun
-        s.freq = SunPad.freq(a[0].x); s.spread = 6; s.div = a[0].y
-        s.mod = rig.sunMod; s.sync = rig.sunSync
-        s.fold1 = a[3].x; s.fold2 = a[3].y
-        s.fold3 = a[4].x; s.feedback = a[4].y
-        s.peak1 = a[7].x; s.peak2 = a[7].y
-        s.level = rig.sunLevel
+        s.freqA = SunPad.oscA(a[0].x); s.freqB = SunPad.oscB(a[0].y)
+        s.fmBA = a[3].x; s.fmAB = a[3].y
+        s.runOsc = a[4].x; s.runPeak = a[4].y
+        s.peakA = a[7].x; s.peakB = a[7].y
+        s.mod = rig.sunMod; s.loop = rig.sunSync
+        s.res = rig.sunRes; s.level = rig.sunLevel
     }
     /// what a Cafe on SUNDAY is told: its string (KARPLUS, "F 7") and reverb ("F 6"); only = one pad's part
     func sunCafe(slot: Int, only pad: Int? = nil) -> [String] {
         let a = rig.sunAxes
         let ring = a[slot == 1 ? 2 : 1], space = a[slot == 1 ? 6 : 5]
         func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
-        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].x))", damp = "F 7 2 \(v(0.3 + a[7].y * 0.7))"
+        let pitch = "F 7 0 \(SunPad.stringPitch(a[0].y))", damp = "F 7 2 \(v(0.3 + a[7].y * 0.7))"
         let rg = ["F 7 6 \(v(ring.x))", "F 7 1 \(v(ring.y))"], sp = ["F 6 6 \(v(space.x))", "F 6 0 \(v(space.y))"]
         guard let pad else {
             return [pitch, damp] + rg + sp + ["F 7 3 0", "F 7 4 100", "F 7 5 300", "F 7 7 1000",
@@ -1310,8 +1310,8 @@ private struct HudBar: View {
             switch n {
             case 0: textKey(sun.playing ? "STOP" : "PLAY", on: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
             case 1: key("pause.circle", on: rig.fxHold) { d.fxToggleHold() }                 // HOLD: the Cafes' string and reverb
-            case 2: textKey("MOD", on: rig.sunMod) { rig.sunMod.toggle(); d.applySun() }     // S&H -> OSC, SR -> TWIN PEAK
-            default: textKey("SYNC", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() } // the output back as hard sync
+            case 2: textKey("S&H", on: rig.sunMod) { rig.sunMod.toggle(); d.applySun() }     // S&H onto the peaks
+            default: textKey("LOOP", on: rig.sunSync) { rig.sunSync.toggle(); d.applySun() } // the rungler's pattern held
             }
         case .pcoco:
             switch n {
@@ -1352,7 +1352,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "SUNDAY", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "BLIPPOO", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]

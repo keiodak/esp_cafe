@@ -403,7 +403,7 @@ private struct ArpCard: View {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
-                ChipButton(title: "SUNDAY", filled: rig.arpMode == 2) { d.setArpMode(2) }
+                ChipButton(title: "BLIPPOO", filled: rig.arpMode == 2) { d.setArpMode(2) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -447,6 +447,7 @@ private struct SunControls: View {
                 ChipButton(title: sun.playing ? "STOP" : "PLAY", filled: sun.playing) { d.applySun(); d.sun.play(!d.sun.playing) }
                 ChipButton(title: "HOLD", filled: rig.fxHold) { d.fxToggleHold() }
             }
+            PanelRow(label: "RES", value: Binding(get: { rig.sunRes }, set: { rig.sunRes = $0; d.applySun() }))
             PanelRow(label: "LEVEL", value: Binding(get: { rig.sunLevel }, set: { rig.sunLevel = $0; d.applySun() }))
         }
     }
