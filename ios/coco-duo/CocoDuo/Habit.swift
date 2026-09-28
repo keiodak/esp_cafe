@@ -1,8 +1,8 @@
 // Habit.swift — coco duo (k.odk)
 // HABIT (BLE mode 7), after Chase Bliss's Habit: the Cafe sends its input to the phone all the time (IMA ADPCM at
 // 1/2 or 1/4 of its clock); the phone keeps the last 2½ minutes, and plays them back — pieces, or the whole run —
-// by writing ADPCM onto the Cafe's tape a little ahead of its read head. The Cafe plays the tape: main = its input
-// (DRY) + the tape (WET), ASH = the tape. SAVE hands the memory to Files as a WAV.
+// by writing ADPCM onto the Cafe's tape a second ahead of its read head. The Cafe plays the tape (main and ASH), brought
+// up to the memory's loudness (LEVEL · DRIVE). SAVE hands the memory to Files as a WAV.
 // The Cafe's own inputs play it too: FLIP = backwards · SKIP (held) = pulled to where the other Cafe is playing ·
 // EARTH = jumps through the memory (a resting level is learnt and ignored: an open input's faint CV does nothing).
 
@@ -75,13 +75,14 @@ enum Adpcm {
     }
 }
 
-/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, LAYERS · FADE / DRY · WET, TONE · DRIFT,
+/// HABIT's pads: WHERE · SPREAD, LENGTH · GAP, SPEED · REVERSE, LAYERS · FADE / LEVEL · DRIVE, TONE · DRIFT,
 /// REPEAT · CHANCE, DETUNE · OCTAVES
 enum HabitPad {
     static let titles = ["WHERE · SPREAD", "LENGTH · GAP", "SPEED · REVERSE", "LAYERS · FADE",
-                         "DRY · WET", "TONE · DRIFT", "REPEAT · CHANCE", "DETUNE · OCTAVES"]
-    static let starts: [(Double, Double)] = [(0.2, 0.2), (0.55, 0.2), (0.5, 0.0), (0.35, 0.4),
-                                             (0.6, 0.7), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+                         "LEVEL · DRIVE", "TONE · DRIFT", "REPEAT · CHANCE", "DETUNE · OCTAVES"]
+    /// (it starts as a plain run: LENGTH at the top = the whole memory played on at ×1, a little behind)
+    static let starts: [(Double, Double)] = [(0.1, 0.0), (1.0, 0.0), (0.5, 0.0), (0.35, 0.4),
+                                             (0.6, 0.2), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
     /// LENGTH: 30 ms … 4 s, and at the top: the whole run (a tape delay from WHERE)
     static func whole(_ x: Double) -> Bool { x >= 0.97 }
     static func length(_ x: Double) -> Double { 0.03 * pow(4.0 / 0.03, min(1, x / 0.97)) }
@@ -93,7 +94,7 @@ enum HabitPad {
         case 1: return (whole(x) ? "WHOLE" : String(format: "%.2f s", length(x))) + String(format: " · GAP %d%%", Int(y * 100))
         case 2: return String(format: "×%.2f · REV %d%%", speed(x), Int(y * 100))
         case 3: return "\(1 + Int(x * 3.99)) · FADE \(Int(y * 100))%"
-        case 4: return "DRY \(Int(x * 100))% · WET \(Int(y * 100))%"
+        case 4: return "LEVEL \(Int(x * 100))% · DRIVE \(Int(y * 100))%"
         case 5: return "TONE \(Int(x * 100))% · DRIFT \(Int(y * 100))%"
         case 6: return "×\(1 + Int(x * 7.99)) · \(Int(y * 100))%"
         case 7: return "DETUNE \(Int(x * 100))% · OCT \(Int(y * 100))%"
@@ -136,6 +137,7 @@ final class HabitEngine {
     private var untilNext = 0                    // samples to the next piece
     private var lastStart: Double = 0, repeatsLeft = 0
     private var lp: Double = 0, drift: Double = 0
+    private var peak: Double = 0.05              // how loud the memory is (the playing is brought up to it)
     private var wholeVoice: Voice? = nil
     // speeds
     private var upBytes = 0, downBytes = 0, statT = Date()
@@ -185,8 +187,11 @@ final class HabitEngine {
         for k in 11..<b.count {
             for h in 0..<2 {
                 let n = h == 0 ? b[k] & 15 : b[k] >> 4
-                mem[mw % cap] = Int16(Adpcm.dec(n, &p, &i))
+                let v = Adpcm.dec(n, &p, &i)
+                mem[mw % cap] = Int16(v)
                 mw += 1
+                let av = Double(abs(v)) / 32768
+                peak = av > peak ? av : peak * 0.99998 + 0.0000002
             }
         }
     }
@@ -209,9 +214,9 @@ final class HabitEngine {
         // where the Cafe reads now (rate samples on the tape)
         let est = (Double(rp) + now.timeIntervalSince(rpAt) * unit.hz) / Double(div)
         let head = Int(est) % tapeLen
-        let lead = Int(0.6 * r), window = Int(0.35 * r)
+        let lead = Int(1.0 * r), window = Int(0.5 * r)                // (a second ahead: the link comes in bursts)
         var ahead = (wh - head) % tapeLen; if ahead < 0 { ahead += tapeLen }
-        if !synced || ahead > tapeLen / 2 || ahead < lead / 3 {   // lost the thread: start again, 0.6 s ahead
+        if !synced || ahead > tapeLen / 2 || ahead < lead / 5 {   // lost the thread: start again, a second ahead
             wh = (head + lead) % tapeLen
             ahead = lead
             synced = true
@@ -341,6 +346,10 @@ final class HabitEngine {
             lp += (out - lp) * c
             out = lp
         }
+        // LEVEL · DRIVE: brought up to the memory's loudness (a quiet input still plays loud), then a soft ceiling
+        let g = min(12, 0.7 / max(0.02, peak)) * (a(4).x * 2)
+        let dr = 1 + a(4).y * 5
+        out = tanh(out * g * dr) / tanh(dr) * min(1, 0.9 + 0.1 / dr)
         return max(-1, min(1, out))
     }
 

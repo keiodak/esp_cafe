@@ -363,14 +363,12 @@ final class Rig: ObservableObject {
     @Published var sxFreeze = 0
     /// HABIT (BLE mode 7): its pads (the phone's playing reads them), the rate, HOLD, the WAV to hand to Files
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
-    @Published var habit8k = false              // (the low rate: true = 4K, false = 8K)
+    @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false
     @Published var habitSeconds = 150.0         // the memory: 30 s … 10 min
     @Published var habitWav: Data? = nil
-    func habitLevels() -> [String] {
-        let a = habitAxes[4]
-        return ["B 1 \(Int((a.x * 1000).rounded()))", "B 2 \(Int((a.y * 1000).rounded()))"]
-    }
+    /// the Cafe plays the tape only (no dry), at full level: LEVEL · DRIVE are the phone's
+    func habitLevels() -> [String] { ["B 1 0", "B 2 500"] }       // (500 = ×1: the phone already brings it up)
     let coAxes: [PadAxis] = CoPad.allCases.map { PadAxis($0.start) }
     @Published var coReverse = false
 

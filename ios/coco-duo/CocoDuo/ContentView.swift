@@ -215,7 +215,7 @@ final class Director: ObservableObject {
             for u in ctxUnits() { grain.commands(pad: i, slot: u.slot).forEach(u.send) }
             if resync { sync() }
         case .habit:
-            if i == 4 { for u in ctxUnits() { rig.habitLevels().forEach(u.send) } }   // (the others: the phone reads them)
+            break                                                // (the phone reads HABIT's pads itself)
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
