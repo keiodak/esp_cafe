@@ -1,5 +1,5 @@
 // PhoneSun.swift — coco duo (k.odk)
-// APP+CAFE's RUNGLE: a Blippoo Box on the phone, after Rob Hordijk's own description ("The Blippoo Box: A Chaotic
+// APP+CAFE's BOX: a Blippoo Box on the phone, after Rob Hordijk's own description ("The Blippoo Box: A Chaotic
 // Electronic Music Instrument, Bent by Design", Leonardo Music Journal 19, 2009) and notes from those who rebuilt it:
 //   the CHAOTIC CORE — two oscillators (triangle and square, exponential, ~16 octaves up to 12 kHz) that bend each
 //   other three ways:

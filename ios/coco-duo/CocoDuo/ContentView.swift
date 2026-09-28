@@ -154,7 +154,7 @@ final class Director: ObservableObject {
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(cafeAdMode)")                             // ARP: the tap delay · PHONE_COCO: COCO · RUNGLE: ZEITGEIST / COCO
+            u.send("F 97 \(cafeAdMode)")                             // ARP: the tap delay · PHONE_COCO: COCO · BOX: ZEITGEIST / COCO
             if rig.arpMode == 2 {
                 sunCafe(slot: s).forEach(u.send)
                 sunLinkSend(u)
@@ -324,9 +324,9 @@ final class Director: ObservableObject {
     /// (1 to Cafe A, 2 to Cafe B), or the squares' XOR
     private var sunCVSent = [-1, -1]
     private var sunCoSent = [[-1, -1, -1], [-1, -1, -1]]
-    /// what the Cafe is on APP+CAFE: 0 ARP · 1 PHONE_COCO · 2 ZEITGEIST · 3 COCO (RUNGLE's two)
+    /// what the Cafe is on APP+CAFE: 0 ARP · 1 PHONE_COCO · 2 ZEITGEIST · 3 COCO (BOX's two)
     var cafeAdMode: Int { rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : rig.arpMode }
-    /// RUNGLE's Cafes: ZEITGEIST (0) or COCO (1)
+    /// BOX's Cafes: ZEITGEIST (0) or COCO (1)
     func setSunCafe(_ m: Int) {
         rig.sunCafe = m == 1 ? 1 : 0
         guard rig.arpMode == 2 else { return }
@@ -1418,7 +1418,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "RUNGLE", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE",
     ]

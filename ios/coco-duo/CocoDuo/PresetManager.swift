@@ -408,7 +408,7 @@ private struct ArpCard: View {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
-                ChipButton(title: "RUNGLE", filled: rig.arpMode == 2) { d.setArpMode(2) }
+                ChipButton(title: "BOX", filled: rig.arpMode == 2) { d.setArpMode(2) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -440,7 +440,7 @@ private struct ArpCard: View {
     }
 }
 
-/// APP+CAFE · RUNGLE: the phone's box (play, level); the Cafes: ZEITGEIST (its card) or COCO (LINK)
+/// APP+CAFE · BOX: the phone's box (play, level); the Cafes: ZEITGEIST (its card) or COCO (LINK)
 private struct SunControls: View {
     let d: Director
     @ObservedObject var rig: Rig

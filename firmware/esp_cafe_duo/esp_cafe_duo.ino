@@ -795,7 +795,7 @@ void pc_line(char *s) {
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
                 else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
-                else if (e == 88 && k >= 3) {                                // RUNGLE's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK
+                else if (e == 88 && k >= 3) {                                // BOX's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK
                   if (val < 0) val = 0; if (val > 1000) val = 1000;
                   if (id == 0) co_spd = (int32_t)(256.0f * powf(2.0f, (val - 500) / 250.0f));
                   else if (id == 1) co_vflip = val != 0;

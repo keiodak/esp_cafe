@@ -4255,11 +4255,11 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
 // SPEECH (F 97 1): the phone speaks instead of arpeggiating, and this Cafe is COCO (the BLE preset's mode 1):
 // a record head on the tape and a play head in a loop, EARTH = FM of the speed ("C <id> <v>" as in BLE COCO).
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
-volatile bool cl_on = false;  // RUNGLE's COCO: LINK ("F 88 3")
+volatile bool cl_on = false;  // BOX's COCO: LINK ("F 88 3")
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
   if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
-  if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; coco_mod(); co_link = false; return; }   // RUNGLE's COCO: a plain COCO (+ LINK)
+  if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; coco_mod(); co_link = false; return; }   // BOX's COCO: a plain COCO (+ LINK)
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;

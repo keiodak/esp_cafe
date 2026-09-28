@@ -468,7 +468,7 @@ final class Rig: ObservableObject {
     @Published var sunZgIn: Double = 0.5
     /// what goes to the Cafes as a CV (onto the ZEITGEIST's time, with EARTH, at MOD): OFF · S&H · RUNG · XOR
     @Published var sunSend = 0
-    /// RUNGLE's Cafes: 0 ZEITGEIST · 1 COCO; LINK (COCO): the phone drives their heads
+    /// BOX's Cafes: 0 ZEITGEIST · 1 COCO; LINK (COCO): the phone drives their heads
     @Published var sunCafe: Int = Rig.d.integer(forKey: "rig.sunCafe") { didSet { Self.d.set(sunCafe, forKey: "rig.sunCafe") } }
     @Published var sunLink = false
     static let sunSendNames = ["→ OFF", "→ S&H", "→ RUNG", "→ XOR"]
