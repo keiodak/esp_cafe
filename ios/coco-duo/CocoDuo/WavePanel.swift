@@ -126,10 +126,16 @@ private struct CafeWaveCard: View {
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
-            Text("\(unit.preset < 0 ? "—" : Preset.tag(unit.preset))\(unit.preset == Preset.ble ? "  ·  " + Preset.modeNames[min(max(unit.mode, 0), Preset.modeNames.count - 1)] : "")")
+            Text((unit.fw.isEmpty ? "" : "v\(unit.fw)  ·  ") + "\(unit.preset < 0 ? "—" : Preset.tag(unit.preset))\(unit.preset == Preset.ble ? "  ·  " + Preset.modeNames[min(max(unit.mode, 0), Preset.modeNames.count - 1)] : "")")
                 .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(1)
+            if unit.preset == Preset.ble && unit.mode == 6 {                  // HABIT: the link
+                Text(String(format: "HABIT  ↑%.1f  ↓%.1f kB/s  ·  drop %d  ·  mtu %d", unit.hbUp, unit.hbDown, unit.hbDrops, unit.mtu))
+                    .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
+                    .foregroundStyle(PastelTheme.hudOrange)
+                    .lineLimit(1)
+            }
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.audio]) { loadFile($0) }
         // SAVE: once the tape is in, hand the WAV to Files
