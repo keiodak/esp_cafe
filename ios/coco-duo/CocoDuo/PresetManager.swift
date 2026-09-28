@@ -132,7 +132,7 @@ struct PresetManagerView: View {
                     // to nothing). The box never changes size, whichever cards are shown: nothing moves.
                     VStack(spacing: 8) {
                         rightCards
-                        NowCard(d: d, rig: rig).frame(maxHeight: .infinity)
+                        NowCard(d: d, rig: rig, a: a, b: b).frame(maxHeight: .infinity)
                     }
                     .frame(height: presetsH > 0 ? presetsH : nil, alignment: .top)
                     .clipped()
@@ -556,6 +556,8 @@ private struct PresetsHeight: PreferenceKey {
 private struct NowCard: View {
     let d: Director
     @ObservedObject var rig: Rig
+    @ObservedObject var a: CafeUnit
+    @ObservedObject var b: CafeUnit
 
     var body: some View {
         PanelCard(title: "NOW", note: "Cafe BLE") {
@@ -568,6 +570,10 @@ private struct NowCard: View {
                             .foregroundStyle(PastelTheme.hudBlack)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
+                        let u = s == 0 ? a : b
+                        Text(u.isConnected ? "v\(u.fw.isEmpty ? "?" : u.fw)" : "—")      // the Cafe's firmware
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(PastelTheme.textSecondary)
                     }
                 }
                 Spacer(minLength: 0)
