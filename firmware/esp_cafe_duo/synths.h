@@ -2481,22 +2481,27 @@ void hb_write(const uint8_t *d, size_t n) {
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
 #define TP_N 77
-#define TP_NL 48
+#define TP_NL 128
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
                                         0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6 };
 static const uint8_t tp_h[TP_NB] = { 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2,
                                      2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0 };
 static const int16_t tp_sig[128] = { 321,333,345,357,370,383,397,411,425,440,456,471,488,505,522,540,558,577,596,616,636,657,679,701,724,747,770,795,820,845,871,898,925,953,982,1011,1040,1070,1101,1132,1164,1196,1229,1263,1296,1331,1366,1401,1437,1473,1509,1546,1583,1621,1658,1697,1735,1773,1812,1851,1890,1929,1969,2008,2048,2087,2126,2166,2205,2244,2283,2322,2360,2398,2437,2474,2512,2549,2586,2622,2658,2694,2729,2764,2799,2832,2866,2899,2931,2963,2994,3025,3055,3084,3113,3142,3170,3197,3224,3250,3275,3300,3325,3348,3371,3394,3416,3438,3459,3479,3499,3518,3537,3555,3573,3590,3607,3624,3639,3655,3670,3684,3698,3712,3725,3738,3750,3762 };   // the pairs: σ(Δ / 26 mV), Q12, Δ = -64 .. 63 mV
-// the links as the loop keeps them (RTC memory)
-RTC_DATA_ATTR static uint8_t tp_la[TP_NL], tp_lb[TP_NL];
-RTC_DATA_ATTR static int16_t tp_lg[TP_NL];                    // (Q12 per 10K; 0 = no link)
+// the links as the loop keeps them — a piece of the tape as well (the phone sends them all again whenever FOURSES
+// starts, after its "T")
+struct TpLinks { uint8_t la[TP_NL], lb[TP_NL]; int16_t lg[TP_NL]; };   // (lg: Q12 per 10K; 0 = no link)
+struct TpCl { int16_t cg[2][TP_NL]; uint8_t ca[2][TP_NL], cb[2][TP_NL]; };   // the compact lists the audio reads
+static_assert(sizeof(TpLinks) <= DCHUNK_BYTES && sizeof(TpCl) <= DCHUNK_BYTES, "FOURSES: the links must fit tape pieces");
+#define TL ((TpLinks *)dchunk[102])
+#define TC ((TpCl *)dchunk[103])
+#define tp_la (TL->la)
+#define tp_lb (TL->lb)
+#define tp_lg (TL->lg)
 // the working space (a piece of the tape)
 struct TpWs2 { int32_t num[TP_N], den[TP_N]; };
 struct TpWs {
   int16_t E[TP_N], G[TP_N], V[TP_N];
-  int16_t cg[2][TP_NL];
-  uint8_t ca[2][TP_NL], cb[2][TP_NL];
   uint8_t an[2][TP_N], af[2][TP_N];
   uint8_t ncl[2], nan[2], lad[2][4];
 };
@@ -2524,7 +2529,7 @@ static void tp_rebuild() {
   for (int i = 0; i < TP_N; i++) w->af[b][i] = 0;
   for (int k = 0; k < TP_NL; k++) {
     if (!tp_lg[k]) continue;
-    w->ca[b][n] = tp_la[k]; w->cb[b][n] = tp_lb[k]; w->cg[b][n] = tp_lg[k]; n++;
+    TC->ca[b][n] = tp_la[k]; TC->cb[b][n] = tp_lb[k]; TC->cg[b][n] = tp_lg[k]; n++;
     int q[2] = { tp_la[k], tp_lb[k] };
     for (int j = 0; j < 2; j++) if (!w->af[b][q[j]]) { w->af[b][q[j]] = 1; w->an[b][m++] = (uint8_t)q[j]; }
   }
@@ -2553,6 +2558,7 @@ static void fr_update() {                                    // (the loop: float
   tp_kc = (int32_t)(5000.0f * 32000.0f / hz / c);
 }
 static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
+  if (pc_mode != 7) return;                                    // (the tape is someone else's)
   if (a > b) { int t = a; a = b; b = t; }
   if (a < 0 || b >= TP_N || a == b) return;
   int32_t g = 0;
@@ -2565,7 +2571,8 @@ static void tp_link(int a, int b, int v) {                   // (the loop) a tou
   if (g && free_ >= 0) { tp_la[free_] = (uint8_t)a; tp_lb[free_] = (uint8_t)b; tp_lg[free_] = (int16_t)g; }
   tp_rebuild();
 }
-static void tp_clear() { for (int i = 0; i < TP_NL; i++) tp_lg[i] = 0; tp_rebuild(); }
+static void tp_clear() { if (pc_mode != 7) return; memset(TL, 0, sizeof(TpLinks)); tp_rebuild(); }
+static void tp_enter() { memset(TL, 0, sizeof(TpLinks)); }    // (the loop, as FOURSES is chosen: no links from the tape's old sound)
 // the horses' state (the audio)
 static int32_t tp_pos[4], tp_out[4], tp_olp[4], tp_bnd[4];
 static int32_t tp_sh[4] = { 4200, 4200, 4200, 4200 };         // INTERSEXON: what each sample & hold holds (mV)
@@ -2610,7 +2617,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   if (fr_reset) {                                                                 // (FOURSES starts: its working space anew)
     fr_reset = false;
     for (int h = 0; h < 4; h++) { tp_pos[h] = (1500 + h * 1500) * 1000; tp_out[h] = (h & 1) ? 50 : 6800; tp_olp[h] = 3000; tp_bnd[h] = 4200; }
-    memset(w, 0, sizeof(TpWs));
+    memset(w, 0, sizeof(TpWs)); memset(TC, 0, sizeof(TpCl));
     tp_on = true;
     tp_rebuild();
     gen = 0xFFFFFFFF;
@@ -2619,8 +2626,8 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   { int32_t ht = (int32_t)(hum >> 16) - 32768; tp_hum = ((ht < 0 ? -ht : ht) - 16384) / 55; }   // (±300 mV)
   const int c = tp_cur;
   const int nl = w->ncl[c], na = w->nan[c];
-  const uint8_t *la = w->ca[c], *lb = w->cb[c], *an = w->an[c], *af = w->af[c];
-  const int16_t *lg = w->cg[c];
+  const uint8_t *la = TC->ca[c], *lb = TC->cb[c], *an = w->an[c], *af = w->af[c];
+  const int16_t *lg = TC->cg[c];
   int16_t *V = w->V;
   const bool fresh = gen != tp_gen; gen = tp_gen;
   const bool solve = fresh || ((++ph & 3) == 0);                                  // (the network: every 4th sample, 8 kHz)
