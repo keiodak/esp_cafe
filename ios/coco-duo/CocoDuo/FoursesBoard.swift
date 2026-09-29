@@ -386,15 +386,21 @@ struct FoursesBoard: View {
                     let amp = (FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).map { Double($0[2]) }.max() ?? 0) / 1000
                     let live = amp > 0
                     let ink = FrBoard.targetInk[min(2, max(0, FrBoard.target(s)))]
+                    let lit = camOn && k < 16 && k < cam.shapeLight.count ? cam.shapeLight[k] : 0   // CAMERA: its LIGHT, a glow that breathes
                     if Int(s[0]) == 3 && s.count >= 5 {
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(ink.opacity(live ? 0.2 + 0.45 * amp : 0.12), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
+                            .stroke(ink.opacity(live ? 0.2 + 0.45 * amp : 0.12), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2 * (1 + 0.5 * lit), lineCap: .round))
                             .brightness(live ? -0.25 * amp : 0)
+                            .shadow(color: ink.opacity(0.9 * lit), radius: 14 * lit)
+                            .animation(.easeOut(duration: 0.12), value: lit)
                     } else if s.count >= 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         FrShapePath(type: Int(s[0]))
                             .fill(ink.opacity(live ? 0.15 + 0.40 * amp : 0.10))
                             .brightness(live ? -0.25 * amp : 0)
+                            .scaleEffect(1 + 0.08 * lit)
+                            .shadow(color: ink.opacity(0.9 * lit), radius: 18 * lit)
+                            .animation(.easeOut(duration: 0.12), value: lit)
                             .frame(width: r * 2, height: r * 2)
                             .position(c)
                     }

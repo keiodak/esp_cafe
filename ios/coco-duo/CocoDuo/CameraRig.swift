@@ -10,6 +10,8 @@ import QuartzCore
 final class CameraState: ObservableObject {
     @Published var mosaicBrightness: [[Double]] = Array(repeating: Array(repeating: 0.5, count: 16), count: 8)
     @Published var cameraMotion: Double = 0.0
+    /// FOURSES: each shape's LIGHT now (0…1), for the board to glow with
+    @Published var shapeLight: [Double] = []
 }
 
 final class CameraRig: ObservableObject {

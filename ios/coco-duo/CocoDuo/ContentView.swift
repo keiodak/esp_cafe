@@ -56,7 +56,7 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
-            if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
+            if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
@@ -809,17 +809,36 @@ final class Director: ObservableObject {
     var frLightOn = false
     private var frLightSent = [Int](repeating: -1, count: 16)
     private var frLightT = 0.0
+    private var frPrevGrid: [[Double]] = []
+    private var frLo = 0.2, frHi = 0.8
+    private var frEnv = [Double](repeating: 0, count: 16)
     func frLight(_ grid: [[Double]]) {
         let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }
-        guard !on.isEmpty else { return }
-        if !frLightOn { frLightOn = true; frLightSent = [Int](repeating: -1, count: 16); frSyncShapes() }
+        guard !on.isEmpty, grid.count >= 8, grid[0].count >= 16 else { return }
+        if !frLightOn { frLightOn = true; frLightSent = [Int](repeating: -1, count: 16); frEnv = [Double](repeating: 0, count: 16); frSyncShapes() }
+        // the room's own level follows slowly, so a shape reads light against the rest of the picture, not the lamp in the room
+        let flat = grid.flatMap { $0 }
+        frLo += ((flat.min() ?? 0) - frLo) * 0.05; frHi += ((flat.max() ?? 1) - frHi) * 0.05
+        let span = max(0.08, frHi - frLo)
+        let norm = grid.map { $0.map { min(1, max(0, ($0 - frLo) / span)) } }
+        // what moves inside a shape kicks it (the change from the last frame)
+        let prev = frPrevGrid.count == 8 ? frPrevGrid : grid
+        let move = (0..<8).map { r in (0..<16).map { c in abs(grid[r][c] - prev[r][c]) } }
+        frPrevGrid = grid
         let t = CACurrentMediaTime()
-        guard t - frLightT >= 0.066 else { return }
-        frLightT = t
+        let send = t - frLightT >= 0.066
+        if send { frLightT = t }
+        var shown: [Double] = []
         for (k, s) in rig.frShapes.prefix(16).enumerated() where s.count >= 4 {
-            let v = Int((FrBoard.light(s, grid: grid, aspect: frAspect) * 1000).rounded())
-            if abs(v - frLightSent[k]) > 8 { frLightSent[k] = v; on.forEach { $0.send("O \(30 + k) \(v)") } }
+            let b = FrBoard.light(s, grid: norm, aspect: frAspect)
+            let m = min(1, FrBoard.light(s, grid: move, aspect: frAspect) * 10)
+            let target = min(1, 0.15 + 0.75 * b * b + 0.9 * m)          // (dark ~0.15 · bright ~0.9 · a movement jumps it up)
+            frEnv[k] = target > frEnv[k] ? frEnv[k] + (target - frEnv[k]) * 0.7 : frEnv[k] + (target - frEnv[k]) * 0.12   // quick up, slow down
+            shown.append(frEnv[k])
+            let v = Int((frEnv[k] * 1000).rounded())
+            if send && abs(v - frLightSent[k]) > 8 { frLightSent[k] = v; on.forEach { $0.send("O \(30 + k) \(v)") } }
         }
+        if send { camera.state.shapeLight = shown }
     }
     /// each Cafe's EARTH to the other (~30x a second, only when it moves): its EARTH A / EARTH B
     var frEarthSent = [-1, -1]
