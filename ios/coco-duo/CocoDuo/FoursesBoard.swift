@@ -16,11 +16,33 @@ enum FrBoard {
     static let role: [Int] = [4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6]
     static let horse: [Int] = [0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0]
     static let terms = ["IN", "EARTH", "OUT L", "OUT R"]
-    static let count = 48
+    /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
+    /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
+    static let nodes: [Int] = Array(0..<48) + Array(53..<75)
+    static let count = nodes.count
+    /// what an icon is: < 44 a Fourses glyph (role) · 44…47 a terminal · 11 S&H IN · 12 S&H GATE · 13 S&H OUT ·
+    /// 14 SOURCE · 15 SINK · 16 LINK
+    static func kind(_ i: Int) -> Int {
+        let n = nodes[i]
+        if n < 44 { return role[n] }
+        if n < 48 || n >= 73 { return 16 }
+        if n < 57 { return 11 }; if n < 61 { return 12 }; if n < 65 { return 13 }
+        return (n - 65) % 2 == 0 ? 14 : 15
+    }
+    static func label(_ i: Int) -> String {
+        let n = nodes[i]
+        if n < 44 { return "" }
+        if n < 48 { return terms[n - 44] }
+        if n == 73 { return "LINK OUT" }; if n == 74 { return "LINK IN" }
+        let sh = ["A", "B", "C", "D"]
+        if n < 65 { return sh[(n - 53) % 4] }
+        return ["D→A", "A→D", "B→C", "C→B"][(n - 65) / 2]
+    }
     static let shapeNames = ["○", "△", "□", "／"]
     /// the free field (the sliders take the bottom)
     static let yMax = 0.84
     static func buf(_ h: Int) -> Int { (0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0 }
+    static func icon(ofNode n: Int) -> Int { nodes.firstIndex(of: n) ?? 0 }
 
     /// the icons thrown across the board (none too near another)
     static func scatter(seed: UInt64? = nil) -> [[Double]] {
@@ -42,8 +64,8 @@ enum FrBoard {
     static func defaultLayout() -> (icons: [[Double]], shapes: [[Double]]) {
         var ic = scatter(seed: 7)
         let b0 = ic[buf(0)], b2 = ic[buf(2)]
-        ic[46] = [min(0.95, b0[0] + 0.06), b0[1]]
-        ic[47] = [min(0.95, b2[0] + 0.06), b2[1]]
+        ic[icon(ofNode: 46)] = [min(0.95, b0[0] + 0.06), b0[1]]
+        ic[icon(ofNode: 47)] = [min(0.95, b2[0] + 0.06), b2[1]]
         let sh = [[0, b0[0] + 0.03, b0[1], 0.09], [0, b2[0] + 0.03, b2[1], 0.09]]
         return (ic, sh)
     }
@@ -75,8 +97,12 @@ enum FrBoard {
         for k in 0..<12 { let a = Double(k) * .pi / 6; p.append((s[1] + cos(a) * s[3] * 0.97 / aspect, s[2] + sin(a) * s[3] * 0.97)) }
         return p.filter { inside($0.0, $0.1, s, aspect: aspect) }
     }
-    /// the wires the shapes make: the icons in each shape joined; overlapping shapes joined (a star from the first)
+    /// the wires the shapes make, as node pairs
     static func links(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
+        iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]])] }
+    }
+    /// the icons in each shape joined; overlapping shapes joined (a star from the first)
+    static func iconLinks(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
         var parent = Array(0..<(count + shapes.count))
         func find(_ i: Int) -> Int { var i = i; while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }; return i }
         func join(_ a: Int, _ b: Int) { parent[find(a)] = find(b) }
@@ -133,7 +159,18 @@ struct FrGlyph: Shape {
             let a = 0.28, b = 0.8
             let xs: [(Double, Double)] = [(-a, b), (a, b), (a, a), (b, a), (b, -a), (a, -a), (a, -b), (-a, -b), (-a, -a), (-b, -a), (-b, a), (-a, a)]
             p.move(to: pt(xs[0].0, xs[0].1)); xs.dropFirst().forEach { p.addLine(to: pt($0.0, $0.1)) }; p.closeSubpath()
-        default:                                                     // three bars: the ladder's middle
+        case 11:                                                     // S&H IN: two bowties
+            for dx in [-0.42, 0.42] {
+                p.move(to: pt(dx - 0.32, 0.55)); p.addLine(to: pt(dx + 0.32, -0.55)); p.addLine(to: pt(dx + 0.32, 0.55))
+                p.addLine(to: pt(dx - 0.32, -0.55)); p.closeSubpath()
+            }
+        case 12:                                                     // S&H GATE: a bowtie
+            p.move(to: pt(-0.6, 0.55)); p.addLine(to: pt(0.6, -0.55)); p.addLine(to: pt(0.6, 0.55)); p.addLine(to: pt(-0.6, -0.55)); p.closeSubpath()
+        case 14:                                                     // SOURCE △
+            p.move(to: pt(0, 0.7)); p.addLine(to: pt(0.65, -0.5)); p.addLine(to: pt(-0.65, -0.5)); p.closeSubpath()
+        case 15:                                                     // SINK ▽
+            p.move(to: pt(0, -0.7)); p.addLine(to: pt(0.65, 0.5)); p.addLine(to: pt(-0.65, 0.5)); p.closeSubpath()
+        default:                                                     // three bars: the ladder's middle · S&H OUT
             for x in [-0.4, 0.0, 0.4] { p.move(to: pt(x, 0.7)); p.addLine(to: pt(x, -0.7)) }
             p.move(to: pt(-0.7, 0)); p.addLine(to: pt(0.7, 0))
         }
@@ -194,7 +231,7 @@ struct FoursesBoard: View {
         GeometryReader { geo in
             let size = geo.size
             let field = CGSize(width: size.width, height: size.height * FrBoard.yMax)
-            let sounding = Set(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)).flatMap { $0 })
+            let sounding = Set(FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)).flatMap { $0 })
             ZStack(alignment: .topLeading) {
                 // the board: paper, a fine dot grid
                 Rectangle().fill(PastelTheme.padScreen)
@@ -285,15 +322,27 @@ struct FoursesBoard: View {
     private func icon(_ i: Int, lit: Bool, field: CGSize) -> some View {
         let p = rig.frIcons.indices.contains(i) ? rig.frIcons[i] : [0.5, 0.5]
         let q = view(p[0], p[1], field), s = iconSize(field)
+        let k = FrBoard.kind(i)
         return ZStack {
-            if i < 44 {
+            if k < 11 {
                 RoundedRectangle(cornerRadius: 3).fill(lit ? PastelTheme.hudOrange : PastelTheme.padScreen)
                 RoundedRectangle(cornerRadius: 3).strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
-                FrGlyph(role: FrBoard.role[i])
+                FrGlyph(role: k)
                     .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.18)
+            } else if k < 16 {                                                     // INTERSEXON: round, with its letter
+                Circle().fill(lit ? PastelTheme.hudOrange : PastelTheme.padScreen)
+                Circle().strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
+                FrGlyph(role: k)
+                    .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                    .padding(s * 0.22)
+                Text(FrBoard.label(i))
+                    .font(.hud(6, .semibold))
+                    .foregroundStyle(PastelTheme.textSecondary)
+                    .fixedSize()
+                    .offset(y: s * 0.72)
             } else {
-                Text(FrBoard.terms[i - 44])
+                Text(FrBoard.label(i))
                     .font(.hud(8, .semibold))
                     .foregroundStyle(lit ? PastelTheme.selectionText : PastelTheme.padScreen)
                     .padding(.horizontal, 5)
@@ -302,7 +351,7 @@ struct FoursesBoard: View {
                     .fixedSize()
             }
         }
-        .frame(width: i < 44 ? s : nil, height: i < 44 ? s : nil)
+        .frame(width: k < 16 ? s : nil, height: k < 16 ? s : nil)
         .scaleEffect(grab?.kind == 0 && grab?.index == i ? 1.25 : 1)
         .position(q)
         .allowsHitTesting(false)
@@ -405,7 +454,7 @@ struct FoursesBoard: View {
                     guard dd < R else { continue }
                     let firm = min(1, max(0, (t.r - 7) / 22))                    // the finger's contact: tip … flat
                     let near = 1 - dd / R * 0.6                                   // (the edge of the finger touches less)
-                    links[48 + fi, default: [:]][i] = Int((150 + firm * 780) * near)
+                    links[48 + fi, default: [:]][FrBoard.nodes[i]] = Int((150 + firm * 780) * near)
                 }
             }
             d.frTouches(links)

@@ -2467,13 +2467,18 @@ void hb_write(const uint8_t *d, size_t n) {
 // (1000 = a wire, 2K; 0 = off; between: a finger, light ~10M .. firm ~20K), and the node voltages are solved
 // with it. Nodes 44 IN (the Cafe's input), 45 EARTH, 46 OUT L (main), 47 OUT R (ASH), 48..52 the fingers (each
 // also leaks to the body: the mains' hum). "O <id> <v>": 0..3 the pots · 8 RANGE (0 CV · 500 LOW · 1000 AUDIO)
-// · 9 the board (0 TARPTERGE · 1 ARPSERGE) · 19 RESET.
+// · 9 the board (0 TARPTERGE · 1 ARPSERGE) · 19 RESET · 20 LINK IN (0..1000 = 0..8.4 V: the other Cafe's LINK OUT).
+// And half of crucFX's INTERSEXON on every Cafe (read from its Gerbers too): four sample & holds (4066 + LM324
+// followers: 53+k IN · 57+k GATE (100K down: a touch of a gate samples) · 61+k OUT) and four voltage-to-current
+// cells (an op-amp forcing a push-pull pair's emitters, 10K between two held values; the collectors are the
+// nodes: 65+2j SOURCE (the PNP, △), 66+2j SINK (the NPN, ▽)) — D→A, A→D, B→C, C→B. 73 LINK OUT (reported to the
+// phone, "t <0..1000>", which hands it to the other Cafe's LINK IN, 74): slow (the link), but it crosses.
 // (Memory: the heap has nothing to spare — the tape takes all of it. So the solver's working space is a piece of
 //  the tape (FOURSES does not use it), set up again each time FOURSES starts; the links are kept in RTC memory.)
 // ==========================================
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
-#define TP_N 53
+#define TP_N 75
 #define TP_NL 64
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
@@ -2485,8 +2490,8 @@ static const int16_t tp_sig[128] = { 321,333,345,357,370,383,397,411,425,440,456
 RTC_DATA_ATTR static uint8_t tp_la[TP_NL], tp_lb[TP_NL];
 RTC_DATA_ATTR static int16_t tp_lg[TP_NL];                    // (Q12 per 10K; 0 = no link)
 // the working space (a piece of the tape)
+struct TpWs2 { int32_t num[TP_N], den[TP_N]; };
 struct TpWs {
-  int32_t num[TP_N], den[TP_N];
   int16_t E[TP_N], G[TP_N], V[TP_N];
   int16_t cg[2][TP_NL];
   uint8_t ca[2][TP_NL], cb[2][TP_NL];
@@ -2494,8 +2499,12 @@ struct TpWs {
   uint8_t ncl[2], nan[2], lad[2][4];
 };
 static_assert(sizeof(TpWs) <= DCHUNK_BYTES, "FOURSES: the working space must fit a piece of the tape");
+static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece of the tape");
 #define TW ((TpWs *)dchunk[100])
+#define TW2 ((TpWs2 *)dchunk[101])
 volatile int16_t fr_p[10] = { 500, 500, 500, 500, 0, 0, 0, 0, 1000, 0 };
+volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
+static const uint8_t tp_vx[4] = { 3, 0, 1, 2 }, tp_vy[4] = { 0, 3, 2, 1 };   // the V→I cells: I = (X - Y) / 10K
 volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
 volatile int32_t tp_kc = 5000;                                // a node's current into the capacitor (Q16)
 volatile bool fr_flip = false, fr_reset = true, fr_gate = false;
@@ -2556,6 +2565,7 @@ static void tp_link(int a, int b, int v) {                   // (the loop) a tou
 static void tp_clear() { for (int i = 0; i < TP_NL; i++) tp_lg[i] = 0; tp_rebuild(); }
 // the horses' state (the audio)
 static int32_t tp_pos[4], tp_out[4], tp_olp[4], tp_bnd[4];
+static int32_t tp_sh[4] = { 4200, 4200, 4200, 4200 };         // INTERSEXON: what each sample & hold holds (mV)
 static int32_t tp_hum = 0;
 // a node's own source (mV) and its conductance to it (Q12 per 10K)
 static inline void tp_eg(TpWs *w, int i, int32_t in) {
@@ -2577,7 +2587,13 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   } else if (i == 44) { e = 4200 + in * 2; g = 4096; }                            // IN (10K)
   else if (i == 45) { e = 4200 + pc_emod * 30; g = 410; }                         // EARTH
   else if (i < 48) { e = 4200; g = 410; }                                         // OUT: an amplifier's input
-  else { e = tp_hum; g = 41; }                                                    // a finger: the body (1M, the hum)
+  else if (i < 53) { e = tp_hum; g = 41; }                                        // a finger: the body (1M, the hum)
+  else if (i < 57) { e = tp_sh[i - 53]; g = 1; }                                  // S&H IN (floats: reads what it holds)
+  else if (i < 61) { e = 0; g = 410; }                                            // S&H GATE (100K down)
+  else if (i < 65) { e = tp_sh[i - 61]; if (e > 6900) e = 6900; if (e < 20) e = 20; g = 20480; }   // S&H OUT (LM324)
+  else if (i < 73) { e = 4200; g = 0; }                                           // a collector: only a current (below)
+  else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
+  else { e = tp_linkin; g = 4096; }                                               // LINK IN (10K)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
@@ -2604,7 +2620,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   const bool solve = fresh || ((++ph & 3) == 0);                                  // (the network: every 4th sample, 8 kHz)
   if (solve && na) {
     for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(w, i, in); if (fresh) V[i] = w->E[i]; }
-    int32_t *num = w->num, *den = w->den;
+    int32_t *num = TW2->num, *den = TW2->den;
     for (int j = 0; j < na; j++) { int i = an[j]; num[i] = w->E[i] * w->G[i]; den[i] = w->G[i]; }
     for (int h = 0; h < 4; h++) {                                                 // the ladders (100K, 100K)
       if (!w->lad[c][h]) continue;
@@ -2615,10 +2631,17 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
       int a = la[k], b = lb[k]; int32_t g = lg[k];
       num[a] += g * V[b]; den[a] += g; num[b] += g * V[a]; den[b] += g;
     }
+    for (int j = 0; j < 4; j++) {                                                 // INTERSEXON: the collectors' currents
+      int so = 65 + 2 * j, si = so + 1;
+      if (!af[so] && !af[si]) continue;
+      int32_t x = tp_sh[tp_vx[j]], y = tp_sh[tp_vy[j]];                          // (the followers: the held values)
+      if (af[si] && x > y) num[si] -= (x - y) * 4096;                           // the NPN sinks (X above Y)
+      if (af[so] && y > x) num[so] += (y - x) * 4096;                           // the PNP sources (X below Y)
+    }
     for (int j = 0; j < na; j++) {
       int i = an[j];
       if (i < TP_NB && tp_role[i] == TP_POS) { V[i] = w->E[i]; continue; }       // (the capacitor holds)
-      if (den[i] > 0) V[i] = (int16_t)(num[i] / den[i]);
+      if (den[i] > 0) { int32_t v = num[i] / den[i]; if (v > 9500) v = 9500; if (v < -1000) v = -1000; V[i] = (int16_t)v; }   // (the rails)
     }
   }
   // what the touches and wires pull out of the capacitors
@@ -2658,6 +2681,8 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     if (np > 8300000) np = 8300000; if (np < 0) np = 0;                           // (the mirrors run out)
     tp_pos[h] = np;
   }
+  // INTERSEXON: a gate above ~3 V samples (its own regulated supply: a lower threshold than the Fourses) (the 4066 on: the capacitor follows its IN)
+  for (int k = 0; k < 4; k++) if (af[57 + k] && V[57 + k] > 3000) tp_sh[k] = af[53 + k] ? V[53 + k] : tp_sh[k];
   fr_gate = tp_out[0] > 3400;
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
   l = l * 2047 / 3000; r = r * 2047 / 3000;

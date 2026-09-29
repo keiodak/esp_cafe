@@ -94,6 +94,8 @@ final class CafeUnit: ObservableObject {
     let outs = OutScope()
     // HABIT: packets from the Cafe (its input) go to onHabit; the link's speed both ways, kB/s, and what was dropped
     var onHabit: ((Data) -> Void)?
+    /// FOURSES: this Cafe's LINK OUT (0…1000), for the other's LINK IN
+    var onLink: ((Int) -> Void)?
     @Published var hbUp: Double = 0
     @Published var hbDown: Double = 0
     @Published var hbDrops = 0
@@ -279,6 +281,9 @@ final class CafeUnit: ObservableObject {
             polls += 1
         case "U":
             otaLine(l)
+        case "t":
+            let a = l.split(separator: " ")
+            if a.count >= 2, let v = Int(a[1]) { onLink?(v) }
         case "d":
             let a = l.split(separator: " ", maxSplits: 2)
             guard a.count >= 3, let st = Int(a[1]), savePending.removeValue(forKey: st) != nil, saveBuf != nil else { return }

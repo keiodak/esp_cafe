@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.17"
+#define FW_VERSION "4.18"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -838,6 +838,7 @@ void pc_line(char *s) {
     case 'O': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // FOURSES: "O <id> <0..1000>"
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
                 if (id >= 0 && id < 10) { fr_p[id] = (int16_t)val; fr_update(); }
+                else if (id == 20) tp_linkin = val * 84 / 10;                              // LINK IN: the other Cafe's LINK OUT
                 else if (id == 19) fr_reset = true;
               } break;
     case 'T': { long a = -1, b2 = -1, v = 0; if (sscanf(s + 1, "%ld %ld %ld", &a, &b2, &v) == 3) {   // FOURSES: a touch / a wire
@@ -903,6 +904,17 @@ void pc_line(char *s) {
   }
 }
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
+// FOURSES: LINK OUT to the phone (for the other Cafe's LINK IN), ~30x a second while it is joined to anything
+void tp_service() {
+  static uint32_t t = 0; static int last = -1;
+  if (pc_mode != 7 || !tp_on || !ble_conn || millis() - t < 33) return;
+  t = millis();
+  if (!TW->af[tp_cur][73]) return;
+  int v = TW->V[73] * 10 / 84; if (v < 0) v = 0; if (v > 1000) v = 1000;
+  if (abs(v - last) < 3) return;
+  last = v;
+  char b[16]; snprintf(b, sizeof(b), "t %d", v); pc_out(b);
+}
 void hb_service() {
   static uint32_t mt = 0;                           // the MTU as the link has it now (the callback may not have told us)
   if (pc_mode == 6 && ble_conn && millis() - mt > 1000) {
@@ -1176,6 +1188,7 @@ void loop() {
   pc_service();   // lines from the phone (BLE)
   wv_finish();    // WAVE REC: the table made ready
   hb_service();   // HABIT: the input out to the phone
+  tp_service();   // FOURSES: LINK OUT
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
   // latch the switches for the status line

@@ -76,6 +76,13 @@ final class Director: ObservableObject {
             self.sun.keep(); if onPc { self.pcoco.keep() }                   // (an engine the output change stopped: again)
             if !onPc && self.arp.speech.playing { self.arp.speech.playing = false; self.rig.speechPlaying = false }
         }
+        for u in units {                                          // FOURSES: each Cafe's LINK OUT to the other's LINK IN
+            u.onLink = { [weak self, weak u] v in
+                guard let self, let u else { return }
+                let o = self.units[1 - (u.slot == 1 ? 1 : 0)]
+                if o.isConnected && self.rig.preset[o.slot] == Preset.ble && self.rig.mode[o.slot] == 7 { o.send("O 20 \(v)") }
+            }
+        }
         for u in units {
             u.onReady = { [weak self, weak u] in
                 guard let self, let u else { return }
