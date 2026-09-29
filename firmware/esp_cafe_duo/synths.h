@@ -2703,11 +2703,11 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   for (int k = 0; k < 4; k++) if (af[57 + k] && V[57 + k] > 3000) tp_sh[k] = af[53 + k] ? V[53 + k] : tp_sh[k];
   fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 3400;                            // YELLOW (and the lamp)
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
-  l = l * 2047 / 3000; r = r * 2047 / 3000;
+  l = l * 2047 / 1800; r = r * 2047 / 1800;                                      // (louder: ±1.8 V is full scale)
   dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
   dcr += ((r << 8) - dcr) >> 14; r -= dcr >> 8;
-  // no click as the wires change: a new network smooths the output for a moment (~600 Hz, back open in ~15 ms)
-  if (fresh && sm > 512) sm = 512;
+  // no click as the wires change: a new network smooths the output for a moment (~2 kHz, back open in ~10 ms)
+  if (fresh && sm > 1536) sm = 1536;                                            // (gentle: ~2 kHz, the level kept)
   if (sm < 4096) { sm += ((4096 - sm) >> 7) + 1; if (sm > 4096) sm = 4096; }
   yl += ((l - yl) * sm) >> 12; yr += ((r - yr) * sm) >> 12;
   l = yl; r = yr;
@@ -2717,19 +2717,19 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   return l;
 }
 
-// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two halves, each a knob
-// buffered into two sample & holds (4066) that close on the two edges of a slow clock (a Schmitt oscillator, its square
-// through capacitors): what the knob did between the edges is its turning, a diode charges a capacitor with it and it
-// leaks away — that ENERGY is the tail current of the differential pairs the triangle oscillators (LM324) go through,
-// so the sound is as loud as the knob is being turned. Each half's two oscillators follow the two held positions.
-// Here: a pad is the two knobs (X = half A's, Y = half B's); OUT = half A, ASH = half B ("E <id> <0..1000>").
-//   0 KNOB A · 1 KNOB B · 2 CLOCK · 3 DECAY · 4 PITCH · 5 SPREAD · 6 BEND (energy into the second oscillator's pitch) · 7 MIX
+// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two halves, each a knob:
+// turning it is what makes the sound — how fast it turns charges an ENERGY that leaks away, and that is the tail current
+// of the differential pairs its two triangle oscillators (LM324) go through, so it is as loud as the knob is being turned;
+// where the knob is sets their pitch (freely, no steps). A switch per half: LO / HI (two octaves up).
+// OUT = half A, ASH = half B ("E <id> <0..1000>"):
+//   0 KNOB A · 1 KNOB B · 3 DECAY · 4 PITCH · 5 SPREAD · 6 BEND (energy into the second oscillator's pitch) · 7 MIX ·
+//   8 SWITCH A · 9 SWITCH B
 #define nb_p fr_p                                             // (FOURSES' settings: the two modes never run together)
 volatile bool nb_reset = true, nb_gate = false;
 struct NbState {                                              // (all of it in a piece of the tape: no RAM of its own)
-  int32_t kn[2], s1[2], s2[2], pv[2][2], e[2], es[2], lem[2];
-  uint32_t cph[2], ph[2][2], inc[2][2];
-  uint32_t sub, cinc[2], inc0;
+  int32_t kn[2], kp[2], e[2], es[2], lem[2];
+  uint32_t ph[2][2], inc[2][2];
+  uint32_t sub, inc0;
   int32_t dk, spread;
 };
 static_assert(sizeof(NbState) <= DCHUNK_BYTES, "NOBSRINE: its state must fit a piece of the tape");
@@ -2743,11 +2743,9 @@ static inline uint32_t nb_exp2(uint32_t base, int32_t x) {   // base × 2^(x / 4
   return v > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)v;
 }
 static void nb_settings(NbState *n) {                         // (every 16th sample, from the settings; 32 kHz taken as is)
-  n->cinc[0] = nb_exp2(40265, nb_p[2] * 27213 / 1000);        // CLOCK: 0.3 … 30 Hz
-  n->cinc[1] = (uint32_t)(((uint64_t)n->cinc[0] * 74056) >> 16);   // (half B ×1.13: they drift)
   n->dk = (int32_t)nb_exp2(3495, -(nb_p[3] * 31310 / 1000)); if (n->dk < 1) n->dk = 1;   // DECAY: 0.15 … 30 s
   n->inc0 = nb_exp2(4026532, nb_p[4] * 20480 / 1000);         // PITCH: 30 … 960 Hz
-  n->spread = nb_p[5] * 24576 / 1000;                         // SPREAD: 0 … 6 octaves
+  n->spread = nb_p[5] * 24576 / 1000;                         // SPREAD: 0 … 6 octaves over the knob
 }
 static inline uint32_t nb_pitch(NbState *n, int32_t x) {
   uint32_t v = nb_exp2(n->inc0, x);
@@ -2763,32 +2761,25 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
   if (nb_reset) {
     nb_reset = false;
     memset(n, 0, sizeof(NbState));
-    for (int h = 0; h < 2; h++) { int32_t k = nb_p[h] * 65; n->kn[h] = n->s1[h] = n->s2[h] = n->pv[h][0] = n->pv[h][1] = k; n->lem[h] = pc_emod; }
-    n->cph[1] = 0x80000000u;
+    for (int h = 0; h < 2; h++) { n->kn[h] = n->kp[h] = (nb_p[h] * 65) << 8; n->lem[h] = pc_emod; }
     nb_settings(n);
   }
   const bool sub = (++n->sub & 15) == 0;
   if (sub) nb_settings(n);
   int32_t o[2];
   for (int h = 0; h < 2; h++) {
-    n->kn[h] += ((nb_p[h] * 65) - n->kn[h]) >> 6;                               // the knob (the pot and its buffer)
-    uint32_t c0 = n->cph[h]; n->cph[h] = c0 + n->cinc[h];
-    bool up = !(c0 & 0x80000000u) && (n->cph[h] & 0x80000000u), dn = (c0 & 0x80000000u) && !(n->cph[h] & 0x80000000u);
-    if (up || dn) {                                                             // an edge: one of the holds takes the knob
-      if (up) n->s1[h] = n->kn[h]; else n->s2[h] = n->kn[h];
-      int32_t d = n->s1[h] - n->s2[h]; if (d < 0) d = -d;                         // how far it turned between the edges
-      int32_t de = pc_emod - n->lem[h]; if (de < 0) de = -de; n->lem[h] = pc_emod; // (EARTH moving turns it too)
-      int32_t t = (d + de * 400) * 3; if (t > 65535) t = 65535;
-      t <<= 8;
-      if (t > n->e[h]) n->e[h] = t;                                             // the diode charges the capacitor
-    }
-    n->e[h] -= ((n->e[h] >> 12) * n->dk) >> 12;                                 // ...and it leaks away
-    n->es[h] += ((n->e[h] >> 8) - n->es[h]) >> 7;                               // (the tail current: no click)
-    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) >> 8;                               // the held positions, a little slewed
-    n->pv[h][1] += (n->s2[h] - n->pv[h][1]) >> 8;
+    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) >> 8;                        // the knob (Q24; its steps smoothed, ~8 ms)
+    int32_t d = n->kn[h] - n->kp[h]; if (d < 0) d = -d; n->kp[h] = n->kn[h];     // how fast it turns
+    int32_t de = pc_emod - n->lem[h]; if (de < 0) de = -de; n->lem[h] = pc_emod; // (EARTH moving turns it too)
+    int32_t e = n->e[h] + d * 5 + de * 60000;                                   // the energy gathers...
+    if (e > 16777215) e = 16777215;
+    e -= ((e >> 12) * n->dk) >> 12;                                             // ...and leaks away
+    n->e[h] = e;
+    n->es[h] += ((e >> 8) - n->es[h]) >> 7;                                     // (the tail current: no click)
     if (sub) {
-      n->inc[h][0] = nb_pitch(n, (int32_t)(((int64_t)n->spread * (n->pv[h][0] - 32768)) >> 16));
-      n->inc[h][1] = nb_pitch(n, (int32_t)(((int64_t)n->spread * (n->pv[h][1] - 32768)) >> 16) + 2396);   // (a fifth above)
+      int32_t x = (int32_t)(((int64_t)n->spread * ((n->kn[h] >> 8) - 32768)) >> 16) + (nb_p[8 + h] >= 500 ? 8192 : 0);
+      n->inc[h][0] = nb_pitch(n, x);
+      n->inc[h][1] = nb_pitch(n, x + 2396 + 23);                                // (a fifth above, a hair wide)
     }
     int32_t tri[2];
     for (int k = 0; k < 2; k++) {
@@ -2802,10 +2793,12 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
     for (int k = 0; k < 2; k++) v += (nb_sat(tri[k] * 3 / 2) * n->es[h]) >> 16;    // through the pairs: as loud as the energy
     o[h] = (v * 3) >> 6;
   }
-  nb_gate = n->cph[0] & 0x80000000u;                                            // YELLOW / the lamp: half A's clock
+  nb_gate = n->es[0] > 8000;                                                    // YELLOW / the lamp: half A sounding
   int32_t l = o[0] + (((o[1] - o[0]) * nb_p[7]) / 2000), r = o[1] + (((o[0] - o[1]) * nb_p[7]) / 2000);
-  if (l > 2047) l = 2047; if (l < -2047) l = -2047;
-  if (r > 2047) r = 2047; if (r < -2047) r = -2047;
+  if (l > 2047) l = 2047;
+  if (l < -2047) l = -2047;
+  if (r > 2047) r = 2047;
+  if (r < -2047) r = -2047;
   *rout = r;
   return l;
 }

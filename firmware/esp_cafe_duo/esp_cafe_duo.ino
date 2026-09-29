@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.28"
+#define FW_VERSION "4.29"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -837,7 +837,7 @@ void pc_line(char *s) {
               } break;
     case 'E': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // NOBSRINE: "E <id> <0..1000>"
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
-                if (id >= 0 && id < 8) nb_p[id] = (int16_t)val;
+                if (id >= 0 && id < 10) nb_p[id] = (int16_t)val;
                 else if (id == 19) nb_reset = true;
               } break;
     case 'O': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // FOURSES: "O <id> <0..1000>"

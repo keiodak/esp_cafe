@@ -960,6 +960,10 @@ final class Director: ObservableObject {
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
 
+    func setNbSw(_ row: Int, _ h: Int, _ on: Bool) {
+        rig.nbSw[row * 2 + h] = on
+        if rig.inCtx(row) && units[row].isConnected { units[row].send("E \(8 + h) \(on ? 1000 : 0)") }
+    }
     func nbDice(_ row: Int) {
         rig.nbDice(row: row)
         if rig.inCtx(row) && units[row].isConnected { (0..<4).forEach { k in rig.nbCommands(pad: row * 4 + k).forEach(units[row].send) } }
@@ -1056,6 +1060,9 @@ private struct MainScreen: View {
     @ViewBuilder private var pads: some View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rig.padSet == .nobs {
+            NobsBoard(d: d, rig: rig)                                                      // NOBSRINE: the knobs themselves
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
             FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself

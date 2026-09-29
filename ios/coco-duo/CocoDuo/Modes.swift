@@ -127,18 +127,12 @@ enum FrPad {
     }
 }
 
-/// NOBSRINE (BLE mode 8): each row a Cafe's own; its first pad the two knobs (moving it is turning them: the sound is
-/// as loud as they are turned) — "E <id> <0..1000>"
+/// NOBSRINE (BLE mode 8): each row a Cafe's own — two big knobs (turning them is what sounds), a LO / HI switch each,
+/// DECAY · PITCH · SPREAD · BEND · MIX — "E <id> <0..1000>"
 enum NbPad {
-    static let titles = ["KNOB A · KNOB B", "CLOCK · DECAY", "PITCH · SPREAD", "BEND · MIX"]
-    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.45, 0.5), (0.4, 0.5), (0.3, 0.0)]
-    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String? {
-        switch i % 4 {
-        case 1: return String(format: "%.1f Hz · %.1f s", 0.3 * pow(100, x), 0.15 * pow(200, y))
-        case 2: return String(format: "%.0f Hz · %.1f OCT", 30 * pow(32, x), 6 * y)
-        default: return nil
-        }
-    }
+    static let titles = ["KNOB A · KNOB B", "DECAY · PITCH", "SPREAD · BEND", "MIX"]
+    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.5, 0.4), (0.5, 0.3), (0.0, 0.0)]
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String? { nil }
 }
 
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
@@ -449,12 +443,22 @@ final class Rig: ObservableObject {
     /// NOBSRINE: top row Cafe A, bottom row Cafe B
     let nbAxes: [PadAxis] = (0..<8).map { PadAxis(NbPad.starts[$0 % 4]) }
     func nbCommands(pad i: Int) -> [String] {
-        let a = nbAxes[i], k = i % 4
-        return ["E \(2 * k) \(Int((a.x * 1000).rounded()))", "E \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
+        let a = nbAxes[i], x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
+        switch i % 4 {
+        case 0: return ["E 0 \(x)", "E 1 \(y)"]            // the knobs
+        case 1: return ["E 3 \(x)", "E 4 \(y)"]            // DECAY · PITCH
+        case 2: return ["E 5 \(x)", "E 6 \(y)"]            // SPREAD · BEND
+        default: return ["E 7 \(x)"]                        // MIX
+        }
     }
-    func nbAll(slot: Int) -> [String] { (0..<4).flatMap { nbCommands(pad: (slot == 1 ? 4 : 0) + $0) } }
+    /// each Cafe's two switches (LO / HI), top row A's
+    @Published var nbSw: [Bool] = [false, false, false, false]
+    func nbAll(slot: Int) -> [String] {
+        let r = slot == 1 ? 1 : 0
+        return (0..<4).flatMap { nbCommands(pad: r * 4 + $0) } + (0..<2).map { "E \(8 + $0) \(nbSw[r * 2 + $0] ? 1000 : 0)" }
+    }
     func nbDice(row: Int) {
-        for k in 1..<4 { nbAxes[row * 4 + k].x = Double.random(in: 0.1...0.9); nbAxes[row * 4 + k].y = Double.random(in: 0.1...0.9) }
+        for k in 1..<3 { nbAxes[row * 4 + k].x = Double.random(in: 0.1...0.9); nbAxes[row * 4 + k].y = Double.random(in: 0.1...0.9) }
     }
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO (all four, from the key)
     @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
