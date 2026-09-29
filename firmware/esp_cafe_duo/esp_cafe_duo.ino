@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.47"
+#define FW_VERSION "4.48"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -943,6 +943,11 @@ void hb_service() {
 void pc_service() {                       // called from loop(): lines that arrived over BLE
   RTC_DATA_ATTR static char bl[300]; static int bn = 0;            // long enough for a W line (128 samples)
   ble_watch();
+  { static uint32_t st_ms = 0; uint32_t ms = millis();                // (the serial monitor: how things stand, every 5 s)
+    if (ms - st_ms >= 5000) { st_ms = ms;
+      Serial.printf("[st] v%s reset %d ble %d nobtn %d conn %d heap %u min %u largest %u mode %d\n", FW_VERSION, (int)esp_reset_reason(),
+        ble_ok, cafe_no_ble ? 1 : 0, ble_conn ? 1 : 0, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (int)pc_mode); } }
   while (ble_rh != ble_wh) {
     char c = ble_rb[ble_rh]; ble_rh = (ble_rh + 1) & 1023;
     if (c == '\n' || c == '\r') { if (bn) { bl[bn] = 0; pc_line(bl); bn = 0; } }
