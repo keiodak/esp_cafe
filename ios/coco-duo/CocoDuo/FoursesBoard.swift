@@ -23,7 +23,7 @@ enum FrBoard {
     static let shapeBlue = Color(hex: 0x6FA8DC)
     /// what a shape passes: 0 both Cafes (light blue) · 1 TARPTERGE only (Cafe A, navy) · 2 ARPSERGE only (Cafe B, green)
     static let targetNames = ["A+B", "TARP", "ARP"]
-    static let targetInk = [Color(hex: 0x6FA8DC), Color(hex: 0x1F4E79), Color(hex: 0x2E7D4F)]
+    static let targetInk = [PastelTheme.hudOrange, Color(hex: 0x1F4E79), Color(hex: 0x2E7D4F)]
     static func target(_ s: [Double]) -> Int { let i = Int(s[0]) == 3 ? 5 : 4; return s.count > i ? Int(s[i]) : 0 }
     static func passes(_ s: [Double], slot: Int) -> Bool { let t = target(s); return t == 0 || t == slot + 1 }
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &

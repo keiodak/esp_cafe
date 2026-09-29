@@ -224,15 +224,22 @@ struct DiagRow: View {
 struct ChipButton: View {
     let title: String
     let filled: Bool
+    var height: CGFloat = PanelMetrics.chipHeight
+    var font: CGFloat = PanelMetrics.chipFont
     let action: () -> Void
+
+    init(title: String, filled: Bool, height: CGFloat = PanelMetrics.chipHeight, font: CGFloat = PanelMetrics.chipFont,
+         action: @escaping () -> Void) {
+        self.title = title; self.filled = filled; self.height = height; self.font = font; self.action = action
+    }
 
     var body: some View {
         Text(title)
-            .font(.hud(PanelMetrics.chipFont, .medium))
+            .font(.hud(font, .medium))
             .lineLimit(1).minimumScaleFactor(0.6)                 // (a long name in a full row: smaller, not cut)
             .foregroundStyle(filled ? PastelTheme.selectionText : PastelTheme.textPrimary)
             .frame(maxWidth: .infinity)
-            .frame(height: PanelMetrics.chipHeight)
+            .frame(height: height)
             .background(ChipBackground(fill: filled ? PastelTheme.selection : nil))
             .contentShape(PastelTheme.chipShape)
             .onTapGesture { action() }
