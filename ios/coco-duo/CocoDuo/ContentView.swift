@@ -122,6 +122,7 @@ final class Director: ObservableObject {
         case .wave: return rig.wvAxes
         case .habit: return rig.habitAxes
         case .fourses: return rig.frAxes
+        case .nobs: return rig.nbAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -164,6 +165,7 @@ final class Director: ObservableObject {
                 }
                 w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
+            case 8: rig.nbAll(slot: s).forEach(u.send)
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -274,6 +276,9 @@ final class Director: ObservableObject {
             break                                                // (the phone reads HABIT's pads itself)
         case .fourses:
             for u in ctxUnits() { rig.frCommands(pad: i).forEach(u.send) }
+        case .nobs:                                              // (each row its own Cafe)
+            let row = i / 4
+            if rig.inCtx(row) && units[row].isConnected { rig.nbCommands(pad: i).forEach(units[row].send) }
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -955,6 +960,11 @@ final class Director: ObservableObject {
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
 
+    func nbDice(_ row: Int) {
+        rig.nbDice(row: row)
+        if rig.inCtx(row) && units[row].isConnected { (0..<4).forEach { k in rig.nbCommands(pad: row * 4 + k).forEach(units[row].send) } }
+        refresh()
+    }
     func noiseDice() {
         rig.nzDice()
         for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }
@@ -1083,6 +1093,7 @@ private struct MainScreen: View {
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
         case .habit: return (rig.habitAxes[i], HabitPad.titles[i])
         case .fourses: return (rig.frAxes[i], FrPad.titles[i])
+        case .nobs: return (rig.nbAxes[i], NbPad.titles[i % 4])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -1114,6 +1125,9 @@ private struct MainScreen: View {
             return { x, y in HabitPad.caption(i, x, y) }
         case .fourses:
             return { x, y in FrPad.caption(i, x, y) }
+        case .nobs:
+            if NbPad.caption(i, 0.5, 0.5) == nil { return nil }
+            return { x, y in NbPad.caption(i, x, y) ?? "" }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1567,6 +1581,13 @@ private struct HudBar: View {
             case 1: key("forward.end") { d.fxNext(1) }
             case 2: key("dice") { d.fxRandom(0) }
             default: key("dice") { d.fxRandom(1) }
+            }
+        case .nobs:
+            switch n {
+            case 0: key("dice") { d.nbDice(0) }                                                      // Cafe A's settings anew
+            case 1: key("dice") { d.nbDice(1) }                                                      // Cafe B's
+            case 2: textKey("RESET") { d.ctxUnits().forEach { $0.send("E 19 1") } }                  // the energy and holds away
+            default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .knob:
             blank

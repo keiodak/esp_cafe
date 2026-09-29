@@ -26,10 +26,11 @@ struct PresetManagerView: View {
     @ViewBuilder private var rightCards: some View {
                 if rig.preset.contains(Preset.ble) {
                 PanelCard(title: "BLE MODE", note: rig.ctxPreset == Preset.ble ? Preset.tag(Preset.ble) : "choose BLE first") {
-                    VStack(spacing: PanelMetrics.chipSpacing) {                 // two rows of four, larger
+                    VStack(spacing: PanelMetrics.chipSpacing) {                 // two rows, larger
+                        let per = (Preset.modeNames.count + 1) / 2
                         ForEach(0..<2, id: \.self) { row in
                             HStack(spacing: PanelMetrics.chipSpacing) {
-                                ForEach(row * 4..<min(row * 4 + 4, Preset.modeNames.count), id: \.self) { m in
+                                ForEach(row * per..<min(row * per + per, Preset.modeNames.count), id: \.self) { m in
                                     ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m,
                                                height: 22, font: 9.5) {
                                         d.setMode(m)

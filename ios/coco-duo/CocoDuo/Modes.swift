@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "NOBSRINE"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -111,7 +111,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, nobs, harmony, multi, arp, speech, pcoco, sun, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
@@ -124,6 +124,20 @@ enum FrPad {
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
         if i < 4 { return y < 0.47 ? "FALL" : (y > 0.53 ? "RISE" : "TRI") }
         return x < 0.02 ? "OFF" : "\(Int((x * 100).rounded()))"
+    }
+}
+
+/// NOBSRINE (BLE mode 8): each row a Cafe's own; its first pad the two knobs (moving it is turning them: the sound is
+/// as loud as they are turned) — "E <id> <0..1000>"
+enum NbPad {
+    static let titles = ["KNOB A · KNOB B", "CLOCK · DECAY", "PITCH · SPREAD", "BEND · MIX"]
+    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.45, 0.5), (0.4, 0.5), (0.3, 0.0)]
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String? {
+        switch i % 4 {
+        case 1: return String(format: "%.1f Hz · %.1f s", 0.3 * pow(100, x), 0.15 * pow(200, y))
+        case 2: return String(format: "%.0f Hz · %.1f OCT", 30 * pow(32, x), 6 * y)
+        default: return nil
+        }
     }
 }
 
@@ -432,6 +446,16 @@ final class Rig: ObservableObject {
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
     /// FOURSES
     let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
+    /// NOBSRINE: top row Cafe A, bottom row Cafe B
+    let nbAxes: [PadAxis] = (0..<8).map { PadAxis(NbPad.starts[$0 % 4]) }
+    func nbCommands(pad i: Int) -> [String] {
+        let a = nbAxes[i], k = i % 4
+        return ["E \(2 * k) \(Int((a.x * 1000).rounded()))", "E \(2 * k + 1) \(Int((a.y * 1000).rounded()))"]
+    }
+    func nbAll(slot: Int) -> [String] { (0..<4).flatMap { nbCommands(pad: (slot == 1 ? 4 : 0) + $0) } }
+    func nbDice(row: Int) {
+        for k in 1..<4 { nbAxes[row * 4 + k].x = Double.random(in: 0.1...0.9); nbAxes[row * 4 + k].y = Double.random(in: 0.1...0.9) }
+    }
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO (all four, from the key)
     @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
@@ -542,10 +566,10 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses][min(max(ctxMode, 0), 7)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .nobs][min(max(ctxMode, 0), 8)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
-    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
+    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi || padSet == .nobs }
     /// the TAP pad (tempo): the 4th pad of each row where there is a tempo (ARP: only the bottom row's)
     func isTapPad(_ i: Int) -> Bool {
         switch padSet {

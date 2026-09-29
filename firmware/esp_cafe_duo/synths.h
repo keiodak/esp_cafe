@@ -1128,7 +1128,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES ("M 25 <0..7>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES, 8 = NOBSRINE ("M 25 <0..8>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -2717,6 +2717,102 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   return l;
 }
 
+// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two halves, each a knob
+// buffered into two sample & holds (4066) that close on the two edges of a slow clock (a Schmitt oscillator, its square
+// through capacitors): what the knob did between the edges is its turning, a diode charges a capacitor with it and it
+// leaks away — that ENERGY is the tail current of the differential pairs the triangle oscillators (LM324) go through,
+// so the sound is as loud as the knob is being turned. Each half's two oscillators follow the two held positions.
+// Here: a pad is the two knobs (X = half A's, Y = half B's); OUT = half A, ASH = half B ("E <id> <0..1000>").
+//   0 KNOB A · 1 KNOB B · 2 CLOCK · 3 DECAY · 4 PITCH · 5 SPREAD · 6 BEND (energy into the second oscillator's pitch) · 7 MIX
+volatile int16_t nb_p[8] = { 500, 500, 450, 500, 400, 500, 300, 0 };
+volatile bool nb_reset = true, nb_gate = false;
+struct NbState {
+  int32_t kn[2], s1[2], s2[2], pv[2][2], e[2], es[2], lem[2];
+  uint32_t cph[2], ph[2][2], inc[2][2];
+  uint32_t sub;
+};
+static_assert(sizeof(NbState) <= DCHUNK_BYTES, "NOBSRINE: its state must fit a piece of the tape");
+#define NB ((NbState *)dchunk[100])
+static uint32_t nb_cinc[2], nb_inc0;                        // (the loop sets these)
+static int32_t nb_spread, nb_dk, nb_bend, nb_mix;
+static uint32_t nb_exp[65];                                  // 2^(i/64), Q16
+static void nb_update() {                                    // (the loop: floats are fine here)
+  float hz = clock_hz();
+  if (!nb_exp[0]) for (int i = 0; i <= 64; i++) nb_exp[i] = (uint32_t)(65536.0f * powf(2.0f, i / 64.0f));
+  float fc = 0.3f * powf(100.0f, nb_p[2] / 1000.0f);         // CLOCK: 0.3 … 30 Hz (half B a little faster: they drift)
+  nb_cinc[0] = (uint32_t)(fc / hz * 4294967296.0f);
+  nb_cinc[1] = (uint32_t)(fc * 1.13f / hz * 4294967296.0f);
+  float tau = 0.15f * powf(200.0f, nb_p[3] / 1000.0f);       // DECAY: 0.15 … 30 s
+  nb_dk = (int32_t)(16777216.0f / (tau * hz)); if (nb_dk < 1) nb_dk = 1;
+  float f0 = 30.0f * powf(32.0f, nb_p[4] / 1000.0f);         // PITCH: 30 … 960 Hz, the knob in the middle
+  nb_inc0 = (uint32_t)(f0 / hz * 4294967296.0f);
+  nb_spread = (int32_t)(nb_p[5] * 6 * 4096 / 1000);          // SPREAD: the knob's travel, 0 … 6 octaves
+  nb_bend = nb_p[6];
+  nb_mix = nb_p[7];
+}
+static inline uint32_t nb_pitch(int32_t x) {                 // nb_inc0 × 2^(x / 4096)
+  int32_t o = x >> 12, f = x & 4095, i = f >> 6, r = f & 63;
+  uint32_t m = nb_exp[i] + (((nb_exp[i + 1] - nb_exp[i]) * (uint32_t)r) >> 6);
+  uint64_t v = ((uint64_t)nb_inc0 * m) >> 16;
+  if (o > 0) v <<= (o > 8 ? 8 : o); else if (o < 0) v >>= (-o > 16 ? 16 : -o);
+  if (v > 900000000u) v = 900000000u;                         // (~6.7 kHz at most)
+  return (uint32_t)v;
+}
+static inline int32_t nb_sat(int32_t x) {                    // a differential pair: tanh-ish, Q15
+  if (x >= 32768) return 21845; if (x <= -32768) return -21845;
+  return x - ((((x * x) >> 15) * x) >> 15) / 3;
+}
+static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
+  NbState *n = NB;
+  if (nb_reset) {
+    nb_reset = false;
+    memset(n, 0, sizeof(NbState));
+    for (int h = 0; h < 2; h++) { int32_t k = nb_p[h] * 65; n->kn[h] = n->s1[h] = n->s2[h] = n->pv[h][0] = n->pv[h][1] = k; n->lem[h] = pc_emod; }
+    n->cph[1] = 0x80000000u;
+  }
+  if (!nb_inc0) return 0;
+  const bool sub = (++n->sub & 15) == 0;
+  int32_t o[2];
+  for (int h = 0; h < 2; h++) {
+    n->kn[h] += ((nb_p[h] * 65) - n->kn[h]) >> 6;                               // the knob (the pot and its buffer)
+    uint32_t c0 = n->cph[h]; n->cph[h] = c0 + nb_cinc[h];
+    bool up = !(c0 & 0x80000000u) && (n->cph[h] & 0x80000000u), dn = (c0 & 0x80000000u) && !(n->cph[h] & 0x80000000u);
+    if (up || dn) {                                                             // an edge: one of the holds takes the knob
+      if (up) n->s1[h] = n->kn[h]; else n->s2[h] = n->kn[h];
+      int32_t d = n->s1[h] - n->s2[h]; if (d < 0) d = -d;                         // how far it turned between the edges
+      int32_t de = pc_emod - n->lem[h]; if (de < 0) de = -de; n->lem[h] = pc_emod; // (EARTH moving turns it too)
+      int32_t t = (d + de * 400) * 3; if (t > 65535) t = 65535;
+      t <<= 8;
+      if (t > n->e[h]) n->e[h] = t;                                             // the diode charges the capacitor
+    }
+    n->e[h] -= ((n->e[h] >> 12) * nb_dk) >> 12;                                 // ...and it leaks away
+    n->es[h] += ((n->e[h] >> 8) - n->es[h]) >> 7;                               // (the tail current: no click)
+    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) >> 8;                               // the held positions, a little slewed
+    n->pv[h][1] += (n->s2[h] - n->pv[h][1]) >> 8;
+    if (sub) {
+      n->inc[h][0] = nb_pitch((int32_t)(((int64_t)nb_spread * (n->pv[h][0] - 32768)) >> 16));
+      n->inc[h][1] = nb_pitch((int32_t)(((int64_t)nb_spread * (n->pv[h][1] - 32768)) >> 16) + 2396);   // (a fifth above)
+    }
+    int32_t tri[2];
+    for (int k = 0; k < 2; k++) {
+      int32_t t = (int32_t)(n->ph[h][k] >> 16);
+      tri[k] = t < 32768 ? t * 2 - 32768 : (65535 - t) * 2 - 32768;
+    }
+    n->ph[h][0] += n->inc[h][0];
+    int32_t fm = (int32_t)((((int64_t)tri[0] * n->es[h]) >> 16) * nb_bend / 1000);   // BEND: the energy pushes the second
+    n->ph[h][1] += n->inc[h][1] + (uint32_t)(((int64_t)n->inc[h][1] * fm) >> 15);
+    int32_t v = 0;
+    for (int k = 0; k < 2; k++) v += (nb_sat(tri[k] * 3 / 2) * n->es[h]) >> 16;    // through the pairs: as loud as the energy
+    o[h] = (v * 3) >> 6;
+  }
+  nb_gate = n->cph[0] & 0x80000000u;                                            // YELLOW / the lamp: half A's clock
+  int32_t l = o[0] + (((o[1] - o[0]) * nb_mix) / 2000), r = o[1] + (((o[0] - o[1]) * nb_mix) / 2000);
+  if (l > 2047) l = 2047; if (l < -2047) l = -2047;
+  if (r > 2047) r = 2047; if (r < -2047) r = -2047;
+  *rout = r;
+  return l;
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
@@ -2763,6 +2859,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 4 || cur == 5) sx_reset = true;
     else if (cur == 6) hb_reset = true;
     else if (cur == 7) fr_reset = true;
+    else if (cur == 8) nb_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2776,11 +2873,13 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 4 || cur == 5) sx_reset = true;
       else if (cur == 6) hb_reset = true;
       else if (cur == 7) fr_reset = true;
+      else if (cur == 8) nb_reset = true;
     }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   bool hmode = cur == 6;                                     // HABIT: the memory on the phone
   bool fmode = cur == 7;                                     // FOURSES
+  bool nbmode = cur == 8;                                    // NOBSRINE
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2797,7 +2896,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || bmode || hmode || fmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
+  grit_off = smode || bmode || hmode || fmode || nbmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2832,6 +2931,8 @@ void IRAM_ATTR coco_pc() {
     l = hb_tick(gyo - 2048, &r);                             // HABIT: main = input + tape, ASH = the tape
   } else if (fmode) {
     l = fr_tick(gyo - 2048, &r, FLIPPERAT, SKIPPERAT);       // FOURSES
+  } else if (nbmode) {
+    l = nb_tick(&r);                                         // NOBSRINE
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2861,7 +2962,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = hmode ? false : (fmode ? fr_gate : (smode ? sx_gate : nz_gate));
+  } else y = hmode ? false : (nbmode ? nb_gate : (fmode ? fr_gate : (smode ? sx_gate : nz_gate)));
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2893,8 +2994,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || bmode || fmode) {
-    if (fmode ? fr_gate : (bmode ? bb_gate : nz_gate)) {
+  } else if (nmode || bmode || fmode || nbmode) {
+    if (nbmode ? nb_gate : (fmode ? fr_gate : (bmode ? bb_gate : nz_gate))) {
       LAMP_ON;
     } else {
       LAMP_OFF;
