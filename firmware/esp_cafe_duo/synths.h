@@ -2474,13 +2474,14 @@ void hb_write(const uint8_t *d, size_t n) {
 // nodes: 65+2j SOURCE (the PNP, △), 66+2j SINK (the NPN, ▽)) — D→A, A→D, B→C, C→B. 73 LINK OUT (reported to the
 // phone, "t <0..1000>", which hands it to the other Cafe's LINK IN, 74): slow (the link), but it crosses.
 // 75: the other Cafe's EARTH ("O 21 <0..255>", from the phone: slow too). 76: YELLOW (a gate: above 3 V it is high;
-// nothing on it: H1's comparator, as before).
+// nothing on it: H1's comparator, as before). 77..92: LIGHT 0..15 — each drawn shape's brightness in the phone's
+// camera ("O <30+k> <0..1000>" = 0..8.4 V through 10K), joined to what the shape covers: a light-dependent source.
 // (Memory: the heap has nothing to spare — the tape takes all of it. So the solver's working space is a piece of
 //  the tape (FOURSES does not use it), set up again each time FOURSES starts; the links are kept in RTC memory.)
 // ==========================================
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
-#define TP_N 77
+#define TP_N 93
 #define TP_NL 128
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
@@ -2490,7 +2491,7 @@ static const uint8_t tp_h[TP_NB] = { 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3
 static const int16_t tp_sig[128] = { 321,333,345,357,370,383,397,411,425,440,456,471,488,505,522,540,558,577,596,616,636,657,679,701,724,747,770,795,820,845,871,898,925,953,982,1011,1040,1070,1101,1132,1164,1196,1229,1263,1296,1331,1366,1401,1437,1473,1509,1546,1583,1621,1658,1697,1735,1773,1812,1851,1890,1929,1969,2008,2048,2087,2126,2166,2205,2244,2283,2322,2360,2398,2437,2474,2512,2549,2586,2622,2658,2694,2729,2764,2799,2832,2866,2899,2931,2963,2994,3025,3055,3084,3113,3142,3170,3197,3224,3250,3275,3300,3325,3348,3371,3394,3416,3438,3459,3479,3499,3518,3537,3555,3573,3590,3607,3624,3639,3655,3670,3684,3698,3712,3725,3738,3750,3762 };   // the pairs: σ(Δ / 26 mV), Q12, Δ = -64 .. 63 mV
 // the links as the loop keeps them — a piece of the tape as well (the phone sends them all again whenever FOURSES
 // starts, after its "T")
-struct TpLinks { uint8_t la[TP_NL], lb[TP_NL]; int16_t lg[TP_NL]; };   // (lg: Q12 per 10K; 0 = no link)
+struct TpLinks { uint8_t la[TP_NL], lb[TP_NL]; int16_t lg[TP_NL]; int16_t light[16]; };   // (lg: Q12 per 10K; 0 = no link)
 struct TpCl { int16_t cg[2][TP_NL]; uint8_t ca[2][TP_NL], cb[2][TP_NL]; };   // the compact lists the audio reads
 static_assert(sizeof(TpLinks) <= DCHUNK_BYTES && sizeof(TpCl) <= DCHUNK_BYTES, "FOURSES: the links must fit tape pieces");
 #define TL ((TpLinks *)dchunk[102])
@@ -2605,7 +2606,8 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
   else if (i == 74) { e = tp_linkin; g = 4096; }                                  // LINK IN (10K)
   else if (i == 76) { e = 0; g = 410; }                                           // YELLOW (a pin's input, 100K down)
-  else { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
+  else if (i < 93) { e = TL->light[i - 77]; g = 4096; }                          // LIGHT: a shape's brightness (10K)
+  else if (i == 75) { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
          e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 410; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
 }

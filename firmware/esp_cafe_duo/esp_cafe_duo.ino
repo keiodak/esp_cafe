@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.21"
+#define FW_VERSION "4.22"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -840,6 +840,7 @@ void pc_line(char *s) {
                 if (id >= 0 && id < 10) { fr_p[id] = (int16_t)val; fr_update(); }
                 else if (id == 20) tp_linkin = val * 84 / 10;                              // LINK IN: the other Cafe's LINK OUT
                 else if (id == 21) tp_earth2 = val > 255 ? 255 : val;                      // the other Cafe's EARTH
+                else if (id >= 30 && id < 46 && pc_mode == 7) TL->light[id - 30] = (int16_t)(val * 84 / 10);   // LIGHT: a shape's brightness
                 else if (id == 19) fr_reset = true;
               } break;
     case 'T': { long a = -1, b2 = -1, v = 0; if (sscanf(s + 1, "%ld %ld %ld", &a, &b2, &v) == 3) {   // FOURSES: a touch / a wire

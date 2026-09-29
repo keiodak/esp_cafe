@@ -154,10 +154,28 @@ enum FrBoard {
         return p.filter { inside($0.0, $0.1, s, aspect: aspect) }
     }
     /// the wires the shapes make, as node pairs
-    static func links(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
-        iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
+    static func links(icons: [[Double]], shapes: [[Double]], aspect: Double, light: Bool = false) -> [[Int]] {
+        var out = iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
+        if light {                                                       // CAMERA: each shape's LIGHT (node 77 + k) on what it covers
+            for (k, s) in shapes.prefix(16).enumerated() where s.count >= 4 {
+                for i in 0..<min(count, icons.count) {
+                    let c = cover(i, icons[i], s, aspect: aspect)
+                    if c > 0 { out.append([nodes[i], 77 + k, Int(150 + 850 * c)]) }
+                }
+            }
+        }
+        return out
     }
     /// the icons in each shape joined; overlapping shapes joined (a star from the first)
+    /// how bright the camera is inside a shape (the 8 × 16 mosaic over the field; 0…1)
+    static func light(_ s: [Double], grid: [[Double]], aspect: Double) -> Double {
+        guard grid.count >= 8, grid[0].count >= 16 else { return 0.5 }
+        var sum = 0.0, n = 0
+        for r in 0..<8 { for c in 0..<16 where inside((Double(c) + 0.5) / 16, (Double(r) + 0.5) / 8, s, aspect: aspect) { sum += grid[r][c]; n += 1 } }
+        if n > 0 { return sum / Double(n) }
+        let r = min(7, max(0, Int(s[2] * 8))), c = min(15, max(0, Int(s[1] * 16)))   // (smaller than a cell: the one under it)
+        return grid[r][c]
+    }
     /// how much of an icon a shape covers (0…1: 5 × 5 points over the icon)
     static func cover(_ i: Int, _ p: [Double], _ s: [Double], aspect: Double) -> Double {
         let (hw, hh) = kind(i) >= 16 ? (0.15, 0.05) : (0.045, 0.045)       // (half its size, in heights)
@@ -299,6 +317,8 @@ struct FrTouchLayer: UIViewRepresentable {
 struct FoursesBoard: View {
     let d: Director
     @ObservedObject var rig: Rig
+    @ObservedObject var cam: CameraState
+    var camOn: Bool
     @State private var fingers: [Int: (p: CGPoint, r: CGFloat)] = [:]
     @State private var draft: (start: CGPoint, now: CGPoint)? = nil
     @State private var grab: (kind: Int, index: Int, offset: CGSize)? = nil    // EDIT: 0 an icon, 1 a shape
@@ -316,8 +336,19 @@ struct FoursesBoard: View {
                 return m
             }()
             ZStack(alignment: .topLeading) {
-                // the board: paper, a fine dot grid
+                // the board: paper, a fine dot grid (CAMERA: the mosaic under it — each shape's LIGHT is its brightness)
                 Rectangle().fill(PastelTheme.padScreen)
+                if camOn {
+                    Canvas { ctx, s in
+                        let g = cam.mosaicBrightness
+                        guard g.count >= 8, g[0].count >= 16 else { return }
+                        let cw = s.width / 16, ch = s.height * FrBoard.yMax / 8
+                        for r in 0..<8 { for c in 0..<16 {
+                            ctx.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 0.5, height: ch + 0.5)),
+                                     with: .color(PastelTheme.hudBlack.opacity(0.28 * (1 - g[r][c]))))
+                        } }
+                    }
+                }
                 Canvas { ctx, s in
                     let step: CGFloat = 16
                     for x in stride(from: step / 2, to: s.width, by: step) {

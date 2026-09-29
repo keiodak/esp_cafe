@@ -36,6 +36,8 @@ final class CameraRig: ObservableObject {
     /// the 8 pads, and what to do after a pad moved (send it to its Cafe)
     var axes: [PadAxis] = []
     var onPadMoved: ((Int) -> Void)?
+    /// every frame's mosaic (8 × 16, 0…1), for whoever wants it (FOURSES: its shapes' LIGHT)
+    var onGrid: (([[Double]]) -> Void)?
 
     init() {
         controller.setPosition(.front)
@@ -46,6 +48,7 @@ final class CameraRig: ObservableObject {
                 guard self.enabled else { return }
                 let now = CACurrentMediaTime()
                 self.attract(brightness: grid, motion: motion ?? grid)    // every frame, like Sunnandæg
+                self.onGrid?(grid)
                 let level = ((frame.motion ?? 0) * 20).rounded() / 20
                 if abs(self.state.cameraMotion - level) > 0.01 { self.state.cameraMotion = level }
                 guard now - self.lastMosaic >= 0.1 else { return }   // the mosaic redraws at most 10×/s

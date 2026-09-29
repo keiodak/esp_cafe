@@ -56,6 +56,7 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
+            if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
@@ -102,6 +103,7 @@ final class Director: ObservableObject {
         camera.axes = axes()
         camera.onPadMoved = { [weak self] i in self?.padMoved(i) }
         camera.warm()
+        camera.onGrid = { [weak self] g in self?.frLight(g) }
         applyArp()
         arp.speechOn = rig.arpMode == 1 && rig.pcMode == 1
         applySpeech()
@@ -153,7 +155,8 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
-                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect)   // (what the shapes join)
+                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn)   // (what the shapes join)
+                frLightSent = [Int](repeating: -1, count: 16)
                 w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
             case 6:
@@ -778,7 +781,7 @@ final class Director: ObservableObject {
     /// the wires the shapes make, as sent: only what changed goes
     private var frWireSent: [[Int]: Int] = [:]                    // (node pair -> strength)
     func frSyncShapes() {
-        let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect).map { ([$0[0], $0[1]], $0[2]) },
+        let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn).map { ([$0[0], $0[1]], $0[2]) },
                              uniquingKeysWith: { a, _ in a })
         var out: [(Int, Int, Int)] = []
         for (k, v) in now where frWireSent[k] != v { out.append((k[0], k[1], v)) }
@@ -798,6 +801,22 @@ final class Director: ObservableObject {
     func frT(_ a: Int, _ b: Int, _ v: Int, _ u: CafeUnit) {
         guard let x = frNode(a, u.slot), let y = frNode(b, u.slot) else { return }
         u.send("T \(min(x, y)) \(max(x, y)) \(v)")
+    }
+    /// CAMERA on FOURSES: each shape's brightness is its LIGHT (a source joined to what it covers), ~15x a second
+    var frLightOn = false
+    private var frLightSent = [Int](repeating: -1, count: 16)
+    private var frLightT = 0.0
+    func frLight(_ grid: [[Double]]) {
+        let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }
+        guard !on.isEmpty else { return }
+        if !frLightOn { frLightOn = true; frLightSent = [Int](repeating: -1, count: 16); frSyncShapes() }
+        let t = CACurrentMediaTime()
+        guard t - frLightT >= 0.066 else { return }
+        frLightT = t
+        for (k, s) in rig.frShapes.prefix(16).enumerated() where s.count >= 4 {
+            let v = Int((FrBoard.light(s, grid: grid, aspect: frAspect) * 1000).rounded())
+            if abs(v - frLightSent[k]) > 8 { frLightSent[k] = v; on.forEach { $0.send("O \(30 + k) \(v)") } }
+        }
     }
     /// each Cafe's EARTH to the other (~30x a second, only when it moves): its EARTH A / EARTH B
     var frEarthSent = [-1, -1]
@@ -971,7 +990,7 @@ private struct MainScreen: View {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
-            FoursesBoard(d: d, rig: rig)                                                  // FOURSES: the board itself
+            FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
