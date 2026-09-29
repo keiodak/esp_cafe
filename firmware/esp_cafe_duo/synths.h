@@ -2732,7 +2732,7 @@ static inline uint32_t nb_exp2(uint32_t base, int32_t x) {
 // and knob reach which filter and which way (base state after RESET; random at power).
 // The 42 sandrodes are nodes; a patch (a wire, a touch) between two joins them by the difference of their potentials —
 // a current, not a voltage: it modulates what an input node governs, and is injected into what a filter node holds.
-// ENV L / R: each wheel's turning (the VCA: a channel sounds only while its wheel turns). S&H 1 / 2: IN · CLK · OUT.
+// ENV L / R: each wheel's turning (an envelope to patch). S&H 1 / 2: IN · CLK · OUT.
 // "A <id> <0..1000>": 0 / 1 the wheels (L / R) · 2 / 3 the resonance knobs (L / R) · 19 RESET (base state) · 20 random.
 // "T a b v": a patch (as FOURSES').
 #define ST_N 50                                               // (+ ENV L / R 42 · 43, S&H 1 IN · CLK · OUT 44–46, S&H 2 47–49)
@@ -2803,8 +2803,7 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
   }
   // the wheels and the knobs (the phone's steps smoothed)
   for (int h = 0; h < 2; h++) { s->wh[h] += (st_p[h] * 65 - s->wh[h]) / 256; s->rs[h] += (st_p[2 + h] * 65 - s->rs[h]) / 256; }
-  // each wheel's turning: an attack-decay envelope (the stereo VCA: a channel sounds only while its wheel turns);
-  // EARTH, once its jack is patched, moves both as if turning them
+  // each wheel's turning: an attack-decay envelope, brought out at ENV L / R (EARTH, once patched, moves both)
   int32_t de = 0;
   for (int k = 0; k < nl; k++) if (la[k] == 41 || lb[k] == 41) { de = pc_emod - s->lem; if (de < 0) de = -de; break; }
   s->lem = pc_emod;
@@ -2874,7 +2873,7 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
     st_svf(&s->lp[h], &s->bp[h], x, f, q);
     st_svf(&s->lp[h], &s->bp[h], x, f, q);
     V[base + ST_LP] = s->lp[h]; V[base + ST_BP] = s->bp[h];
-    o[h] = (int32_t)(((int64_t)(s->lp[h] >> 4) * s->env[h]) >> 16);             // (through the VCA)
+    o[h] = s->lp[h] >> 4;                                                      // (the wheel: where it stands is the pitch; the knob: Q)
   }
   // the dividers: left from D, right from B (16 stages; four brought out each)
   for (int h = 0; h < 2; h++) {
