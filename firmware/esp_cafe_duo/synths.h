@@ -2649,7 +2649,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   const int16_t *lg = TC->cg[c];
   int16_t *V = w->V;
   const bool fresh = gen != tp_gen; gen = tp_gen;
-  const bool solve = fresh || ((++ph & 1) == 0);                                  // (the network: every 2nd sample, 16 kHz — its edges keep their bite)
+  const bool solve = fresh || ((++ph & 3) == 0);                                  // (the network: every 4th sample, 8 kHz — 16 kHz starved the ISR)
   if (solve && na) {
     const uint8_t *was = w->af[1 - c];                                            // (a new wire: only the nodes new to the network start
     for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(w, i, in); if (fresh && !was[i]) V[i] = w->E[i]; }   //  anew; the rest keep their voltage)
