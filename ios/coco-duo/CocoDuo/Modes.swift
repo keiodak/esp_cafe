@@ -457,10 +457,13 @@ final class Rig: ObservableObject {
         didSet { Self.d.set(stShapes, forKey: "rig.stShapes") }
     }
     /// the wheels (x) and the resonance knobs (y): L, R
-    let stAx: [PadAxis] = [PadAxis((0.4, 0.45)), PadAxis((0.6, 0.45))]
-    func stParams() -> [String] {
-        (0..<2).flatMap { h in ["A \(h) \(Int((stAx[h].x * 1000).rounded()))", "A \(2 + h) \(Int((stAx[h].y * 1000).rounded()))"] }
+    /// (both knobs clockwise = more resonance, singing past ~75 %: the left one is inverso on the Cafe, so it is sent turned)
+    let stAx: [PadAxis] = [PadAxis((0.4, 0.85)), PadAxis((0.6, 0.85))]
+    func stLines(_ h: Int) -> [String] {
+        let r = Int((stAx[h].y * 1000).rounded())
+        return ["A \(h) \(Int((stAx[h].x * 1000).rounded()))", "A \(2 + h) \(h == 0 ? 1000 - r : r)"]
     }
+    func stParams() -> [String] { stLines(0) + stLines(1) }
     func frAll(slot: Int) -> [String] {
         ["T", "O 9 \(slot == 1 ? 1000 : 0)"] + (0..<4).map { "O \(4 + $0) \(frRanges[$0] * 500)" }
             + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }

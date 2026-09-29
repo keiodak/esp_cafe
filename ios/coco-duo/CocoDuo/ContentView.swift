@@ -978,8 +978,7 @@ final class Director: ObservableObject {
         }
     }
     func stKnob(_ h: Int) {
-        let a = rig.stAx[h]
-        for u in ctxUnits() { u.send("A \(h) \(Int((a.x * 1000).rounded()))"); u.send("A \(2 + h) \(Int((a.y * 1000).rounded()))") }
+        for u in ctxUnits() { rig.stLines(h).forEach(u.send) }
     }
     func stAddShape(_ s: [Double]) { rig.stShapes.append(s); stSync() }
     func stRemoveShape(_ k: Int) { if rig.stShapes.indices.contains(k) { rig.stShapes.remove(at: k); stSync() } }
