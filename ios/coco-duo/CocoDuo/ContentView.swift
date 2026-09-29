@@ -143,7 +143,10 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
-            case 7: rig.frAll(slot: s).forEach(u.send); frSent = [:]
+            case 7:
+                rig.frAll(slot: s).forEach(u.send); frSent = [:]
+                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect)   // (what the shapes join)
+                w.forEach { u.send("T \($0[0]) \($0[1]) 1000") }; frWireSent = Set(w)
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -761,17 +764,22 @@ final class Director: ObservableObject {
         rig.frPots[h] = v
         ctxUnits().forEach { $0.send("O \(h) \(Int((v * 1000).rounded()))") }
     }
-    func frToggleWire(_ a: Int, _ b: Int) {
-        let w = [min(a, b), max(a, b)]
-        let on = !rig.frWires.contains(w)
-        if on { rig.frWires.append(w) } else { rig.frWires.removeAll { $0 == w } }
-        ctxUnits().forEach { $0.send("T \(w[0]) \(w[1]) \(on ? 1000 : 0)") }
+    /// the board's shape (width / height of the field): what lies inside a shape depends on it
+    var frAspect: Double = 2.5 { didSet { if abs(frAspect - oldValue) > 0.02 { frSyncShapes() } } }
+    /// the wires the shapes make, as sent: only what changed goes
+    private var frWireSent: Set<[Int]> = []
+    func frSyncShapes() {
+        let now = Set(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect))
+        var out: [String] = []
+        for w in now.subtracting(frWireSent) { out.append("T \(w[0]) \(w[1]) 1000") }
+        for w in frWireSent.subtracting(now) { out.append("T \(w[0]) \(w[1]) 0") }
+        frWireSent = now
+        if !out.isEmpty { ctxUnits().forEach { u in out.forEach(u.send) } }
     }
-    func frClearWires() {
-        rig.frWires = FrBoard.defaultWires
-        ctxUnits().forEach { u in rig.frAll(slot: u.slot).forEach(u.send) }
-        frSent = [:]
-    }
+    func frAddShape(_ s: [Double]) { rig.frShapes.append(s); frSyncShapes() }
+    func frRemoveShape(_ k: Int) { if rig.frShapes.indices.contains(k) { rig.frShapes.remove(at: k); frSyncShapes() } }
+    func frRandom() { rig.frIcons = FrBoard.scatter(); frSyncShapes() }
+    func frClearShapes() { rig.frShapes = []; frSyncShapes() }
     /// the fingers' links now (finger node -> node -> 0…1000): only what changed goes
     var frSent: [String: Int] = [:]
     func frTouches(_ links: [Int: [Int: Int]]) {
@@ -1383,9 +1391,9 @@ private struct HudBar: View {
         case .fourses:
             switch n {
             case 0: textKey(FrPad.rangeNames[rig.frRange], on: rig.frRange < 2) { d.setFrRange((rig.frRange + 1) % 3) }   // AUDIO -> CV -> LOW
-            case 1: textKey("DRAW", on: rig.frDraw) { rig.frDraw.toggle() }                             // lines = wires
-            case 2: textKey("CLEAR") { d.frClearWires() }                                              // the wires back to OUT only
-            default: textKey("RESET") { d.ctxUnits().forEach { $0.send("O 19 1") } }                 // the capacitors back to their places
+            case 1: textKey(["PLAY", "DRAW", "EDIT"][rig.frMode], on: rig.frMode > 0) { rig.frMode = (rig.frMode + 1) % 3 }   // fingers · shapes · moving
+            case 2: textKey("RANDOM") { d.frRandom() }                                                 // the icons thrown anew
+            default: textKey("CLEAR") { d.frClearShapes() }                                            // every shape away
             }
         case .wave:
             switch n {

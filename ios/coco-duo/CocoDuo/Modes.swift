@@ -434,17 +434,19 @@ final class Rig: ObservableObject {
     let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
-    @Published var frDraw = false               // DRAW: lines are wires
-    /// the wires (node pairs), kept
-    @Published var frWires: [[Int]] = (Rig.d.array(forKey: "rig.frWires") as? [[Int]]) ?? FrBoard.defaultWires {
-        didSet { Self.d.set(frWires, forKey: "rig.frWires") }
+    @Published var frMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
+    @Published var frShape = 0                  // DRAW: 0 circle · 1 triangle · 2 square
+    /// where the icons lie (0…1 across, 0…1 down the field) and the shapes drawn ([type, x, y, radius in heights]), kept
+    @Published var frIcons: [[Double]] = (Rig.d.array(forKey: "rig.frIcons") as? [[Double]]).flatMap { $0.count == FrBoard.count ? $0 : nil }
+        ?? FrBoard.defaultLayout().icons { didSet { Self.d.set(frIcons, forKey: "rig.frIcons") } }
+    @Published var frShapes: [[Double]] = (Rig.d.array(forKey: "rig.frShapes") as? [[Double]]) ?? FrBoard.defaultLayout().shapes {
+        didSet { Self.d.set(frShapes, forKey: "rig.frShapes") }
     }
     func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
     /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
     func frAll(slot: Int) -> [String] {
         ["T", "O 9 \(slot == 1 ? 1000 : 0)", "O 8 \(frRange * 500)"]
             + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }
-            + frWires.filter { $0.count == 2 }.map { "T \($0[0]) \($0[1]) 1000" }
     }
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false
