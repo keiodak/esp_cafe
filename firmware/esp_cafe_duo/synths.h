@@ -2371,17 +2371,32 @@ static inline int32_t hb_dec(uint8_t n, int32_t &pred, int &ix) {           // 4
   return pred;
 }
 
+// a 4th-order Butterworth low-pass (two biquads, Q28) at ~0.42 of the link's rate: before the samples are taken for the
+// phone (no aliasing) and after the tape (no images of its steps) — [rate: 0 ~8K, 1 ~4K][stage][b0 b1 b2 a1 a2]
+DRAM_ATTR static const int32_t hb_lp[2][2][5] = {
+  { { 18330109, 36660218, 18330109, -268208298, 73093278 }, { 23295363, 46590726, 23295363, -340860467, 165606463 } },   // 3.4 kHz
+  { { 5983498, 11966997, 5983498, -385502510, 141001048 }, { 6949857, 13899715, 6949857, -447762718, 207126692 } } };    // 1.75 kHz
+struct HbBq { int32_t x1, x2, y1, y2; };
+static inline int32_t hb_bq(HbBq &q, const int32_t *c, int32_t x) {
+  int64_t a = (int64_t)c[0] * x + (int64_t)c[1] * q.x1 + (int64_t)c[2] * q.x2 - (int64_t)c[3] * q.y1 - (int64_t)c[4] * q.y2;
+  int32_t y = (int32_t)(a >> 28);
+  q.x2 = q.x1; q.x1 = x; q.y2 = q.y1; q.y1 = y;
+  return y;
+}
 static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   static int32_t acc = 0, pred = 0;
   static int accn = 0, ix = 0, pkn = 0;
   static uint16_t seq = 0;
   if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; hb_rp = hb_wp; }
-  // up: the input (its hiss gated out), averaged over RATE samples, into packets for the phone
+  // up: the input (its hiss gated out), low-passed under the link's rate, every RATE-th sample into packets for the phone
   static InGate ig = { 0, 0, 0 };
+  static HbBq u1 = { 0, 0, 0, 0 }, u2 = { 0, 0, 0, 0 }, d1 = { 0, 0, 0, 0 }, d2 = { 0, 0, 0, 0 };
+  const int32_t (*lc)[5] = hb_lp[hb_div >= 8 ? 1 : 0];
   in = in_gate(in, ig);
-  acc += in;
+  int32_t fl = hb_bq(u2, lc[1], hb_bq(u1, lc[0], in << 4));
+  (void)acc;
   if (++accn >= hb_div) {
-    int32_t x = (acc << 6) / accn;                           // 12 -> 16 bits, ×4 hotter: the 4-bit link's noise
+    int32_t x = fl * 4;                                      // 12 -> 16 bits, ×4 hotter: the 4-bit link's noise
     if (x > 24000) x = 24000 + ((x - 24000) >> 3);            //   sits that much further under the sound (a soft top)
     if (x < -24000) x = -24000 + ((x + 24000) >> 3);
     if (x > 32767) x = 32767; if (x < -32767) x = -32767;
@@ -2414,13 +2429,9 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   hg += ((have ? 4096 : 0) - hg) >> 6;
   if (have) { last = dread(hb_rp) - 2048; hb_rp = (hb_rp + 1) & 0x1FFFF; }
   int32_t p = (last * hg) >> 12;
-  // smooth: the tape holds 4K / 8K brought up to the Cafe's rate in straight lines — two gentle low-passes at about
-  // half that rate take the steps' edges (the grit and the whistle above) off
-  static int32_t s1 = 0, s2 = 0;
-  int32_t ak = hb_div >= 8 ? 2400 : 3200;                    // (Q12: just past the link's top — only the steps' edges go, not the sound's)
-  s1 += ((p - s1) * ak) >> 12;
-  s2 += ((s1 - s2) * ak) >> 12;
-  p = s2;
+  // smooth: the tape holds 4K / 8K brought up to the Cafe's rate in straight lines — the same low-pass takes the
+  // steps' images (the grit and the whistle above) off, and leaves the sound
+  p = hb_bq(d2, lc[1], hb_bq(d1, lc[0], p << 4)) >> 4;
   int32_t y = soft_clip(((in * hb_dry) >> 8) + ((p * hb_wet) >> 8));
   int32_t r = soft_clip((p * hb_wet) >> 8);
   *rout = r;
