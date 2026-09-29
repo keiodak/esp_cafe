@@ -2898,9 +2898,9 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (smode) {                          // SIDRAX / WAVE: ON (its sound is being recorded), OFF on FREEZE
-    lamp = !wv_frz;
-    if (!wv_frz) {
+  } else if (smode) {                          // SIDRAX: ON while recording, OFF on FREEZE · WAVE: the other way (ON when frozen)
+    lamp = sx_wave ? wv_frz : !wv_frz;
+    if (lamp) {
       LAMP_ON;
     } else {
       LAMP_OFF;
