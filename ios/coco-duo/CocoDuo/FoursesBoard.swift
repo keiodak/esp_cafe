@@ -107,8 +107,8 @@ enum FrBoard {
         }
         return relax(out, aspect: a)
     }
-    /// the corners the icons keep out of: DRAW's shapes and passes (top left), the mode (top right) — [x0, x1, y bottom]
-    static let keepOut: [[Double]] = [[0, 0.38, 0.27], [0.66, 1, 0.17]]
+    /// where the icons keep out: DRAW's shapes and passes (top left), the mode (top right), the LED — [x0, x1, y bottom]
+    static let keepOut: [[Double]] = [[0, 0.38, 0.27], [0.66, 1, 0.17], [0.45, 0.55, 0.2]]   // (+ the LED, top centre)
     /// pushed apart until no two icons' boxes overlap
     static func relax(_ o: [[Double]], aspect: Double = 2.5) -> [[Double]] {
         var out = o
@@ -556,6 +556,10 @@ struct FoursesBoard: View {
                     .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
                     .padding(.leading, 6).padding(.top, 34)
                 }
+                // the LED (top centre): the first Cafe on FOURSES
+                if let u = d.units.first(where: { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }) {
+                    FrLed(unit: u).position(x: size.width / 2, y: 26)
+                }
                 // the mode: PLAY · DRAW · EDIT, always there (top right)
                 HStack(spacing: 0) {
                     ForEach(0..<3, id: \.self) { m in
@@ -637,9 +641,6 @@ struct FoursesBoard: View {
                 Text("H\(h + 1)")
                     .font(.hud(7, .semibold))
                     .foregroundStyle(PastelTheme.textSecondary)
-                if let u = d.units.first(where: { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }) {
-                    FrLed(unit: u, h: h)                                           // (its LED, as on the Fourses)
-                }
                 // its range switch: AUDIO · LOW · CV (a tap: the next)
                 Text(["CV", "LOW", "AUDIO"][rig.frRanges[h]])
                     .font(.hud(7, .semibold))
@@ -828,16 +829,28 @@ struct FrCameraView: UIViewRepresentable {
     func updateUIView(_ v: V, context: Context) { if v.preview.session !== session { v.preview.session = session } }
 }
 
-/// one of the Fourses' four LEDs: lit as long as its horse's output is high (a fast horse: a steady glow)
+/// the Fourses' LED: one dome, four dies in it (one a horse), each lit as long as its horse's output is high —
+/// their light mixing in the dome
 struct FrLed: View {
     @ObservedObject var unit: CafeUnit
-    let h: Int
+    static let inks: [Color] = [Color(hex: 0xFF3B30), Color(hex: 0x34C759), Color(hex: 0x3A7BFF), Color(hex: 0xFFC400)]
     var body: some View {
-        let v = Double(unit.frLeds.indices.contains(h) ? unit.frLeds[h] : 0) / 15
-        Circle()
-            .fill(Color(hex: 0xE0301E).opacity(0.12 + 0.88 * v))
-            .overlay(Circle().strokeBorder(PastelTheme.hudBlack.opacity(0.4), lineWidth: 0.5))
-            .shadow(color: Color(hex: 0xE0301E).opacity(0.8 * v), radius: 3 * v)
-            .frame(width: 8, height: 8)
+        let v = (0..<4).map { Double(unit.frLeds.indices.contains($0) ? unit.frLeds[$0] : 0) / 15 }
+        ZStack {
+            Circle().fill(Color.white.opacity(0.55))
+            ForEach(0..<4, id: \.self) { h in                                  // (the light of each, spread in the dome)
+                Circle().fill(Self.inks[h].opacity(0.55 * v[h])).blur(radius: 6)
+                    .offset(x: h % 2 == 0 ? -4 : 4, y: h < 2 ? -4 : 4)
+            }
+            ForEach(0..<4, id: \.self) { h in                                  // the four dies
+                Circle().fill(Self.inks[h].opacity(0.25 + 0.75 * v[h]))
+                    .frame(width: 7, height: 7)
+                    .offset(x: h % 2 == 0 ? -5 : 5, y: h < 2 ? -5 : 5)
+            }
+            Circle().strokeBorder(PastelTheme.hudBlack.opacity(0.5), lineWidth: 1)
+        }
+        .frame(width: 38, height: 38)
+        .shadow(color: Self.inks[(0..<4).max { v[$0] < v[$1] } ?? 0].opacity(0.5 * (v.max() ?? 0)), radius: 8)
+        .allowsHitTesting(false)
     }
 }
