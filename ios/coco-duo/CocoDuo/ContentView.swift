@@ -110,6 +110,7 @@ final class Director: ObservableObject {
         case .sidrax: return rig.sxAxes
         case .wave: return rig.wvAxes
         case .habit: return rig.habitAxes
+        case .fourses: return rig.frAxes
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -142,6 +143,7 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
+            case 7: rig.frAll().forEach(u.send)
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -250,6 +252,8 @@ final class Director: ObservableObject {
             if resync { sync() }
         case .habit:
             break                                                // (the phone reads HABIT's pads itself)
+        case .fourses:
+            for u in ctxUnits() { rig.frCommands(pad: i).forEach(u.send) }
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -751,6 +755,9 @@ final class Director: ObservableObject {
     }
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
     func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
+    // MARK: FOURSES
+    func setFrRange(_ r: Int) { rig.frRange = r; ctxUnits().forEach { $0.send("O 8 \(r * 500)") } }
+    func setFrInput(_ on: Bool) { rig.frInput = on; ctxUnits().forEach { $0.send("O 17 \(on ? 300 : 0)") } }
     func setHabitDub(_ on: Bool) { rig.habitDub = on; habits.forEach { $0.dub = on } }
     func setHabitSeconds(_ v: Double) {
         rig.habitSeconds = v; HabitEngine.shownSeconds = v
@@ -924,6 +931,7 @@ private struct MainScreen: View {
         case .sidrax: return (rig.sxAxes[i], SxPad.titles[i])
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
         case .habit: return (rig.habitAxes[i], HabitPad.titles[i])
+        case .fourses: return (rig.frAxes[i], FrPad.titles[i])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -953,6 +961,8 @@ private struct MainScreen: View {
             return { x, y in SunPad.caption(i, x, y) }
         case .habit:
             return { x, y in HabitPad.caption(i, x, y) }
+        case .fourses:
+            return { x, y in FrPad.caption(i, x, y) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1341,6 +1351,13 @@ private struct HudBar: View {
             case 2: textKey("DUB", on: rig.habitDub) { d.setHabitDub(!rig.habitDub) }                 // the input laid over the memory
             default: textKey("CLEAR", on: false) { d.habitClear() }
             }
+        case .fourses:
+            switch n {
+            case 0: textKey(FrPad.rangeNames[rig.frRange], on: rig.frRange < 2) { d.setFrRange((rig.frRange + 1) % 3) }   // AUDIO -> CV -> LOW
+            case 1: textKey("IN", on: rig.frInput) { d.setFrInput(!rig.frInput) }                      // the input onto the bottom bound
+            case 2: textKey("FLIP") { d.ctxUnits().forEach { $0.send("O 18 1") } }                   // all turn round
+            default: textKey("RESET") { d.ctxUnits().forEach { $0.send("O 19 1") } }                 // back to their places
+            }
         case .wave:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
@@ -1420,7 +1437,7 @@ private struct HudBar: View {
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
         "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
-        "waveform.circle": "MODE",
+        "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]
 
     /// a key with a word only (no icon)

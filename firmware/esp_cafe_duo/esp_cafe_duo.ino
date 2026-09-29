@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.11"
+#define FW_VERSION "4.12"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -722,7 +722,7 @@ void fx_update(int e) {
 }
 void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bb_update(); hd_update(); fx_update_all(); }
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bb_update(); hd_update(); fx_update_all(); fr_update(); }
 
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
@@ -776,7 +776,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 6 ? 6 : (int)val); }
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 7 ? 7 : (int)val); }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -834,6 +834,12 @@ void pc_line(char *s) {
                 if (s[0] == 'N' && id >= 0 && id < 16) { nz_p[id] = (int16_t)val; nz_update(); }
                 if (s[0] == 'N' && id == 16) nz_dist = val > 0;   // DIST
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
+              } break;
+    case 'O': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // FOURSES: "O <id> <0..1000>"
+                if (val < 0) val = 0; if (val > 1000) val = 1000;
+                if (id >= 0 && id < 18) { fr_p[id] = (int16_t)val; fr_update(); }
+                else if (id == 18) fr_flip = true;
+                else if (id == 19) fr_reset = true;
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
                 cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;

@@ -229,6 +229,7 @@ struct ChipButton: View {
     var body: some View {
         Text(title)
             .font(.hud(PanelMetrics.chipFont, .medium))
+            .lineLimit(1).minimumScaleFactor(0.6)                 // (a long name in a full row: smaller, not cut)
             .foregroundStyle(filled ? PastelTheme.selectionText : PastelTheme.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: PanelMetrics.chipHeight)

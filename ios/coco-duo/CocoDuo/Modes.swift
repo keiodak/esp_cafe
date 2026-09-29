@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -95,13 +95,14 @@ enum Preset {
         "four plates, one note each · press on one Cafe, it rings out on the other",
         "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
         "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
+        "four oscillators bounded by each other · TOUCH puts a finger across two · EARTH on the top, the input on the bottom",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath"]
+    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath", "square.stack.3d.up"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -110,7 +111,21 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, knob }
+
+/// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
+/// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
+enum FrPad {
+    static let titles = ["OP 1 RATE · SLOPE", "OP 2 RATE · SLOPE", "OP 3 RATE · SLOPE", "OP 4 RATE · SLOPE",
+                         "TOUCH 1–2 · BODY", "TOUCH 2–3 · BODY", "TOUCH 3–4 · BODY", "TOUCH 4–1 · BODY"]
+    static let starts: [(Double, Double)] = [(0.45, 0.5), (0.52, 0.5), (0.58, 0.5), (0.64, 0.5),
+                                             (0, 0.3), (0, 0.3), (0, 0.3), (0, 0.3)]
+    static let rangeNames = ["CV", "LOW", "AUDIO"]
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        if i < 4 { return y < 0.47 ? "FALL" : (y > 0.53 ? "RISE" : "TRI") }
+        return x < 0.02 ? "OFF" : "\(Int((x * 100).rounded()))"
+    }
+}
 
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
 /// string follows OSC B, PEAK B brightens it); the four inner ones move the Cafes' effect, L = Cafe A, R = Cafe B
@@ -415,6 +430,18 @@ final class Rig: ObservableObject {
     @Published var sxFreeze = 0
     /// HABIT (BLE mode 7): its pads (the phone's playing reads them), the rate, HOLD, the WAV to hand to Files
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
+    /// FOURSES
+    let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
+    @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO
+    @Published var frInput = true               // the Cafe's input onto the bottom bound
+    func frCommands(pad i: Int) -> [String] {
+        func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
+        let a = frAxes[i]
+        return i < 4 ? ["O \(i) \(v(a.x))", "O \(4 + i) \(v(a.y))"] : ["O \(5 + i) \(v(a.x))", "O \(9 + i) \(v(a.y))"]
+    }
+    func frAll() -> [String] {
+        (0..<8).flatMap { frCommands(pad: $0) } + ["O 8 \(frRange * 500)", "O 17 \(frInput ? 300 : 0)"]
+    }
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false
     @Published var habitDub = false             // DUB: the input laid over the memory (it plays as HOLD)
@@ -506,7 +533,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses][min(max(ctxMode, 0), 7)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

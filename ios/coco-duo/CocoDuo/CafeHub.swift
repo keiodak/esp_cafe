@@ -155,7 +155,7 @@ final class CafeUnit: ObservableObject {
         guard rx != nil, let k = s.first else { return }
         if k == "Q" && !out.isEmpty { waitingQ = false; return }
         let key = Self.key(s)
-        if "SLJKXMBYNVCF".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
+        if "SLJKXMBYNVCFO".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
         out.append(s)
         pump()
     }
@@ -166,7 +166,7 @@ final class CafeUnit: ObservableObject {
             if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
             return Substring(s)
         }
-        if let f = s.first, "XMBYNVCS".contains(f) {    // "M 12", "Y 3", "S 10" …: the id is part of the key
+        if let f = s.first, "XMBYNVCSO".contains(f) {    // "M 12", "Y 3", "S 10" …: the id is part of the key
                                                          // (SIDRAX: each plate its own — a lift must never be dropped)
             let parts = s.split(separator: " ", maxSplits: 2)
             if parts.count >= 2 { return s.prefix(parts[0].count + 1 + parts[1].count) }

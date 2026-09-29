@@ -1128,7 +1128,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT ("M 25 <0..6>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES ("M 25 <0..7>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -2454,6 +2454,91 @@ void hb_write(const uint8_t *d, size_t n) {
   wv_valid = false;
 }
 
+// ==========================================
+// FOURSES --- mode 7 of the BLE preset (k.odk), after Blasser's Fourses: four "bounce" oscillators stacked so their
+// bounds are mutual — each rises and falls between the one below and the one above it (the bottom one from -8 V, the
+// top one up to +8 V), so each one's turning points are the others' voltages; lower above upper = the "paradox"
+// (hyper-oscillation). Each: RATE (both slopes) and SLOPE (rise against fall; the middle = a triangle).
+// TOUCH: four touch points, each a finger across two neighbours (1-2, 2-3, 3-4, 4-1): CONTACT = how much current
+//   crosses (the skin's resistance: the two voltages pull towards each other, both ways), BODY = what the body
+//   brings with it (the mains' hum and hiss). The Cafe's own: EARTH (a plate) = onto the top bound (its insert),
+//   the input = onto the bottom bound, FLIP = every oscillator turns round, SKIP (held) = OP 2's bounds swapped
+//   (paradox). Main = OP 1 + OP 3, ASH = OP 2 + OP 4. YELLOW / lamp = OP 1 rising.
+// "O <id> <0..1000>": 0..3 RATE · 4..7 SLOPE · 8 RANGE (0 CV · 500 LOW · 1000 AUDIO) · 9..12 CONTACT ·
+//   13..16 BODY · 17 INPUT · 18 FLIP (now) · 19 RESET (now)
+// ==========================================
+static inline float clock_hz();   // (in the sketch)
+#define FR_V 1048576                                         // one volt (Q20 of the 4096-per-volt scale: ±8 V fits)
+volatile int16_t fr_p[18] = { 450, 520, 580, 640, 500, 500, 500, 500, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 300 };
+volatile int32_t fr_up[4] = { 4000, 4000, 4000, 4000 }, fr_dn[4] = { 4000, 4000, 4000, 4000 };
+volatile int32_t fr_g[4] = { 0, 0, 0, 0 }, fr_body[4] = { 0, 0, 0, 0 }, fr_in = 0;
+volatile bool fr_flip = false, fr_reset = true, fr_gate = false;
+static void fr_update() {                                    // (the loop: floats are fine here)
+  float hz = clock_hz();
+  float range = fr_p[8] >= 750 ? 1.0f : (fr_p[8] >= 250 ? 1.0f / 16 : 1.0f / 512);   // AUDIO · LOW · CV
+  for (int k = 0; k < 4; k++) {
+    float f = 20.0f * powf(200.0f, fr_p[k] / 1000.0f) * range;                        // 20 Hz .. 4 kHz (over ~4 V)
+    float base = 2.0f * 4.0f * FR_V * f / hz;                                          // (volts per sample, both ways)
+    float a = (fr_p[4 + k] - 500) / 500.0f * 2.5f;                                     // SLOPE: ±2.5 octaves apart
+    float up = base * powf(2.0f, a), dn = base * powf(2.0f, -a);
+    fr_up[k] = (int32_t)fminf(fmaxf(up, 1.0f), 4.0f * FR_V);
+    fr_dn[k] = (int32_t)fminf(fmaxf(dn, 1.0f), 4.0f * FR_V);
+    fr_g[k] = (fr_p[9 + k] * fr_p[9 + k]) / 1000 * 1024 / 1000;                        // CONTACT (Q12: up to 1/4 a sample)
+    fr_body[k] = fr_p[13 + k];
+  }
+  fr_in = fr_p[17];
+}
+static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
+  static int32_t p[4], d[4];
+  static uint32_t hum = 0, rnd = 22222;
+  static int32_t dcl = 0, dcr = 0;
+  static bool flipWas = false;
+  if (fr_reset) {
+    fr_reset = false;
+    for (int k = 0; k < 4; k++) { p[k] = (k * 4 - 6) * FR_V; d[k] = (k & 1) ? -1 : 1; }
+  }
+  if ((flip && !flipWas) || fr_flip) { fr_flip = false; for (int k = 0; k < 4; k++) d[k] = -d[k]; }   // FLIP: all turn round
+  flipWas = flip;
+  // the body: the mains' hum (50 Hz) and hiss, what a finger brings along
+  hum += (uint32_t)(50.0f * 4294967296.0f / 32000.0f);
+  int32_t ht = (int32_t)(hum >> 16) - 32768; ht = (ht < 0 ? -ht : ht) * 2 - 32768;        // (a triangle, ±32768)
+  rnd = rnd * 1664525u + 1013904223u;
+  int32_t nz = (int32_t)(rnd >> 16) - 32768;
+  // the bounds: the neighbours' voltages; the rails and their inserts at the ends
+  int32_t top = 8 * FR_V + pc_emod * (FR_V / 32);                                        // EARTH: ±4 V on the top bound
+  int32_t bot = -8 * FR_V + in * (int32_t)((int64_t)fr_in * 8 * FR_V / 1000 / 2048);     // the input: up to ±8 V on the bottom
+  for (int k = 0; k < 4; k++) {
+    int32_t lo = k == 0 ? bot : p[k - 1];
+    int32_t hi = k == 3 ? top : p[k + 1];
+    if (skip && k == 1) { int32_t t2 = lo; lo = hi; hi = t2; }                            // SKIP: paradox
+    int32_t v = p[k] + (d[k] > 0 ? fr_up[k] : -fr_dn[k]);
+    if (d[k] > 0 && v >= hi) { v = hi; d[k] = -1; }
+    else if (d[k] < 0 && v <= lo) { v = lo; d[k] = 1; }
+    if (v > 10 * FR_V) { v = 10 * FR_V; d[k] = -1; }                                      // (the rails)
+    if (v < -10 * FR_V) { v = -10 * FR_V; d[k] = 1; }
+    p[k] = v;
+  }
+  // the touch points: a finger across two neighbours — current both ways (they pull together), and the body's hum
+  for (int k = 0; k < 4; k++) {
+    int32_t g = fr_g[k];
+    if (g <= 0) continue;
+    int a = k, b = (k + 1) & 3;
+    int32_t x = (int32_t)(((int64_t)(p[a] - p[b]) * g) >> 12);
+    int32_t body = (int32_t)(((int64_t)(ht * 3 + (nz >> 1)) * fr_body[k] * (g >> 2)) >> 14);   // (only as much as it touches)
+    p[a] -= x - body; p[b] += x + body;
+  }
+  fr_gate = d[0] > 0;
+  // out: OP 1 + OP 3 (main) · OP 2 + OP 4 (ASH), DC out
+  int32_t l = (p[0] + p[2]) >> 12, r = (p[1] + p[3]) >> 12;                                // (±16 V -> ±4096)
+  dcl += ((l << 8) - dcl) >> 11; l -= dcl >> 8;
+  dcr += ((r << 8) - dcr) >> 11; r -= dcr >> 8;
+  l >>= 1; r >>= 1;
+  if (l > 2047) l = 2047; if (l < -2047) l = -2047;
+  if (r > 2047) r = 2047; if (r < -2047) r = -2047;
+  *rout = r;
+  return l;
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
@@ -2499,6 +2584,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 3) nz_reset = true;
     else if (cur == 4 || cur == 5) sx_reset = true;
     else if (cur == 6) hb_reset = true;
+    else if (cur == 7) fr_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2511,10 +2597,12 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 3) nz_reset = true;
       else if (cur == 4 || cur == 5) sx_reset = true;
       else if (cur == 6) hb_reset = true;
+      else if (cur == 7) fr_reset = true;
     }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   bool hmode = cur == 6;                                     // HABIT: the memory on the phone
+  bool fmode = cur == 7;                                     // FOURSES
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2531,7 +2619,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || bmode || hmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
+  grit_off = smode || bmode || hmode || fmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2564,6 +2652,8 @@ void IRAM_ATTR coco_pc() {
     r >>= 1;                                                 // (ASH doubles its input and clips: keep it clean)
   } else if (hmode) {
     l = hb_tick(gyo - 2048, &r);                             // HABIT: main = input + tape, ASH = the tape
+  } else if (fmode) {
+    l = fr_tick(gyo - 2048, &r, FLIPPERAT, SKIPPERAT);       // FOURSES
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2593,7 +2683,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = hmode ? false : (smode ? sx_gate : nz_gate);
+  } else y = hmode ? false : (fmode ? fr_gate : (smode ? sx_gate : nz_gate));
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2625,8 +2715,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || bmode) {
-    if (bmode ? bb_gate : nz_gate) {
+  } else if (nmode || bmode || fmode) {
+    if (fmode ? fr_gate : (bmode ? bb_gate : nz_gate)) {
       LAMP_ON;
     } else {
       LAMP_OFF;
