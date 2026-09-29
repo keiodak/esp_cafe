@@ -20,6 +20,15 @@ enum FrBoard {
     /// the terminals' colours: what comes in (IN, EARTH, LINK IN) · what goes out (OUT, LINK OUT)
     static let inInk = Color(hex: 0x3D5566)
     static let outInk = Color(hex: 0x5B6B2E)
+    /// the terminals each their own: EARTH brown · ASH grey · YELLOW mustard (the rest: IN slate, OUT olive)
+    static func termInk(_ n: Int) -> Color {
+        switch n {
+        case 45, 75: return Color(hex: 0x7A4E2D)
+        case 47, 78: return Color(hex: 0x7D7F80)
+        case 76, 79: return Color(hex: 0xC29A12)
+        default: return outputs.contains(n) ? outInk : inInk
+        }
+    }
     /// the shapes: a light blue
     static let shapeBlue = Color(hex: 0x6FA8DC)
     /// what a shape passes: 0 both Cafes (light blue) · 1 TARPTERGE only (Cafe A, navy) · 2 ARPSERGE only (Cafe B, green)
@@ -567,14 +576,13 @@ struct FoursesBoard: View {
                     .stroke(deep ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.22)
             } else {
-                let out = k == 17
                 Text(FrBoard.label(i))
                     .font(.hud(8, .semibold))
                     .foregroundStyle(PastelTheme.selectionText)
                     .padding(.horizontal, 5)
                     .frame(height: s * 0.8)
                     .background(ZStack {
-                        RoundedRectangle(cornerRadius: 3).fill(out ? FrBoard.outInk : FrBoard.inInk)
+                        RoundedRectangle(cornerRadius: 3).fill(FrBoard.termInk(FrBoard.nodes[i]))
                         if lit { RoundedRectangle(cornerRadius: 3).fill(orange) }
                     })
                     .fixedSize()
