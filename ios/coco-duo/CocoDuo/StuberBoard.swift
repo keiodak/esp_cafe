@@ -1,5 +1,5 @@
 // StuberBoard.swift — coco duo (k.odk)
-// STUBER (BLE mode 9): Blasser's Din Datin Dudero Stuber on a Cafe. Its sandrodes lie on a board between the two big
+// STUBER (BLE mode 8): Blasser's Din Datin Dudero Stuber on a Cafe. Its sandrodes lie on a board between the two big
 // wheels (L: the left channel's cutoff, R: the right's), a resonance knob under each (the left one inverso). It sings
 // with nothing patched once a resonance passes ~75 %. As on FOURSES: DRAW shapes join the jacks they cover (as hard as
 // they cover them), PLAY fingers join what they touch, EDIT moves the jacks and the shapes.
@@ -13,12 +13,13 @@ enum StBoard {
         let f = ["LP", "BP", "M+", "M−", "RES", "Q+", "Q−"]
         var n: [String] = []
         for c in ["B", "D", "A", "C"] { n += f.map { c + " " + $0 } }
-        n += ["÷2", "÷16", "÷256", "÷4K", "÷2", "÷16", "÷256", "÷4K", "PAR L", "PAR R", "CLK A", "CLK B", "IN", "EARTH"]
+        n += ["÷2", "÷16", "÷256", "÷4K", "÷2", "÷16", "÷256", "÷4K", "PAR L", "PAR R", "CLK A", "CLK B", "IN", "EARTH",
+              "ENV L", "ENV R", "S&H1 IN", "S&H1 CLK", "S&H1 OUT", "S&H2 IN", "S&H2 CLK", "S&H2 OUT"]
         return n
     }()
-    static let count = 42
+    static let count = 50
     /// each group its colour: B red · D blue · A orange · C green · the dividers grey (L light, R dark) · parasites violet ·
-    /// clocks mustard · IN / EARTH brown
+    /// clocks mustard · IN / EARTH brown · ENV cyan · S&H teal
     static func ink(_ i: Int) -> Color {
         switch i {
         case 0..<7: return Color(hex: 0xC0392B)
@@ -29,7 +30,9 @@ enum StBoard {
         case 32..<36: return Color(hex: 0x5E5E5E)
         case 36, 37: return Color(hex: 0x7B4FA0)
         case 38, 39: return Color(hex: 0xC29A12)
-        default: return Color(hex: 0x7A4E2D)
+        case 40, 41: return Color(hex: 0x7A4E2D)
+        case 42, 43: return Color(hex: 0x2AA7B8)
+        default: return Color(hex: 0x1F6F6F)
         }
     }
     static let shapeNames = ["○", "△", "□", "／"]

@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "NOBSRINE", "STUBER"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "STUBER"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -111,7 +111,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, nobs, stuber, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, stuber, harmony, multi, arp, speech, pcoco, sun, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
@@ -125,14 +125,6 @@ enum FrPad {
         if i < 4 { return y < 0.47 ? "FALL" : (y > 0.53 ? "RISE" : "TRI") }
         return x < 0.02 ? "OFF" : "\(Int((x * 100).rounded()))"
     }
-}
-
-/// NOBSRINE (BLE mode 8): one instrument — two big knobs (L · R), a LO / HI switch each, DECAY · PITCH · SPREAD · MIX;
-/// it sounds only while a knob turns — "E <id> <0..1000>"
-enum NbPad {
-    static let titles = ["KNOB L · KNOB R", "DECAY · PITCH", "SPREAD", "MIX"]
-    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.4, 0.4), (0.5, 0.0), (0.0, 0.0)]
-    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String? { nil }
 }
 
 /// APP+CAFE's BLIPPOO (PhoneSun.swift): the four outer pads play the phone's Blippoo Box (and reach the Cafes: the
@@ -440,25 +432,6 @@ final class Rig: ObservableObject {
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
     /// FOURSES
     let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
-    /// NOBSRINE: top row Cafe A, bottom row Cafe B
-    let nbAxes: [PadAxis] = (0..<8).map { PadAxis(NbPad.starts[$0 % 4]) }
-    func nbCommands(pad i: Int) -> [String] {
-        let a = nbAxes[i % 4], x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
-        switch i % 4 {
-        case 0: return ["E 0 \(x)", "E 1 \(y)"]            // the knobs
-        case 1: return ["E 3 \(x)", "E 4 \(y)"]            // DECAY · PITCH
-        case 2: return ["E 5 \(x)"]                         // SPREAD
-        default: return ["E 7 \(x)"]                        // MIX
-        }
-    }
-    /// the two switches (LO / HI)
-    @Published var nbSw: [Bool] = [false, false]
-    func nbAll(slot: Int) -> [String] {
-        (0..<4).flatMap { nbCommands(pad: $0) } + (0..<2).map { "E \(8 + $0) \(nbSw[$0] ? 1000 : 0)" }
-    }
-    func nbDice() {
-        nbAxes[1].x = Double.random(in: 0.1...0.9); nbAxes[1].y = Double.random(in: 0.1...0.9); nbAxes[2].x = Double.random(in: 0.1...0.9)
-    }
 
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO (all four, from the key)
     @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
@@ -475,7 +448,7 @@ final class Rig: ObservableObject {
     }
     func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
     /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
-    // MARK: STUBER (BLE mode 9): its sandrodes on a board, patched by shapes and fingers (StuberBoard.swift)
+    // MARK: STUBER (BLE mode 8): its sandrodes on a board, patched by shapes and fingers (StuberBoard.swift)
     @Published var stMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
     @Published var stShape = 0                  // DRAW: ○ △ □ ／
     @Published var stIcons: [[Double]] = (Rig.d.array(forKey: "rig.stIcons") as? [[Double]]).flatMap { $0.count == StBoard.count ? $0 : nil }
@@ -583,7 +556,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .nobs, .stuber][min(max(ctxMode, 0), 9)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .stuber][min(max(ctxMode, 0), 8)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

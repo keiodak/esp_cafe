@@ -1,58 +1,6 @@
 // NobsBoard.swift — coco duo (k.odk)
-// NOBSRINE (BLE mode 8): one instrument, L and R — two big knobs (it sounds only while one turns; where a turn begins
-// sets a pitch), a LO / HI switch under each, and DECAY · PITCH · SPREAD · MIX.
+// The big knob (turned by dragging round it) and the plain slider — STUBER's wheels and resonance knobs.
 import SwiftUI
-
-struct NobsBoard: View {
-    let d: Director
-    @ObservedObject var rig: Rig
-
-    var body: some View {
-        HStack(spacing: 14) {
-            knob(0)
-            knob(1)
-            VStack(spacing: 4) {
-                NbSlider(label: "DECAY", a: rig.nbAxes[1], y: false) { d.padMoved(1) }
-                NbSlider(label: "PITCH", a: rig.nbAxes[1], y: true) { d.padMoved(1) }
-                NbSlider(label: "SPREAD", a: rig.nbAxes[2], y: false) { d.padMoved(2) }
-                NbSlider(label: "MIX", a: rig.nbAxes[3], y: false) { d.padMoved(3) }
-            }
-            .frame(maxWidth: 220)
-        }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// a knob (L / R) with its switch under it
-    private func knob(_ h: Int) -> some View {
-        VStack(spacing: 6) {
-            NbKnob(a: rig.nbAxes[0], y: h == 1) { d.padMoved(0) }
-            HStack(spacing: 8) {
-                Text(h == 0 ? "L" : "R")
-                    .font(.hud(9, .semibold))
-                    .foregroundStyle(PastelTheme.hudBlack)
-                switchChip(h)
-            }
-        }
-    }
-
-    /// LO / HI (HI: two octaves up)
-    private func switchChip(_ h: Int) -> some View {
-        let on = rig.nbSw[h]
-        return HStack(spacing: 0) {
-            ForEach([false, true], id: \.self) { hi in
-                Text(hi ? "HI" : "LO")
-                    .font(.hud(8, .semibold))
-                    .foregroundStyle(on == hi ? PastelTheme.selectionText : PastelTheme.hudBlack)
-                    .frame(width: 28, height: 20)
-                    .background(Rectangle().fill(on == hi ? PastelTheme.hudBlack : Color.clear))
-            }
-        }
-        .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { d.setNbSw(h, !on) }
-    }
-}
 
 /// a big knob: turned by dragging round it (300° of travel)
 struct NbKnob: View {

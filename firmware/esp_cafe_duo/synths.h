@@ -1128,7 +1128,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES, 8 = NOBSRINE, 9 = STUBER ("M 25 <0..9>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES, 8 = STUBER ("M 25 <0..8>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -2561,7 +2561,7 @@ static void fr_update() {                                    // (the loop: float
 }
 static void st_rebuild();                                     // (STUBER: its patches are these too)
 static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
-  if (pc_mode != 7 && pc_mode != 9) return;                    // (the tape is someone else's)
+  if (pc_mode != 7 && pc_mode != 8) return;                    // (the tape is someone else's)
   if (a > b) { int t = a; a = b; b = t; }
   if (a < 0 || b >= TP_N || a == b) return;
   int32_t g = 0;
@@ -2575,7 +2575,7 @@ static void tp_link(int a, int b, int v) {                   // (the loop) a tou
   tp_rebuild();
   st_rebuild();
 }
-static void tp_clear() { if (pc_mode != 7 && pc_mode != 9) return; memset(TL, 0, sizeof(TpLinks)); tp_rebuild(); st_rebuild(); }
+static void tp_clear() { if (pc_mode != 7 && pc_mode != 8) return; memset(TL, 0, sizeof(TpLinks)); tp_rebuild(); st_rebuild(); }
 static void tp_enter() { memset(TL, 0, sizeof(TpLinks)); }    // (the loop, as FOURSES is chosen: no links from the tape's old sound)
 // the horses' state (the audio)
 static int32_t tp_pos[4], tp_out[4], tp_olp[4], tp_bnd[4];
@@ -2713,24 +2713,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   return l;
 }
 
-// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two knobs; each one's
-// buffer goes through a capacitor into a Schmitt comparator, and each flip (a turn beginning, either way) samples the knob
-// into a hold that sets its triangle's pitch. How fast the knob turns, rectified, is the level — the tail current of the
-// differential pair the triangle goes through: it sounds only while it turns, as loud as it turns, no strike, no hold on.
-// L (OUT) = knob A, R (ASH) = knob B. "E <id> <0..1000>":
-//   0 KNOB A · 1 KNOB B · 3 DECAY (20 ms … 2 s) · 4 PITCH (30 … 960 Hz) · 5 SPREAD (0 … 6 oct) · 7 MIX ·
-//   8 SWITCH A · 9 SWITCH B (LO / HI: two octaves up)
-#define nb_p fr_p                                             // (FOURSES' settings: the two modes never run together)
-volatile bool nb_reset = true, nb_gate = false;
-struct NbState {
-  int32_t kn[2], kp[2], dv[2], e[2], es[2], s1[2], s2[2], pv[2][2], lem[2];
-  uint32_t ph[2][2], inc[2][2];
-  uint32_t sub, inc0;
-  int32_t dk, spread;
-  uint8_t st[2];
-};
-static_assert(sizeof(NbState) <= DCHUNK_BYTES, "NOBSRINE: its state must fit a piece of the tape");
-#define NB ((NbState *)dchunk[100])
+// 2^x without tables or floats (was NOBSRINE's)
 static inline uint32_t nb_exp2(uint32_t base, int32_t x) {
   int32_t o = x >> 12;
   uint64_t t = (uint64_t)(x & 4095) << 4;
@@ -2739,64 +2722,8 @@ static inline uint32_t nb_exp2(uint32_t base, int32_t x) {
   if (o > 0) v <<= (o > 12 ? 12 : o); else if (o < 0) v >>= (-o > 30 ? 30 : -o);
   return v > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)v;
 }
-static void nb_settings(NbState *n) {
-  n->dk = (int32_t)nb_exp2(26214, -(nb_p[3] * 27213 / 1000)); if (n->dk < 1) n->dk = 1;
-  n->inc0 = nb_exp2(4026532, nb_p[4] * 20480 / 1000);
-  n->spread = nb_p[5] * 24576 / 1000;
-}
-static inline int32_t nb_sat(int32_t x) {
-  if (x >= 32768) return 21845;
-  if (x <= -32768) return -21845;
-  return x - ((((x * x) >> 15) * x) >> 15) / 3;
-}
-static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
-  NbState *n = NB;
-  if (nb_reset) {
-    nb_reset = false;
-    memset(n, 0, sizeof(NbState));
-    for (int h = 0; h < 2; h++) {
-      n->kn[h] = n->kp[h] = (nb_p[h] * 65) << 8;
-      n->s1[h] = n->s2[h] = n->pv[h][0] = n->pv[h][1] = nb_p[h] * 65;
-      n->lem[h] = pc_emod;
-    }
-    nb_settings(n);
-  }
-  const bool sub = (++n->sub & 15) == 0;
-  if (sub) nb_settings(n);
-  int32_t o[2];
-  for (int h = 0; h < 2; h++) {
-    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) / 1024;                      // the knob (Q24; the phone's steps smoothed)
-    int32_t v = n->kn[h] - n->kp[h]; n->kp[h] = n->kn[h];                       // its turning...
-    n->dv[h] = (n->dv[h] * 511) / 512 + (v * 16) / 512;                         // ...through the capacitor
-    int32_t dv = n->dv[h];
-    if (!n->st[h] && dv > 2400) { n->st[h] = 1; n->s1[h] = n->kn[h] >> 8; }      // a turn begins: the hold takes the knob
-    else if (n->st[h] && dv < -2400) { n->st[h] = 0; n->s1[h] = n->kn[h] >> 8; }
-    int32_t a = dv < 0 ? -dv : dv;                                             // as loud as it turns, no more
-    int32_t t = a > 8191 ? 65535 : a * 8;
-    int32_t e = n->es[h];
-    e += t > e ? (t - e) / 64 : -(((e >> 4) * (n->dk >> 4)) >> 16) - 1;          // (up in ~2 ms, down as DECAY says)
-    n->es[h] = e < 0 ? 0 : e;
-    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) / 64;                               // the hold, through its buffer
-    if (sub) {
-      uint32_t i = nb_exp2(n->inc0, (int32_t)(((int64_t)n->spread * (n->pv[h][0] - 32768)) >> 16) + (nb_p[8 + h] >= 500 ? 8192 : 0));
-      n->inc[h][0] = i > 900000000u ? 900000000u : i;
-    }
-    int32_t p = (int32_t)(n->ph[h][0] >> 16);
-    int32_t w = p < 32768 ? p * 2 - 32768 : (65535 - p) * 2 - 32768;           // one triangle, plain
-    n->ph[h][0] += n->inc[h][0];
-    o[h] = (int32_t)(((int64_t)w * n->es[h]) >> 20);                            // (±2047 at full)
-  }
-  nb_gate = n->es[0] > 6000 || n->es[1] > 6000;
-  int32_t l = o[0] + (((o[1] - o[0]) * nb_p[7]) / 2000), r = o[1] + (((o[0] - o[1]) * nb_p[7]) / 2000);
-  if (l > 2047) l = 2047;
-  if (l < -2047) l = -2047;
-  if (r > 2047) r = 2047;
-  if (r < -2047) r = -2047;
-  *rout = r;
-  return l;
-}
 
-// ==== STUBER (BLE mode 9): after Blasser's Din Datin Dudero Stuber (as its Surfing Guide lays it out). Four identical
+// ==== STUBER (BLE mode 8): after Blasser's Din Datin Dudero Stuber (as its Surfing Guide lays it out). Four identical
 // state-variable filters (12 dB, resonant, rails soft): B and D the audio (the Cafe's IN; B → OUT, D → ASH), A and C the
 // gesture — each wheel's position through a slow resonant filter, so turning it rings a "heartbeat", and that ripple
 // shakes the other channel's resonance. Left wheel: B's cutoff, right wheel: D's; the resonance knobs mirrored (left
@@ -2805,9 +2732,10 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
 // and knob reach which filter and which way (base state after RESET; random at power).
 // The 42 sandrodes are nodes; a patch (a wire, a touch) between two joins them by the difference of their potentials —
 // a current, not a voltage: it modulates what an input node governs, and is injected into what a filter node holds.
+// ENV L / R: each wheel's turning (the VCA: a channel sounds only while its wheel turns). S&H 1 / 2: IN · CLK · OUT.
 // "A <id> <0..1000>": 0 / 1 the wheels (L / R) · 2 / 3 the resonance knobs (L / R) · 19 RESET (base state) · 20 random.
 // "T a b v": a patch (as FOURSES').
-#define ST_N 42
+#define ST_N 50                                               // (+ ENV L / R 42 · 43, S&H 1 IN · CLK · OUT 44–46, S&H 2 47–49)
 enum { ST_LP, ST_BP, ST_MP, ST_MN, ST_RES, ST_RP, ST_RN };      // per filter (×7: B 0, D 7, A 14, C 21)
 volatile int16_t st_p[4] = { 400, 600, 450, 450 };
 volatile bool st_reset = true, st_base = false, st_on = false, st_gate = false;
@@ -2815,7 +2743,8 @@ volatile bool st_rand = false;
 struct StState {                                              // (in a piece of the tape: no RAM of its own)
   int32_t V[ST_N], I[ST_N];
   int32_t lp[4], bp[4];
-  int32_t wh[2], rs[2], whp[2];
+  int32_t wh[2], rs[2], whp[2], whq[2], env[2], sh[2];
+  uint8_t sck[2];
   uint32_t cnt[2], rng;
   uint8_t hy[2], reg[2], ck[2];
   int32_t par[2];
@@ -2825,7 +2754,7 @@ struct StState {                                              // (in a piece of 
 static_assert(sizeof(StState) <= DCHUNK_BYTES, "STUBER: its state must fit a piece of the tape");
 #define ST ((StState *)dchunk[100])
 static void st_rebuild() {                                    // (the loop) the patches, compact, into the buffer the audio is not reading
-  if (!st_on || pc_mode != 9) return;
+  if (!st_on || pc_mode != 8) return;
   StState *s = ST;
   int b = 1 - s->cur, n = 0;
   for (int k = 0; k < TP_NL; k++) {
@@ -2854,8 +2783,8 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
     uint32_t seed = s->rng ^ (uint32_t)esp_timer_get_time();
     memset(s, 0, sizeof(StState));                                            // (no patches until they are rebuilt, below)
     s->rng = seed | 1;
-    for (int h = 0; h < 2; h++) { s->wh[h] = s->whp[h] = st_p[h] * 65; s->rs[h] = st_p[2 + h] * 65; }
-    s->reg[0] = (uint8_t)st_rnd(s); s->reg[1] = (uint8_t)(st_rnd(s) >> 8);     // (every power-up its own routing)
+    for (int h = 0; h < 2; h++) { s->wh[h] = st_p[h] * 65; s->whq[h] = s->whp[h] = (st_p[h] * 65) << 8; s->rs[h] = st_p[2 + h] * 65; }
+    // (the base routing: each wheel its own channel — the dice or a clock at CLK A / B move it)
     st_on = true;
     st_rebuild();                                                              // (the patches that came before it was on)
   }
@@ -2874,6 +2803,23 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
   }
   // the wheels and the knobs (the phone's steps smoothed)
   for (int h = 0; h < 2; h++) { s->wh[h] += (st_p[h] * 65 - s->wh[h]) / 256; s->rs[h] += (st_p[2 + h] * 65 - s->rs[h]) / 256; }
+  // each wheel's turning: an attack-decay envelope (the stereo VCA: a channel sounds only while its wheel turns)
+  for (int h = 0; h < 2; h++) {
+    s->whq[h] += (((st_p[h] * 65) << 8) - s->whq[h]) / 256;                     // (finer: its speed, not just where it is)
+    int32_t v = s->whq[h] - s->whp[h]; s->whp[h] = s->whq[h]; if (v < 0) v = -v;
+    int32_t t = v > 511 ? 65535 : v * 128, e = s->env[h];
+    e += t > e ? (t - e) / 32 : -(e / 4096) - 1;                                  // (up in ~1 ms, down in ~0.3 s)
+    s->env[h] = e < 0 ? 0 : e;
+    V[42 + h] = s->env[h] / 3;                                                  // ENV L / R
+  }
+  // two sample & holds: a rising current at CLK takes what flows into IN
+  for (int k = 0; k < 2; k++) {
+    int b = 44 + 3 * k;
+    bool hi = I[b + 1] > 3000 || (s->sck[k] && I[b + 1] > 1000);
+    if (hi && !s->sck[k]) { int32_t x = I[b] / 2; s->sh[k] = x > 30000 ? 30000 : (x < -30000 ? -30000 : x); }
+    s->sck[k] = hi;
+    V[b + 2] = s->sh[k];
+  }
   // the Sh'mance: a rising current at [A] (38) / [B] (39) steps its side's register; the data: its own wheel, past the
   // middle, against the register's last bit (as a Rungler)
   for (int h = 0; h < 2; h++) {
@@ -2923,7 +2869,7 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
     st_svf(&s->lp[h], &s->bp[h], x, f, q);
     st_svf(&s->lp[h], &s->bp[h], x, f, q);
     V[base + ST_LP] = s->lp[h]; V[base + ST_BP] = s->bp[h];
-    o[h] = s->lp[h] >> 4;
+    o[h] = (int32_t)(((int64_t)(s->lp[h] >> 4) * s->env[h]) >> 16);             // (through the VCA)
   }
   // the dividers: left from D, right from B (16 stages; four brought out each)
   for (int h = 0; h < 2; h++) {
@@ -2996,8 +2942,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 4 || cur == 5) sx_reset = true;
     else if (cur == 6) hb_reset = true;
     else if (cur == 7) fr_reset = true;
-    else if (cur == 8) nb_reset = true;
-    else if (cur == 9) st_reset = true;
+    else if (cur == 8) st_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -3011,15 +2956,13 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 4 || cur == 5) sx_reset = true;
       else if (cur == 6) hb_reset = true;
       else if (cur == 7) fr_reset = true;
-      else if (cur == 8) nb_reset = true;
-      else if (cur == 9) st_reset = true;
+      else if (cur == 8) st_reset = true;
     }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   bool hmode = cur == 6;                                     // HABIT: the memory on the phone
   bool fmode = cur == 7;                                     // FOURSES
-  bool nbmode = cur == 8;                                    // NOBSRINE
-  bool stmode = cur == 9;                                    // STUBER
+  bool stmode = cur == 8;                                    // STUBER
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -3036,7 +2979,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || bmode || hmode || fmode || nbmode || stmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
+  grit_off = smode || bmode || hmode || fmode || stmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -3071,8 +3014,6 @@ void IRAM_ATTR coco_pc() {
     l = hb_tick(gyo - 2048, &r);                             // HABIT: main = input + tape, ASH = the tape
   } else if (fmode) {
     l = fr_tick(gyo - 2048, &r, FLIPPERAT, SKIPPERAT);       // FOURSES
-  } else if (nbmode) {
-    l = nb_tick(&r);                                         // NOBSRINE
   } else if (stmode) {
     l = st_tick(gyo - 2048, &r);                             // STUBER
   } else {
@@ -3104,7 +3045,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = hmode ? false : (stmode ? st_gate : nbmode ? nb_gate : (fmode ? fr_gate : (smode ? sx_gate : nz_gate)));
+  } else y = hmode ? false : (stmode ? st_gate : (fmode ? fr_gate : (smode ? sx_gate : nz_gate)));
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -3136,8 +3077,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || bmode || fmode || nbmode || stmode) {
-    if (stmode ? st_gate : nbmode ? nb_gate : (fmode ? fr_gate : (bmode ? bb_gate : nz_gate))) {
+  } else if (nmode || bmode || fmode || stmode) {
+    if (stmode ? st_gate : (fmode ? fr_gate : (bmode ? bb_gate : nz_gate))) {
       LAMP_ON;
     } else {
       LAMP_OFF;
