@@ -55,6 +55,7 @@ final class Director: ObservableObject {
             // STEREO: A's EARTH -> voice 1 (left), B's -> voice 2 (right); MONO: the first Cafe on ARP_DELAY
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
+            self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
@@ -153,7 +154,8 @@ final class Director: ObservableObject {
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
                 let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect)   // (what the shapes join)
-                w.forEach { u.send("T \($0[0]) \($0[1]) 1000") }; frWireSent = Set(w)
+                w.forEach { frT($0[0], $0[1], 1000, u) }; frWireSent = Set(w)
+                frEarthSent[s] = -1
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -777,11 +779,26 @@ final class Director: ObservableObject {
     private var frWireSent: Set<[Int]> = []
     func frSyncShapes() {
         let now = Set(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect))
-        var out: [String] = []
-        for w in now.subtracting(frWireSent) { out.append("T \(w[0]) \(w[1]) 1000") }
-        for w in frWireSent.subtracting(now) { out.append("T \(w[0]) \(w[1]) 0") }
+        var out: [(Int, Int, Int)] = []
+        for w in now.subtracting(frWireSent) { out.append((w[0], w[1], 1000)) }
+        for w in frWireSent.subtracting(now) { out.append((w[0], w[1], 0)) }
         frWireSent = now
-        if !out.isEmpty { ctxUnits().forEach { u in out.forEach(u.send) } }
+        if !out.isEmpty { ctxUnits().forEach { u in out.forEach { frT($0.0, $0.1, $0.2, u) } } }
+    }
+    /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75); EARTH B the reverse
+    func frNode(_ n: Int, _ slot: Int) -> Int { slot == 1 ? (n == 45 ? 75 : (n == 75 ? 45 : n)) : n }
+    func frT(_ a: Int, _ b: Int, _ v: Int, _ u: CafeUnit) {
+        let x = frNode(a, u.slot), y = frNode(b, u.slot)
+        u.send("T \(min(x, y)) \(max(x, y)) \(v)")
+    }
+    /// each Cafe's EARTH to the other (~30x a second, only when it moves): its EARTH A / EARTH B
+    var frEarthSent = [-1, -1]
+    func frForwardEarth() {
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.ble && rig.mode[u.slot] == 7 {
+            let o = units[u.slot == 1 ? 0 : 1]
+            let e = o.isConnected ? o.earth : 0
+            if abs(e - frEarthSent[u.slot]) >= 2 { frEarthSent[u.slot] = e; u.send("O 21 \(e)") }
+        }
     }
     func frAddShape(_ s: [Double]) { rig.frShapes.append(s); frSyncShapes() }
     func frRemoveShape(_ k: Int) { if rig.frShapes.indices.contains(k) { rig.frShapes.remove(at: k); frSyncShapes() } }
@@ -792,12 +809,17 @@ final class Director: ObservableObject {
     func frTouches(_ links: [Int: [Int: Int]]) {
         var now: [String: Int] = [:]
         for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, (v / 50) * 50 + 25)) } }   // (steps of 50: fewer lines)
-        var out: [String] = []
-        for (k, v) in now where frSent[k] != v { out.append("T \(k) \(v)") }
-        for k in frSent.keys where now[k] == nil { out.append("T \(k) 0") }
+        var out: [(String, Int)] = []
+        for (k, v) in now where frSent[k] != v { out.append((k, v)) }
+        for k in frSent.keys where now[k] == nil { out.append((k, 0)) }
         frSent = now
         guard !out.isEmpty else { return }
-        ctxUnits().forEach { u in out.forEach(u.send) }
+        ctxUnits().forEach { u in
+            for (k, v) in out {
+                let ab = k.split(separator: " ").compactMap { Int($0) }
+                if ab.count == 2 { frT(ab[0], ab[1], v, u) }
+            }
+        }
     }
     func setHabitDub(_ on: Bool) { rig.habitDub = on; habits.forEach { $0.dub = on } }
     func setHabitSeconds(_ v: Double) {

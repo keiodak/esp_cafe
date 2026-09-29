@@ -2473,12 +2473,13 @@ void hb_write(const uint8_t *d, size_t n) {
 // cells (an op-amp forcing a push-pull pair's emitters, 10K between two held values; the collectors are the
 // nodes: 65+2j SOURCE (the PNP, △), 66+2j SINK (the NPN, ▽)) — D→A, A→D, B→C, C→B. 73 LINK OUT (reported to the
 // phone, "t <0..1000>", which hands it to the other Cafe's LINK IN, 74): slow (the link), but it crosses.
+// 75: the other Cafe's EARTH ("O 21 <0..255>", from the phone: slow too).
 // (Memory: the heap has nothing to spare — the tape takes all of it. So the solver's working space is a piece of
 //  the tape (FOURSES does not use it), set up again each time FOURSES starts; the links are kept in RTC memory.)
 // ==========================================
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
-#define TP_N 75
+#define TP_N 76
 #define TP_NL 64
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
@@ -2504,6 +2505,7 @@ static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece
 #define TW2 ((TpWs2 *)dchunk[101])
 volatile int16_t fr_p[10] = { 500, 500, 500, 500, 0, 0, 0, 0, 1000, 0 };
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
+volatile int32_t tp_earth2 = 0;                               // the other Cafe's EARTH (0..255, as its status line has it)
 static const uint8_t tp_vx[4] = { 3, 0, 1, 2 }, tp_vy[4] = { 0, 3, 2, 1 };   // the V→I cells: I = (X - Y) / 10K
 volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
 volatile int32_t tp_kc = 5000;                                // a node's current into the capacitor (Q16)
@@ -2593,7 +2595,9 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i < 65) { e = tp_sh[i - 61]; if (e > 6900) e = 6900; if (e < 20) e = 20; g = 20480; }   // S&H OUT (LM324)
   else if (i < 73) { e = 4200; g = 0; }                                           // a collector: only a current (below)
   else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
-  else { e = tp_linkin; g = 4096; }                                               // LINK IN (10K)
+  else if (i == 74) { e = tp_linkin; g = 4096; }                                  // LINK IN (10K)
+  else { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
+         e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 410; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {

@@ -16,22 +16,27 @@ enum FrBoard {
     static let role: [Int] = [4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6]
     static let horse: [Int] = [0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0]
     static let terms = ["IN", "EARTH", "OUT L", "OUT R"]
+    /// the terminals' colours: what comes in (IN, EARTH, LINK IN) · what goes out (OUT, LINK OUT)
+    static let inInk = Color(hex: 0x3D5566)
+    static let outInk = Color(hex: 0x5B6B2E)
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
     /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
-    static let nodes: [Int] = Array(0..<48) + Array(53..<75)
+    static let nodes: [Int] = Array(0..<48) + Array(53..<76)
     static let count = nodes.count
     /// what an icon is: < 44 a Fourses glyph (role) · 44…47 a terminal · 11 S&H IN · 12 S&H GATE · 13 S&H OUT ·
-    /// 14 SOURCE · 15 SINK · 16 LINK
+    /// 14 SOURCE · 15 SINK · 16 an input terminal (IN, EARTH, LINK IN) · 17 an output (OUT, LINK OUT)
     static func kind(_ i: Int) -> Int {
         let n = nodes[i]
         if n < 44 { return role[n] }
-        if n < 48 || n >= 73 { return 16 }
+        if n == 46 || n == 47 || n == 73 { return 17 }                 // an output terminal
+        if n < 48 || n >= 73 { return 16 }                              // an input terminal
         if n < 57 { return 11 }; if n < 61 { return 12 }; if n < 65 { return 13 }
         return (n - 65) % 2 == 0 ? 14 : 15
     }
     static func label(_ i: Int) -> String {
         let n = nodes[i]
         if n < 44 { return "" }
+        if n == 45 { return "EARTH A" }; if n == 75 { return "EARTH B" }      // (Cafe A's, Cafe B's: each Cafe gets the other's by the phone)
         if n < 48 { return terms[n - 44] }
         if n == 73 { return "LINK OUT" }; if n == 74 { return "LINK IN" }
         let sh = ["A", "B", "C", "D"]
@@ -53,6 +58,7 @@ enum FrBoard {
             var best = [0.5, 0.5], bestD = -1.0
             for _ in 0..<24 {                                            // (the candidate farthest from the others)
                 let c = [0.05 + rnd() * 0.90, 0.07 + rnd() * (yMax - 0.12)]
+                if c[0] < 0.36 && c[1] < 0.17 { continue }                  // (the DRAW palette's corner)
                 let d = out.map { hypot(($0[0] - c[0]) * 2, $0[1] - c[1]) }.min() ?? 1
                 if d > bestD { bestD = d; best = c }
             }
@@ -342,12 +348,13 @@ struct FoursesBoard: View {
                     .fixedSize()
                     .offset(y: s * 0.72)
             } else {
+                let out = k == 17
                 Text(FrBoard.label(i))
                     .font(.hud(8, .semibold))
                     .foregroundStyle(lit ? PastelTheme.selectionText : PastelTheme.padScreen)
                     .padding(.horizontal, 5)
                     .frame(height: s * 0.8)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack))
+                    .background(RoundedRectangle(cornerRadius: 3).fill(lit ? PastelTheme.hudOrange : (out ? FrBoard.outInk : FrBoard.inInk)))
                     .fixedSize()
             }
         }
