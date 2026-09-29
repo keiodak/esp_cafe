@@ -665,7 +665,7 @@ struct FoursesBoard: View {
         .frame(maxHeight: 30)
     }
 
-    /// STARVE: the shapes' power — left starves them (every join weaker), right feeds them (stronger); the middle as drawn
+    /// STARVE: the circuit's supply — left starves it (slower, smaller, sagging under its own load), right feeds it; the middle as it is
     private func starveSlider() -> some View {
         let v = rig.frStarve
         return VStack(alignment: .leading, spacing: 3) {

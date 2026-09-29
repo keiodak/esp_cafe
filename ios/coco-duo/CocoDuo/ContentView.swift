@@ -158,7 +158,8 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
-                let w = frPower(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0))   // (what the shapes join, for this Cafe)
+                u.send("O 22 \(Int((rig.frStarve * 1000).rounded()))")                // (STARVE: the supply)
+                let w = FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
                 frLightSent = [Int](repeating: -1, count: 16)
                 if !frLightOn {                                             // (the empty shapes' pulls, before their wires)
                     let v = FrBoard.drift(icons: rig.frIcons, shapes: frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: s == 1 ? 1 : 0) ? $0 : [] }, aspect: frAspect).volts
@@ -792,7 +793,7 @@ final class Director: ObservableObject {
     func frSyncShapes() {
         for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
             let sl = u.slot == 1 ? 1 : 0
-            let now = Dictionary(frPower(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl)).map { ([$0[0], $0[1]], $0[2]) },
+            let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
                                  uniquingKeysWith: { a, _ in a })
             if !frLightOn {                                                 // an empty shape's pull: its voltage (the CAMERA's light instead, when on)
                 let shapes = frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: sl) ? $0 : [] }
@@ -867,13 +868,11 @@ final class Director: ObservableObject {
     }
     /// the shapes as they are now (◌ flickering)
     var frLive: [[Double]] { FrBoard.flickered(rig.frShapes, rig.frFlick, rig.frGrav) }
-    /// STARVE: every join the shapes make, weaker (left) or stronger (right) — ±400 on the 0…1000 scale (~×30 either way)
-    func frPower(_ links: [[Int]]) -> [[Int]] {
-        let dv = Int(((rig.frStarve - 0.5) * 800).rounded())
-        guard dv != 0 else { return links }
-        return links.map { [$0[0], $0[1], $0[2] > 0 ? min(1000, max(1, $0[2] + dv)) : 0] }
+    /// STARVE: the Cafes' supply to the circuit (0.5 as it is; left starved: slower, smaller, sagging, sputtering; right fed)
+    func setFrStarve(_ v: Double) {
+        rig.frStarve = v
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.ble && rig.mode[u.slot] == 7 { u.send("O 22 \(Int((v * 1000).rounded()))") }
     }
-    func setFrStarve(_ v: Double) { rig.frStarve = v; frSyncShapes() }
     /// ◉ hung circles: each a little spring from where it was drawn, pulled by the phone's tilt, twitching (~30x a second)
     private let motion = CMMotionManager()
     private var frGravV: [[Double]] = []

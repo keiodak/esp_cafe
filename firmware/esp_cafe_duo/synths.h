@@ -2512,6 +2512,8 @@ static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece
 #define TW2 ((TpWs2 *)dchunk[101])
 volatile int16_t fr_p[10] = { 500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 0 };   // 4..7: each horse's range switch
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
+volatile int32_t tp_supply = 500;                             // STARVE: the supply (500 = its 8.4 V; 0 starved to ~0.3, 1000 ~1.7x)
+static int32_t tp_kq = 4096;                                  // (the supply now, Q12, sagging under the load)
 volatile int32_t tp_earth2 = 0;                               // the other Cafe's EARTH (0..255, as its status line has it)
 static const uint8_t tp_vx[4] = { 3, 0, 1, 2 }, tp_vy[4] = { 0, 3, 2, 1 };   // the V→I cells: I = (X - Y) / 10K
 volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
@@ -2590,7 +2592,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
       case TP_PULSE: e = 4200 + tp_out[h] - tp_olp[h]; g = 4096; break;           // through its capacitor
       case TP_THR: e = tp_bnd[h] + (((tp_out[h] - tp_bnd[h]) * 186) >> 12); g = 390; break;   // bound (110K) · output (2.2M)
       case TP_GATE: e = tp_out[h]; g = 410; break;                                // the output through 100K
-      case TP_NGATE: e = tp_out[h] > 3400 ? 60 : 8300; g = 390; break;            // the inverter through 100K
+      case TP_NGATE: e = tp_out[h] > ((3400 * tp_kq) >> 12) ? 60 : (8300 * tp_kq) >> 12; g = 390; break;            // the inverter through 100K
       case TP_BUP: if (h < 3) { e = tp_pos[h + 1] / 1000; if (e > 6800) e = 6800; g = 410; } else { e = 6200; g = 819; } break;
       case TP_BLO: if (h > 0) { e = tp_pos[h - 1] / 1000; if (e > 6800) e = 6800; g = 410; } else { e = 2000; g = 819; } break;
       case TP_LMID: g = 0; break;                                                 // (only the ladder)
@@ -2668,21 +2670,32 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     if (a < TP_NB && tp_role[a] == TP_POS) cur[tp_h[a]] += lg[k] * (V[b] - tp_pos[tp_h[a]] / 1000) / 64;
     if (b < TP_NB && tp_role[b] == TP_POS) cur[tp_h[b]] += lg[k] * (V[a] - tp_pos[tp_h[b]] / 1000) / 64;
   }
+  // STARVE: the supply, and how it sags as the horses' outputs go high (a starved supply droops under its load)
+  {
+    int32_t k = 1229 + tp_supply * 5734 / 1000;                                   // (0.3 … 1 … 1.7)
+    int nh = 0; for (int h = 0; h < 4; h++) nh += tp_out[h] > 1000;
+    if (k < 4096) k -= ((4096 - k) * nh * 260) >> 12;
+    if (k < 250) k = 250;
+    tp_kq = k;
+  }
+  const int32_t kq = tp_kq;
+  const int32_t vh = (6800 * kq) >> 12, vt = (4200 * kq) >> 12, vn = (3400 * kq) >> 12;
+  int32_t rf = ((8400 * kq) >> 12) - 700; if (rf < 0) rf = 0; rf = rf * 4096 / 7700;   // (the mirrors: the supply less a Vbe)
   for (int h = 0; h < 4; h++) {
     int32_t pv = tp_pos[h] / 1000;
     int ni;
     ni = tp_ix[TP_THR][h];                                                        // the comparator: + THR, - the capacitor
     int32_t thr = af[ni] ? V[ni] : tp_bnd[h] + (((tp_out[h] - tp_bnd[h]) * 186) >> 12);
-    int32_t o = thr > pv ? 6800 : 50;
+    int32_t o = thr > pv ? vh : 50;
     tp_out[h] = o;
     tp_olp[h] += (o - tp_olp[h]) >> 7;
-    ni = tp_ix[TP_GATE][h]; bool ad = (af[ni] ? V[ni] : o) > 4200;              // the 4066's controls
-    ni = tp_ix[TP_NGATE][h]; bool bc = af[ni] ? V[ni] > 4200 : o < 3400;
+    ni = tp_ix[TP_GATE][h]; bool ad = (af[ni] ? V[ni] : o) > vt;                // the 4066's controls (its thresholds with its supply)
+    ni = tp_ix[TP_NGATE][h]; bool bc = af[ni] ? V[ni] > vt : o < vn;
     int32_t bu, bl;
     ni = tp_ix[TP_BUP][h];
-    if (af[ni]) bu = V[ni]; else if (h < 3) { bu = tp_pos[h + 1] / 1000; if (bu > 6800) bu = 6800; } else bu = 6200;
+    if (af[ni]) bu = V[ni]; else if (h < 3) { bu = tp_pos[h + 1] / 1000; if (bu > vh) bu = vh; } else bu = (6200 * kq) >> 12;
     ni = tp_ix[TP_BLO][h];
-    if (af[ni]) bl = V[ni]; else if (h > 0) { bl = tp_pos[h - 1] / 1000; if (bl > 6800) bl = 6800; } else bl = 2000;
+    if (af[ni]) bl = V[ni]; else if (h > 0) { bl = tp_pos[h - 1] / 1000; if (bl > vh) bl = vh; } else bl = (2000 * kq) >> 12;
     tp_bnd[h] = (ad && bc) ? (bu + bl) >> 1 : (ad ? bu : (bc ? bl : o));          // (none: only the hysteresis)
     int32_t fu = 2048;                                                            // the rates: the ladder onto the pairs
     if (w->lad[c][h]) {
@@ -2694,13 +2707,14 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     if (ad) dp += (int32_t)(((int64_t)tp_up[h] * fu) >> 11);
     if (bc) dp -= (int32_t)(((int64_t)tp_dn[h] * (4096 - fu)) >> 11);
     if (cur[h]) dp += (int32_t)(((int64_t)cur[h] * tp_kc[h]) >> 10);
+    if (rf != 4096) dp = (int32_t)(((int64_t)dp * rf) >> 12);
     int32_t np = tp_pos[h] + dp;
     if (np > 8300000) np = 8300000; if (np < 0) np = 0;                           // (the mirrors run out)
     tp_pos[h] = np;
   }
   // INTERSEXON: a gate above ~3 V samples (its own regulated supply: a lower threshold than the Fourses) (the 4066 on: the capacitor follows its IN)
   for (int k = 0; k < 4; k++) if (af[57 + k] && V[57 + k] > 3000) tp_sh[k] = af[53 + k] ? V[53 + k] : tp_sh[k];
-  fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 3400;                            // YELLOW (and the lamp)
+  fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 1000;                            // YELLOW (and the lamp)
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
   l = l * 2047 / 1800; r = r * 2047 / 1800;                                      // (louder: ±1.8 V is full scale)
   dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
