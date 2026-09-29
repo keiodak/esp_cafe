@@ -437,8 +437,10 @@ final class Rig: ObservableObject {
     @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
     @Published var frMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
-    @Published var frShape = 0                  // DRAW: 0 circle · 1 triangle · 2 square · 3 line · 4 unsteady circle
+    @Published var frShape = 0                  // DRAW: 0 circle · 1 triangle · 2 square · 3 line · 4 unsteady circle · 5 hung circle (gravity)
     @Published var frFlick: [Double] = []      // ◌: each shape's contact now (not kept)
+    @Published var frGrav: [[Double]] = []     // ◉: each shape's offset now (not kept)
+    @Published var frStarve = 0.5               // STARVE: the shapes' power (0.5 as drawn)
     @Published var frTarget = 0                 // DRAW: what a new shape passes: 0 both · 1 TARPTERGE (A) · 2 ARPSERGE (B)
     /// where the icons lie (0…1 across, 0…1 down the field) and the shapes drawn ([type, x, y, radius in heights]), kept
     @Published var frIcons: [[Double]] = (Rig.d.array(forKey: "rig.frIcons") as? [[Double]]).flatMap { $0.count == FrBoard.count ? $0 : nil }

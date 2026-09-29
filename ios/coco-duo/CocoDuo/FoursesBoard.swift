@@ -65,11 +65,17 @@ enum FrBoard {
         if n < 65 { return sh[(n - 53) % 4] }
         return ["D→A", "A→D", "B→C", "C→B"][(n - 65) / 2]
     }
-    static let shapeNames = ["○", "△", "□", "／", "◌"]
+    static let shapeNames = ["○", "△", "□", "／", "◌", "◉"]
     /// an unsteady supply (◌, type 4): a circle whose contact comes and goes — each shape's state now (1 whole ·
     /// less: it reaches less far · 0: gone for a moment), set by the Director
-    static func flickered(_ shapes: [[Double]], _ f: [Double]) -> [[Double]] {
+    /// ◉ (type 5): a circle hung from where it was drawn, nudged a little by gravity (its offset now, set by the Director)
+    static func flickered(_ shapes: [[Double]], _ f: [Double], _ g: [[Double]] = []) -> [[Double]] {
         shapes.enumerated().map { k, s in
+            if s.count >= 4, Int(s[0]) == 5 {
+                var t = s; t[0] = 0
+                if k < g.count, g[k].count >= 2 { t[1] += g[k][0]; t[2] += g[k][1] }
+                return t
+            }
             guard s.count >= 4, Int(s[0]) == 4 else { return s }
             let v = k < f.count ? f[k] : 1
             if v <= 0 { return [] }
@@ -468,7 +474,8 @@ struct FoursesBoard: View {
                             .shadow(color: ink.opacity(0.9 * lit), radius: 14 * lit)
                             .animation(.easeOut(duration: 0.12), value: lit)
                     } else if s.count >= 4 {
-                        let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
+                        let go = Int(s[0]) == 5 && k < rig.frGrav.count && rig.frGrav[k].count >= 2 ? rig.frGrav[k] : [0, 0]   // ◉: where gravity has it
+                        let c = view(s[1] + go[0], s[2] + go[1], field), r = CGFloat(s[3]) * field.height
                         FrShapePath(type: Int(s[0]))
                             .fill(ink.opacity((live ? 0.15 + 0.40 * amp : 0.10) * (camOn ? 0.45 : 1) * (0.35 + 0.65 * fl)))   // (CAMERA: the colour shows through)
                             .brightness(live && !camOn ? -0.25 * amp : 0)
@@ -477,6 +484,9 @@ struct FoursesBoard: View {
                             .animation(.easeOut(duration: 0.12), value: lit)
                             .frame(width: r * 2, height: r * 2)
                             .position(c)
+                        if Int(s[0]) == 5 {                                            // (the point it hangs from)
+                            Circle().fill(ink.opacity(0.7)).frame(width: 4, height: 4).position(view(s[1], s[2], field))
+                        }
                     }
                 }
                 if let dr = draft, rig.frShape == 3 {
@@ -505,7 +515,7 @@ struct FoursesBoard: View {
                 // DRAW: which shape
                 if rig.frMode == 1 {
                     HStack(spacing: 0) {
-                        ForEach(0..<5, id: \.self) { k in
+                        ForEach(0..<6, id: \.self) { k in
                             Text(FrBoard.shapeNames[k])
                                 .font(.system(size: 13, weight: .regular))
                                 .foregroundStyle(rig.frShape == k ? PastelTheme.selectionText : PastelTheme.hudBlack)
@@ -550,6 +560,7 @@ struct FoursesBoard: View {
                 // the pots: four sliders along the bottom
                 HStack(spacing: 10) {
                     ForEach(0..<4, id: \.self) { h in slider(h) }
+                    starveSlider()
                 }
                 .padding(.horizontal, 10)
                 .frame(width: size.width, height: size.height * (1 - FrBoard.yMax))
@@ -634,6 +645,28 @@ struct FoursesBoard: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onChanged { e in
                     d.setFrPot(h, min(1, max(0, e.location.x / max(1, g.size.width))))
+                })
+            }
+        }
+        .frame(maxHeight: 30)
+    }
+
+    /// STARVE: the shapes' power — left starves them (every join weaker), right feeds them (stronger); the middle as drawn
+    private func starveSlider() -> some View {
+        let v = rig.frStarve
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("STARVE").font(.hud(7, .semibold)).foregroundStyle(PastelTheme.textSecondary).frame(height: 12)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(PastelTheme.trackOff).frame(height: 2)
+                    Rectangle().fill(PastelTheme.hudBlack).frame(width: 1, height: 8).position(x: g.size.width * 0.5, y: g.size.height / 2).opacity(0.35)
+                    Rectangle().fill(PastelTheme.hudOrange).frame(width: 4, height: 12)
+                        .position(x: g.size.width * v, y: g.size.height / 2)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { e in
+                    d.setFrStarve(min(1, max(0, e.location.x / max(1, g.size.width))))
                 })
             }
         }

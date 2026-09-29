@@ -17,6 +17,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import CoreMotion
 
 final class PadAxis: ObservableObject {
     @Published var x: Double
@@ -57,6 +58,7 @@ final class Director: ObservableObject {
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
+            self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
@@ -156,7 +158,7 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
-                let w = FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
+                let w = frPower(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0))   // (what the shapes join, for this Cafe)
                 frLightSent = [Int](repeating: -1, count: 16)
                 if !frLightOn {                                             // (the empty shapes' pulls, before their wires)
                     let v = FrBoard.drift(icons: rig.frIcons, shapes: frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: s == 1 ? 1 : 0) ? $0 : [] }, aspect: frAspect).volts
@@ -790,7 +792,7 @@ final class Director: ObservableObject {
     func frSyncShapes() {
         for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
             let sl = u.slot == 1 ? 1 : 0
-            let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
+            let now = Dictionary(frPower(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl)).map { ([$0[0], $0[1]], $0[2]) },
                                  uniquingKeysWith: { a, _ in a })
             if !frLightOn {                                                 // an empty shape's pull: its voltage (the CAMERA's light instead, when on)
                 let shapes = frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: sl) ? $0 : [] }
@@ -864,7 +866,47 @@ final class Director: ObservableObject {
         }
     }
     /// the shapes as they are now (◌ flickering)
-    var frLive: [[Double]] { FrBoard.flickered(rig.frShapes, rig.frFlick) }
+    var frLive: [[Double]] { FrBoard.flickered(rig.frShapes, rig.frFlick, rig.frGrav) }
+    /// STARVE: every join the shapes make, weaker (left) or stronger (right) — ±400 on the 0…1000 scale (~×30 either way)
+    func frPower(_ links: [[Int]]) -> [[Int]] {
+        let dv = Int(((rig.frStarve - 0.5) * 800).rounded())
+        guard dv != 0 else { return links }
+        return links.map { [$0[0], $0[1], $0[2] > 0 ? min(1000, max(1, $0[2] + dv)) : 0] }
+    }
+    func setFrStarve(_ v: Double) { rig.frStarve = v; frSyncShapes() }
+    /// ◉ hung circles: each a little spring from where it was drawn, pulled by the phone's tilt, twitching (~30x a second)
+    private let motion = CMMotionManager()
+    private var frGravV: [[Double]] = []
+    func frGravTick() {
+        let has = rig.frShapes.contains { $0.count >= 4 && Int($0[0]) == 5 }
+        guard has else { if motion.isDeviceMotionActive { motion.stopDeviceMotionUpdates() }; if !rig.frGrav.isEmpty { rig.frGrav = [] }; return }
+        if !motion.isDeviceMotionActive && motion.isDeviceMotionAvailable { motion.deviceMotionUpdateInterval = 1.0 / 30; motion.startDeviceMotionUpdates() }
+        let g = motion.deviceMotion?.gravity ?? CMAcceleration(x: 0, y: -1, z: 0)
+        let o = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation ?? .portrait
+        let (sx, sy): (Double, Double) = {                                      // (gravity on the screen: x right, y down)
+            switch o {
+            case .landscapeLeft: return (g.y, g.x)
+            case .landscapeRight: return (-g.y, -g.x)
+            case .portraitUpsideDown: return (-g.x, g.y)
+            default: return (g.x, -g.y)
+            }
+        }()
+        var pos = rig.frShapes.indices.map { $0 < rig.frGrav.count && rig.frGrav[$0].count >= 2 ? rig.frGrav[$0] : [0, 0] }
+        while frGravV.count < pos.count { frGravV.append([0, 0]) }
+        for (k, s) in rig.frShapes.enumerated() where s.count >= 4 && Int(s[0]) == 5 {
+            let tx = sx * 0.035 / max(0.5, frAspect), ty = sy * 0.035                // (a short reach, in the field's units)
+            for a in 0..<2 {
+                let t = a == 0 ? tx : ty
+                frGravV[k][a] += (t - pos[k][a]) * 0.12 + Double.random(in: -0.0012...0.0012)   // (a spring, and a twitch)
+                frGravV[k][a] *= 0.78
+                pos[k][a] = ((pos[k][a] + frGravV[k][a]) * 400).rounded() / 400
+            }
+        }
+        if pos != rig.frGrav {
+            rig.frGrav = pos
+            if units.contains(where: { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }) { frSyncShapes() }
+        }
+    }
     /// ◌ an unsteady supply: mostly on and wavering a little, now and then dropping out for a moment (~12x a second)
     private var frFlickT = 0.0, frFlickGone: [Int: Int] = [:]
     func frFlickTick() {
