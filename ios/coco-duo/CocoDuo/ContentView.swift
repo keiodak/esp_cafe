@@ -791,14 +791,13 @@ final class Director: ObservableObject {
         frWireSent = now
         if !out.isEmpty { ctxUnits().forEach { u in out.forEach { frT($0.0, $0.1, $0.2, u) } } }
     }
-    /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75), EARTH B the reverse;
-    /// MAIN / ASH / YELLOW A are Cafe A's 46 · 47 · 76, B's (77 · 78 · 79 here) are Cafe B's 46 · 47 · 76 — nil: not that Cafe's
-    func frNode(_ n: Int, _ slot: Int) -> Int? {
-        if slot == 1 {
-            switch n { case 45: return 75; case 75: return 45; case 46, 47, 76: return nil
-                       case 77: return 46; case 78: return 47; case 79: return 76; default: return n }
-        }
-        return (77...79).contains(n) ? nil : n
+    /// a node as that Cafe has it: the board's icons are Cafe A's nodes (0…99) or Cafe B's (+100); a finger (48…52) is on
+    /// both; the other Cafe's EARTH is its node 75; anything else of the other Cafe: nil (not sent)
+    func frNode(_ id: Int, _ slot: Int) -> Int? {
+        if (48...52).contains(id) { return id }
+        let sd = id >= 100 ? 1 : 0, n = id % 100
+        if sd == (slot == 1 ? 1 : 0) { return n }
+        return n == 45 ? 75 : nil
     }
     func frT(_ a: Int, _ b: Int, _ v: Int, _ u: CafeUnit) {
         guard let x = frNode(a, u.slot), let y = frNode(b, u.slot) else { return }
