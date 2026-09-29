@@ -154,7 +154,7 @@ final class Director: ObservableObject {
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
                 let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect)   // (what the shapes join)
-                w.forEach { frT($0[0], $0[1], 1000, u) }; frWireSent = Set(w)
+                w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
@@ -776,12 +776,13 @@ final class Director: ObservableObject {
     /// the board's shape (width / height of the field): what lies inside a shape depends on it
     var frAspect: Double = 2.5 { didSet { if abs(frAspect - oldValue) > 0.02 { frSyncShapes() } } }
     /// the wires the shapes make, as sent: only what changed goes
-    private var frWireSent: Set<[Int]> = []
+    private var frWireSent: [[Int]: Int] = [:]                    // (node pair -> strength)
     func frSyncShapes() {
-        let now = Set(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect))
+        let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect).map { ([$0[0], $0[1]], $0[2]) },
+                             uniquingKeysWith: { a, _ in a })
         var out: [(Int, Int, Int)] = []
-        for w in now.subtracting(frWireSent) { out.append((w[0], w[1], 1000)) }
-        for w in frWireSent.subtracting(now) { out.append((w[0], w[1], 0)) }
+        for (k, v) in now where frWireSent[k] != v { out.append((k[0], k[1], v)) }
+        for k in frWireSent.keys where now[k] == nil { out.append((k[0], k[1], 0)) }
         frWireSent = now
         if !out.isEmpty { ctxUnits().forEach { u in out.forEach { frT($0.0, $0.1, $0.2, u) } } }
     }

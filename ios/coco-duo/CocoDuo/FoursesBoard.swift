@@ -153,17 +153,30 @@ enum FrBoard {
     }
     /// the wires the shapes make, as node pairs
     static func links(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
-        iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]])] }
+        iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
     }
     /// the icons in each shape joined; overlapping shapes joined (a star from the first)
+    /// how much of an icon a shape covers (0…1: 5 × 5 points over the icon)
+    static func cover(_ i: Int, _ p: [Double], _ s: [Double], aspect: Double) -> Double {
+        let (hw, hh) = kind(i) >= 16 ? (0.15, 0.05) : (0.045, 0.045)       // (half its size, in heights)
+        var n = 0
+        for a in 0..<5 { for b in 0..<5 {
+            let x = p[0] + (Double(a) - 2) / 2 * hw / aspect, y = p[1] + (Double(b) - 2) / 2 * hh
+            if inside(x, y, s, aspect: aspect) { n += 1 }
+        } }
+        return Double(n) / 25
+    }
+    /// [icon, icon, strength 0…1000]: how much of each is covered sets how hard it is joined (just touched ~2M · all in 2K)
     static func iconLinks(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
+        var cov = [Double](repeating: 0, count: count)
         var parent = Array(0..<(count + shapes.count))
         func find(_ i: Int) -> Int { var i = i; while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }; return i }
         func join(_ a: Int, _ b: Int) { parent[find(a)] = find(b) }
         var hasIcon = [Bool](repeating: false, count: shapes.count)
         for (k, s) in shapes.enumerated() where s.count >= 4 {
-            for i in 0..<count where i < icons.count && inside(icons[i][0], icons[i][1], s, aspect: aspect) {
-                join(i, count + k); hasIcon[k] = true
+            for i in 0..<count where i < icons.count {
+                let c = cover(i, icons[i], s, aspect: aspect)
+                if c > 0 { join(i, count + k); hasIcon[k] = true; cov[i] = max(cov[i], c) }
             }
         }
         for a in 0..<shapes.count { for b in (a + 1)..<shapes.count {        // (overlapping: centres closer than the radii)
@@ -176,8 +189,12 @@ enum FrBoard {
         for i in 0..<count { groups[find(i), default: []].append(i) }
         var out: [[Int]] = []
         for (_, g0) in groups where g0.count >= 2 {
-            let g = g0.sorted { (outputs.contains(nodes[$0]) ? 1 : 0) < (outputs.contains(nodes[$1]) ? 1 : 0) }   // (the star's centre: not an output —
-            for m in g.dropFirst() { out.append([min(g[0], m), max(g[0], m)]) }                                       //  each Cafe drops the other's)
+            // (the star's centre: not an output — each Cafe drops the other's — and the most covered)
+            let g = g0.sorted { a, b in
+                let oa = outputs.contains(nodes[a]), ob = outputs.contains(nodes[b])
+                return oa != ob ? !oa : cov[a] > cov[b]
+            }
+            for m in g.dropFirst() { out.append([min(g[0], m), max(g[0], m), Int(150 + 850 * min(cov[g[0]], cov[m]))]) }
         }
         return out
     }
@@ -288,7 +305,7 @@ struct FoursesBoard: View {
         GeometryReader { geo in
             let size = geo.size
             let field = CGSize(width: size.width, height: size.height * FrBoard.yMax)
-            let sounding = Set(FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)).flatMap { $0 })
+            let sounding = Set(FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)).flatMap { $0.prefix(2) })
             ZStack(alignment: .topLeading) {
                 // the board: paper, a fine dot grid
                 Rectangle().fill(PastelTheme.padScreen)
