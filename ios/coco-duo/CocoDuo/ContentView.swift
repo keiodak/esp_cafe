@@ -776,7 +776,7 @@ final class Director: ObservableObject {
     var frSent: [String: Int] = [:]
     func frTouches(_ links: [Int: [Int: Int]]) {
         var now: [String: Int] = [:]
-        for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, v)) } }
+        for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, (v / 50) * 50 + 25)) } }   // (steps of 50: fewer lines)
         var out: [String] = []
         for (k, v) in now where frSent[k] != v { out.append("T \(k) \(v)") }
         for k in frSent.keys where now[k] == nil { out.append("T \(k) 0") }
