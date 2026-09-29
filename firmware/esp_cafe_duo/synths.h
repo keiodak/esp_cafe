@@ -2743,7 +2743,7 @@ volatile bool st_rand = false;
 struct StState {                                              // (in a piece of the tape: no RAM of its own)
   int32_t V[ST_N], I[ST_N];
   int32_t lp[4], bp[4];
-  int32_t wh[2], rs[2], whp[2], whq[2], env[2], sh[2];
+  int32_t wh[2], rs[2], whp[2], whq[2], env[2], sh[2], lem;
   uint8_t sck[2];
   uint32_t cnt[2], rng;
   uint8_t hy[2], reg[2], ck[2];
@@ -2803,12 +2803,17 @@ static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
   }
   // the wheels and the knobs (the phone's steps smoothed)
   for (int h = 0; h < 2; h++) { s->wh[h] += (st_p[h] * 65 - s->wh[h]) / 256; s->rs[h] += (st_p[2 + h] * 65 - s->rs[h]) / 256; }
-  // each wheel's turning: an attack-decay envelope (the stereo VCA: a channel sounds only while its wheel turns)
+  // each wheel's turning: an attack-decay envelope (the stereo VCA: a channel sounds only while its wheel turns);
+  // EARTH, once its jack is patched, moves both as if turning them
+  int32_t de = 0;
+  for (int k = 0; k < nl; k++) if (la[k] == 41 || lb[k] == 41) { de = pc_emod - s->lem; if (de < 0) de = -de; break; }
+  s->lem = pc_emod;
   for (int h = 0; h < 2; h++) {
     s->whq[h] += (((st_p[h] * 65) << 8) - s->whq[h]) / 256;                     // (finer: its speed, not just where it is)
     int32_t v = s->whq[h] - s->whp[h]; s->whp[h] = s->whq[h]; if (v < 0) v = -v;
     int32_t t = v > 511 ? 65535 : v * 128, e = s->env[h];
     e += t > e ? (t - e) / 32 : -(e / 4096) - 1;                                  // (up in ~1 ms, down in ~0.3 s)
+    e += de * 4000; if (e > 65535) e = 65535;
     s->env[h] = e < 0 ? 0 : e;
     V[42 + h] = s->env[h] / 3;                                                  // ENV L / R
   }
