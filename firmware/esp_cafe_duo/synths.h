@@ -2712,11 +2712,10 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
 }
 
 // ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two knobs; each one's
-// buffer goes through a capacitor into a Schmitt comparator — turning it one way flips it up, the other way down, and each
-// flip (through a capacitor into the 4066) samples the knob: one hold where a clockwise turn began, one where an
-// anticlockwise turn began. Each hold sets one triangle oscillator's pitch (LM324). How fast the knob turns, rectified,
-// is an envelope — the tail current of the differential pairs the oscillators go through: it sounds only while it turns.
-// L (OUT) = knob A's two oscillators, R (ASH) = knob B's. "E <id> <0..1000>":
+// buffer goes through a capacitor into a Schmitt comparator, and each flip (a turn beginning, either way) samples the knob
+// into a hold that sets its triangle's pitch. How fast the knob turns, rectified, is the level — the tail current of the
+// differential pair the triangle goes through: it sounds only while it turns, as loud as it turns, no strike, no hold on.
+// L (OUT) = knob A, R (ASH) = knob B. "E <id> <0..1000>":
 //   0 KNOB A · 1 KNOB B · 3 DECAY (20 ms … 2 s) · 4 PITCH (30 … 960 Hz) · 5 SPREAD (0 … 6 oct) · 7 MIX ·
 //   8 SWITCH A · 9 SWITCH B (LO / HI: two octaves up)
 #define nb_p fr_p                                             // (FOURSES' settings: the two modes never run together)
@@ -2764,35 +2763,26 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
   if (sub) nb_settings(n);
   int32_t o[2];
   for (int h = 0; h < 2; h++) {
-    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) / 1024;
-    int32_t v = n->kn[h] - n->kp[h]; n->kp[h] = n->kn[h];
-    int32_t de = pc_emod - n->lem[h]; n->lem[h] = pc_emod;
-    n->dv[h] = (n->dv[h] * 511) / 512 + ((v + de * 3000) * 16) / 512;
+    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) / 1024;                      // the knob (Q24; the phone's steps smoothed)
+    int32_t v = n->kn[h] - n->kp[h]; n->kp[h] = n->kn[h];                       // its turning...
+    n->dv[h] = (n->dv[h] * 511) / 512 + (v * 16) / 512;                         // ...through the capacitor
     int32_t dv = n->dv[h];
-    if (!n->st[h] && dv > 2400) { n->st[h] = 1; n->s1[h] = n->kn[h] >> 8; }
-    else if (n->st[h] && dv < -2400) { n->st[h] = 0; n->s2[h] = n->kn[h] >> 8; }
-    int32_t a = dv < 0 ? -dv : dv;
-    int32_t t = a > 8191 ? 16777215 : a << 11;
-    int32_t e = n->e[h] - (((n->e[h] >> 12) * n->dk) >> 12);
-    if (t > e) e = t;
-    n->e[h] = e;
-    n->es[h] = (n->es[h] * 31) / 32 + (e >> 8) / 32;
-    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) / 64;
-    n->pv[h][1] += (n->s2[h] - n->pv[h][1]) / 64;
+    if (!n->st[h] && dv > 2400) { n->st[h] = 1; n->s1[h] = n->kn[h] >> 8; }      // a turn begins: the hold takes the knob
+    else if (n->st[h] && dv < -2400) { n->st[h] = 0; n->s1[h] = n->kn[h] >> 8; }
+    int32_t a = dv < 0 ? -dv : dv;                                             // as loud as it turns, no more
+    int32_t t = a > 8191 ? 65535 : a * 8;
+    int32_t e = n->es[h];
+    e += t > e ? (t - e) / 64 : -(((e >> 4) * (n->dk >> 4)) >> 16) - 1;          // (up in ~2 ms, down as DECAY says)
+    n->es[h] = e < 0 ? 0 : e;
+    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) / 64;                               // the hold, through its buffer
     if (sub) {
-      int32_t up = nb_p[8 + h] >= 500 ? 8192 : 0;
-      for (int k = 0; k < 2; k++) {
-        uint32_t i = nb_exp2(n->inc0, (int32_t)(((int64_t)n->spread * (n->pv[h][k] - 32768)) >> 16) + up);
-        n->inc[h][k] = i > 900000000u ? 900000000u : i;
-      }
+      uint32_t i = nb_exp2(n->inc0, (int32_t)(((int64_t)n->spread * (n->pv[h][0] - 32768)) >> 16) + (nb_p[8 + h] >= 500 ? 8192 : 0));
+      n->inc[h][0] = i > 900000000u ? 900000000u : i;
     }
-    int32_t w = 0;
-    for (int k = 0; k < 2; k++) {
-      int32_t p = (int32_t)(n->ph[h][k] >> 16);
-      w += p < 32768 ? p * 2 - 32768 : (65535 - p) * 2 - 32768;
-      n->ph[h][k] += n->inc[h][k];
-    }
-    o[h] = (nb_sat(((w >> 1) * n->es[h]) >> 15) * 3) >> 5;
+    int32_t p = (int32_t)(n->ph[h][0] >> 16);
+    int32_t w = p < 32768 ? p * 2 - 32768 : (65535 - p) * 2 - 32768;           // one triangle, plain
+    n->ph[h][0] += n->inc[h][0];
+    o[h] = (int32_t)(((int64_t)w * n->es[h]) >> 20);                            // (±2047 at full)
   }
   nb_gate = n->es[0] > 6000 || n->es[1] > 6000;
   int32_t l = o[0] + (((o[1] - o[0]) * nb_p[7]) / 2000), r = o[1] + (((o[0] - o[1]) * nb_p[7]) / 2000);
