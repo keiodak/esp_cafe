@@ -1,0 +1,141 @@
+parts 167
+N0: R36[10K], R54[100K], T@-63,-7
+N1: C5.1, T@-63,-42
+N2: U5(DIP14).13, U5(DIP14).12, R47[100K], T@-58,60
+N3: U1(DIP8).5, U3(DIP14).10, U3(DIP14).9, R18[2.2M], T@-63,-53
+N4: R12[100K], R22[10K], T@-63,53
+N5: U1(DIP8).1, U1(DIP8).2, R12[100K], R49[100K], T@-63,-30
+N6: R28[100K], R81[100K], T@-63,7
+N7: U5(DIP14).10, U5(DIP14).9, U8(DIP8).5, R11[2.2M], T@-50,64
+N8: R28[100K], R90[100K], T@-63,30
+N9: U3(DIP14).13, U3(DIP14).12, R7[100K], T@-61,-62
+N10: C2.2, T@-38,64
+N11: U1(DIP8).3, U1(DIP8).6, U3(DIP14).2, U3(DIP14).3, SW@-52,4, T@-63,-19
+N12: R44[100K], R81[100K], T@-63,19
+N13: R34[10K], R100[100K], T@-53,-67
+N14: U3(DIP14).5, U3(DIP14).6, R5[100K], T@-42,-67
+N15: U5(DIP14).5, U5(DIP14).6, R67[100K], T@-63,42
+N16: U8(DIP8).1, U8(DIP8).2, R54[100K], T@-27,64
+N17: U5(DIP14).2, U5(DIP14).3, U8(DIP8).3, U8(DIP8).6, SW@5,52, T@-15,64
+N18: R98[100K], R101[100K], T@-30,-67
+N19: R84[100K], R98[100K], T@-7,-67
+N20: R51[100K], R84[100K], T@-19,-67
+N21: R53[10K], R61[100K], R78[100K], T@-4,64
+N22: R35[10K], R49[100K], T@5,-67
+N23: R19[100K], R33[100K], T@8,64
+N24: R9[100K], R33[100K], T@20,64
+N25: U6(DIP14).2, U6(DIP14).3, U7(DIP8).3, U7(DIP8).6, SW@-5,-52, T@16,-67
+N26: R19[100K], R38[100K], T@31,64
+N27: U7(DIP8).1, U7(DIP8).2, R100[100K], R103[100K], T@28,-67
+N28: U2(DIP14).2, U2(DIP14).3, U4(DIP8).3, U4(DIP8).6, SW@52,-5, T@64,15
+N29: U6(DIP14).5, U6(DIP14).6, R68[100K], T@64,-45
+N30: U2(DIP14).5, U2(DIP14).6, R74[100K], T@43,64
+N31: R25[100K], R72[100K], R96[10K], T@54,64
+N32: R1[100K], R69[100K], T@64,-22
+N33: C4.1, T@39,-67
+N34: U2(DIP14).13, U2(DIP14).12, R75[100K], T@62,58
+N35: R69[100K], R97[100K], T@64,-11
+N36: U6(DIP14).10, U6(DIP14).9, U7(DIP8).5, R82[2.2M], T@51,-67
+N37: R59[100K], R97[100K], T@64,-34
+N38: U4(DIP8).1, U4(DIP8).2, R76[100K], T@64,27
+N39: U2(DIP14).10, U2(DIP14).9, U4(DIP8).5, R3[2.2M], T@64,50
+N40: R16[10K], R76[100K], T@64,-57
+N41: U6(DIP14).13, U6(DIP14).12, R92[100K], T@59,-64
+N42: C7.2, T@64,38
+N43: R99[10K], R103[100K], T@64,4
+N44: U5(DIP14).8, R53[10K]
+N45: Q18(dash).E, Q18(dash).B, Q33(dash).B, R4[4.7K]
+N47: Q14(dash).E, D3.2, R68[100K], R102[100K]
+N48: Q14(dash).B, R8[100K]
+N49: Q5(dash).E, R65[4.7K]
+N50: Q5(dash).B, Q7(star).C, R55[2.2M]
+N51: C8.2, SW@0,52
+N52: Q30(dash).E, R5[100K], D4.1, R56[100K]
+N53: R26[?], PWR@-2,25
+N55: Q34(dash).B, Q43(dash).E, Q43(dash).B, R89[4.7K]
+N56: R24[470K], POT@-13,13
+N57: Q25(star).B, R13[10K], R24[470K]
+N58: Q11(star).B, Q37(star).E, Q37(star).B, Q44(dash).E
+N59: Q44(dash).B, R9[100K], R57[10K]
+N60: Q22(dash).C, Q44(dash).C, R41[4.7K]
+N61: Q28(dash).C, Q35(dash).C, R42[4.7K]
+N62: Q28(dash).B, R59[100K], R77[10K]
+N63: Q10(star).E, Q10(star).B, Q15(star).B, Q28(dash).E
+N64: Q3(star).B, R46[470K], R63[10K]
+N65: Q6(star).E, R6[4.7K]
+N66: Q6(star).B, Q20(star).E, Q20(star).B, Q22(dash).E
+N67: Q35(dash).B, R1[100K], R37[10K]
+N68: Q1(dash).C, Q13(dash).C, R65[4.7K]
+N69: Q13(dash).B, R43[10K], R51[100K]
+N70: Q9(star).E, Q9(star).B, Q13(dash).E, Q27(star).B
+N71: Q4(star).B, Q17(dash).E, Q29(star).E, Q29(star).B
+N72: Q4(star).E, R4[4.7K]
+N73: Q27(star).E, R45[4.7K]
+N74: U6(DIP14).11, R16[10K]
+N75: Q2(dash).E, R27[4.7K]
+N76: U2(DIP14).4, R27[4.7K]
+N77: Q23(dash).E, R41[4.7K]
+N78: U4(DIP8).7, R3[2.2M], R75[100K], C7.1, R93[100K]
+N79: Q17(dash).C, Q42(dash).C, R85[4.7K]
+N80: Q36(dash).E, R85[4.7K]
+N81: R43[10K], R62[22K], R71[22K], R87[10K]
+N82: U7(DIP8).7, R8[100K], C4.2, R82[2.2M], R92[100K]
+N83: U8(DIP8).7, C2.1, R11[2.2M], R47[100K], R94[100K]
+N84: Q16(dash).B, R94[100K]
+N85: U6(DIP14).4, R48[4.7K]
+N86: U6(DIP14).8, R35[10K]
+N87: U6(DIP14).1, R32[4.7K]
+N88: U1(DIP8).7, R7[100K], C5.2, R18[2.2M], R64[100K]
+N89: Q30(dash).B, R64[100K]
+N90: Q38(star).B, Q40(star).E, Q40(star).B, Q42(dash).E
+N91: R30[4.7K], D2.1
+N92: Q17(dash).B, R44[100K], R86[10K]
+N93: Q1(dash).E, Q24(star).E, Q24(star).B, Q32(star).B
+N94: Q32(star).E, R91[4.7K]
+N95: Q7(star).B, R10[470K], R50[10K]
+N96: R10[470K], POT@-13,-13
+N97: R2[22K], R25[100K], R39[22K], R57[10K], R61[100K], R83[10K]
+N98: U5(DIP14).11, R22[10K]
+N99: U5(DIP14).1, R17[4.7K]
+N100: U5(DIP14).4, R95[4.7K]
+N101: Q11(star).E, R79[4.7K]
+N102: Q22(dash).B, R38[100K], R83[10K]
+N103: Q33(dash).E, R95[4.7K]
+N104: Q21(dash).E, R42[4.7K]
+N105: Q34(dash).E, R48[4.7K]
+N106: Q1(dash).B, R87[10K], R101[100K]
+N107: Q3(star).C, Q21(dash).B, R23[2.2M]
+N108: Q19(star).E, R89[4.7K]
+N109: U2(DIP14).11, R96[10K]
+N110: C6.2, SW@-1,-53
+N111: Q8(star).E, Q8(star).B, Q19(star).B, Q35(dash).E
+N112: R21[470K], POT@13,13
+N113: Q31(star).B, R21[470K], R60[10K]
+N114: R14[22K], R37[10K], R70[22K], R77[10K]
+N115: R15[22K], R29[10K], R58[22K], R86[10K]
+N116: Q25(star).C, Q36(dash).B, R40[2.2M]
+N117: U2(DIP14).1, R6[4.7K]
+N118: U2(DIP14).8, R99[10K]
+N119: Q2(dash).B, Q26(dash).E, Q26(dash).B, R79[4.7K]
+N121: Q15(star).E, R32[4.7K]
+N122: Q41(dash).E, D2.2, R73[100K], R74[100K]
+N123: U3(DIP14).1, R91[4.7K]
+N124: U3(DIP14).8, R36[10K]
+N125: U3(DIP14).11, R34[10K]
+N126: U3(DIP14).4, R80[4.7K]
+N127: D1.2, R52[4.7K]
+N128: Q16(dash).E, D1.1, R67[100K], R88[100K]
+N129: Q12(dash).E, R80[4.7K]
+N131: C1.1, SW@-53,-0
+N132: Q42(dash).B, R29[10K], R90[100K]
+N133: Q23(dash).B, Q31(star).C, R31[2.2M]
+N135: C3.2, SW@53,-0
+N136: Q38(star).E, R17[4.7K]
+N137: R20[4.7K], D4.2
+N139: Q12(dash).B, Q39(dash).E, Q39(dash).B, R45[4.7K]
+N140: D3.1, R66[4.7K]
+N141: Q41(dash).B, R93[100K]
+N142: R46[470K], POT@13,-14
+rail pins in quad:
+GND ['U1(DIP8).4', 'U2(DIP14).7', 'U3(DIP14).7', 'U4(DIP8).4', 'U5(DIP14).7', 'U6(DIP14).7', 'U7(DIP8).4', 'U8(DIP8).4', 'Q2(dash).C', 'Q3(star).E', 'Q5(dash).C', 'Q7(star).E', 'Q12(dash).C', 'Q14(dash).C', 'Q16(dash).C', 'Q18(dash).C', 'Q21(dash).C', 'Q23(dash).C', 'Q25(star).E', 'Q26(dash).C', 'Q30(dash).C', 'Q31(star).E', 'Q33(dash).C', 'Q34(dash).C', 'Q36(dash).C', 'Q39(dash).C', 'Q41(dash).C', 'Q43(dash).C', 'R2[22K]', 'C1.2', 'C3.1', 'R13[10K]', 'R15[22K]', 'R50[10K]', 'R60[10K]', 'R63[10K]', 'R70[22K]', 'R71[22K]', 'R78[100K]', 'C6.1', 'C8.1']
+VCC ['U1(DIP8).8', 'U2(DIP14).14', 'U3(DIP14).14', 'U4(DIP8).8', 'U5(DIP14).14', 'U6(DIP14).14', 'U7(DIP8).8', 'U8(DIP8).8', 'Q4(star).C', 'Q6(star).C', 'Q8(star).C', 'Q9(star).C', 'Q10(star).C', 'Q11(star).C', 'Q15(star).C', 'Q19(star).C', 'Q20(star).C', 'Q24(star).C', 'Q27(star).C', 'Q29(star).C', 'Q32(star).C', 'Q37(star).C', 'Q38(star).C', 'Q40(star).C', 'R14[22K]', 'R20[4.7K]', 'R23[2.2M]', 'R26[?]', 'R30[4.7K]', 'R31[2.2M]', 'R39[22K]', 'R40[2.2M]', 'R52[4.7K]', 'R55[2.2M]', 'R56[100K]', 'R58[22K]', 'R62[22K]', 'R66[4.7K]', 'R72[100K]', 'R73[100K]', 'R88[100K]', 'R102[100K]']

@@ -2455,84 +2455,169 @@ void hb_write(const uint8_t *d, size_t n) {
 }
 
 // ==========================================
-// FOURSES --- mode 7 of the BLE preset (k.odk), after Blasser's Fourses: four "bounce" oscillators stacked so their
-// bounds are mutual — each rises and falls between the one below and the one above it (the bottom one from -8 V, the
-// top one up to +8 V), so each one's turning points are the others' voltages; lower above upper = the "paradox"
-// (hyper-oscillation). Each: RATE (both slopes) and SLOPE (rise against fall; the middle = a triangle).
-// TOUCH: four touch points, each a finger across two neighbours (1-2, 2-3, 3-4, 4-1): CONTACT = how much current
-//   crosses (the skin's resistance: the two voltages pull towards each other, both ways), BODY = what the body
-//   brings with it (the mains' hum and hiss). The Cafe's own: EARTH (a plate) = onto the top bound (its insert),
-//   the input = onto the bottom bound, FLIP = every oscillator turns round, SKIP (held) = OP 2's bounds swapped
-//   (paradox). Main = OP 1 + OP 3, ASH = OP 2 + OP 4. YELLOW / lamp = OP 1 rising.
-// "O <id> <0..1000>": 0..3 RATE · 4..7 SLOPE · 8 RANGE (0 CV · 500 LOW · 1000 AUDIO) · 9..12 CONTACT ·
-//   13..16 BODY · 17 INPUT · 18 FLIP (now) · 19 RESET (now)
+// FOURSES --- mode 7 of the BLE preset (k.odk): Blasser's Fourses as built on crucFX's boards, read from their
+// Gerbers: TARPTERGE (Cafe A) or ARPSERGE (Cafe B, "O 9 1"). Four horses (H1 at the bottom .. H4 at the top),
+// each: a capacitor charged and discharged by switched current mirrors (4066 A / B), a comparator (LM358 B)
+// with 2.2M hysteresis whose + input takes a bound through 4066 D (going up: the next horse's buffer) or C
+// (going down: the one below); the floor and the ceiling are fixed dividers. The rates: two differential pairs
+// whose tails are exponential current sources on the pot (TARPTERGE: the pot pushes up against down; ARPSERGE:
+// both together), the pairs' bases on a 100K ladder.
+// The 44 touch nodes are the board's own (the same order as on it, clockwise from the top left), each with its
+// real source and source resistance; a touch or a wire ("T <a> <b> <0..1000>") is a resistance between two nodes
+// (1000 = a wire, 2K; 0 = off; between: a finger, light ~10M .. firm ~20K), and the node voltages are solved
+// with it every sample. Nodes 44 IN (the Cafe's input), 45 EARTH, 46 OUT L (main), 47 OUT R (ASH), 48..52 the
+// fingers (each also leaks to the body: the mains' hum). "O <id> <v>": 0..3 the pots · 8 RANGE (0 CV · 500 LOW ·
+// 1000 AUDIO) · 9 the board (0 TARPTERGE · 1 ARPSERGE) · 19 RESET.
 // ==========================================
 static inline float clock_hz();   // (in the sketch)
-#define FR_V 1048576                                         // one volt (Q20 of the 4096-per-volt scale: ±8 V fits)
-volatile int16_t fr_p[18] = { 450, 520, 580, 640, 500, 500, 500, 500, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 300 };
-volatile int32_t fr_up[4] = { 4000, 4000, 4000, 4000 }, fr_dn[4] = { 4000, 4000, 4000, 4000 };
-volatile int32_t fr_g[4] = { 0, 0, 0, 0 }, fr_body[4] = { 0, 0, 0, 0 }, fr_in = 0;
+#define TP_NB 44
+#define TP_N 53
+enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
+static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
+                                        0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6 };
+static const uint8_t tp_h[TP_NB] = { 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2,
+                                     2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0 };
+#define TP_NL 64
+volatile uint8_t tp_la[TP_NL], tp_lb[TP_NL];
+volatile int32_t tp_lg[TP_NL];                                // (Q12 per 10K; 0 = no link)
+volatile int16_t fr_p[10] = { 500, 500, 500, 500, 0, 0, 0, 0, 1000, 0 };
+volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
+volatile int32_t tp_kc = 5000;                                // a node's current into the capacitor (Q16)
 volatile bool fr_flip = false, fr_reset = true, fr_gate = false;
+static int16_t tp_sig[256];                                   // the pairs: σ(Δ / 26 mV), Q12, Δ = -64 .. 64 mV
+static int tp_node(int role, int h) { for (int i = 0; i < TP_NB; i++) if (tp_role[i] == role && tp_h[i] == h) return i; return 0; }
+static int8_t tp_ix[11][4];                                   // (role, horse) -> node
 static void fr_update() {                                    // (the loop: floats are fine here)
-  float hz = clock_hz();
-  float range = fr_p[8] >= 750 ? 1.0f : (fr_p[8] >= 250 ? 1.0f / 16 : 1.0f / 512);   // AUDIO · LOW · CV
-  for (int k = 0; k < 4; k++) {
-    float f = 20.0f * powf(200.0f, fr_p[k] / 1000.0f) * range;                        // 20 Hz .. 4 kHz (over ~4 V)
-    float base = 2.0f * 4.0f * FR_V * f / hz;                                          // (volts per sample, both ways)
-    float a = (fr_p[4 + k] - 500) / 500.0f * 2.5f;                                     // SLOPE: ±2.5 octaves apart
-    float up = base * powf(2.0f, a), dn = base * powf(2.0f, -a);
-    fr_up[k] = (int32_t)fminf(fmaxf(up, 1.0f), 4.0f * FR_V);
-    fr_dn[k] = (int32_t)fminf(fmaxf(dn, 1.0f), 4.0f * FR_V);
-    fr_g[k] = (fr_p[9 + k] * fr_p[9 + k]) / 1000 * 1024 / 1000;                        // CONTACT (Q12: up to 1/4 a sample)
-    fr_body[k] = fr_p[13 + k];
+  static bool once = false;
+  if (!once) {
+    once = true;
+    for (int i = 0; i < 256; i++) tp_sig[i] = (int16_t)(4096.0f / (1.0f + expf(-((i - 128) * 0.5f) / 26.0f)));
+    for (int r = 0; r < 11; r++) for (int h = 0; h < 4; h++) tp_ix[r][h] = (int8_t)tp_node(r, h);
   }
-  fr_in = fr_p[17];
+  float hz = clock_hz();
+  float c = fr_p[8] >= 750 ? 1.0f : (fr_p[8] >= 250 ? 30.0f : 1000.0f);   // the capacitor: AUDIO · LOW (x30) · CV (x1000)
+  float base = 150000.0f * 32000.0f / hz / c;                            // µV a sample, pot in the middle, pairs balanced
+  bool arp = fr_p[9] >= 500;
+  for (int h = 0; h < 4; h++) {
+    float p = fr_p[h] / 1000.0f - 0.5f;
+    float e = expf(6.7f * p);                                             // 470K / 10K onto a base: ×800 over the pot
+    tp_up[h] = (int32_t)fminf(base * e, 3000000.0f);
+    tp_dn[h] = (int32_t)fminf(base * (arp ? e : 1.0f / e), 3000000.0f);   // (ARPSERGE: one rate)
+  }
+  tp_kc = (int32_t)(5000.0f * 32000.0f / hz / c);
+}
+static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
+  if (a > b) { int t = a; a = b; b = t; }
+  if (a < 0 || b >= TP_N || a == b) return;
+  int32_t g = 0;
+  if (v > 0) { float R = 2000.0f * powf(5000.0f, (1000 - v) / 1000.0f); g = (int32_t)(4096.0f * 10000.0f / R); if (g < 1) g = 1; }
+  int free_ = -1;
+  for (int i = 0; i < TP_NL; i++) {
+    if (tp_lg[i] && tp_la[i] == a && tp_lb[i] == b) { tp_lg[i] = g; return; }
+    if (!tp_lg[i] && free_ < 0) free_ = i;
+  }
+  if (g && free_ >= 0) { tp_la[free_] = (uint8_t)a; tp_lb[free_] = (uint8_t)b; tp_lg[free_] = g; }
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
-  static int32_t p[4], d[4];
-  static uint32_t hum = 0, rnd = 22222;
+  static int32_t pos[4];                                      // the capacitors, µV
+  static int32_t out[4];                                      // the comparators' outputs, mV
+  static int32_t olp[4];                                      // (PULSE: the output's slow part)
+  static int32_t bnd[4];                                      // the bound each comparator sees (mV)
+  static int32_t V[TP_N], E[TP_N], G[TP_N];
+  static uint32_t hum = 0;
   static int32_t dcl = 0, dcr = 0;
-  static bool flipWas = false;
   if (fr_reset) {
     fr_reset = false;
-    for (int k = 0; k < 4; k++) { p[k] = (k * 4 - 6) * FR_V; d[k] = (k & 1) ? -1 : 1; }
+    for (int h = 0; h < 4; h++) { pos[h] = (1500 + h * 1500) * 1000; out[h] = (h & 1) ? 50 : 6800; olp[h] = 3000; bnd[h] = 4200; }
+    for (int i = 0; i < TP_N; i++) V[i] = 4200;
   }
-  if ((flip && !flipWas) || fr_flip) { fr_flip = false; for (int k = 0; k < 4; k++) d[k] = -d[k]; }   // FLIP: all turn round
-  flipWas = flip;
-  // the body: the mains' hum (50 Hz) and hiss, what a finger brings along
+  // every node's own source (mV) and its conductance to it (Q12 per 10K)
   hum += (uint32_t)(50.0f * 4294967296.0f / 32000.0f);
-  int32_t ht = (int32_t)(hum >> 16) - 32768; ht = (ht < 0 ? -ht : ht) * 2 - 32768;        // (a triangle, ±32768)
-  rnd = rnd * 1664525u + 1013904223u;
-  int32_t nz = (int32_t)(rnd >> 16) - 32768;
-  // the bounds: the neighbours' voltages; the rails and their inserts at the ends
-  int32_t top = 8 * FR_V + pc_emod * (FR_V / 32);                                        // EARTH: ±4 V on the top bound
-  int32_t bot = -8 * FR_V + in * (int32_t)((int64_t)fr_in * 8 * FR_V / 1000 / 2048);     // the input: up to ±8 V on the bottom
-  for (int k = 0; k < 4; k++) {
-    int32_t lo = k == 0 ? bot : p[k - 1];
-    int32_t hi = k == 3 ? top : p[k + 1];
-    if (skip && k == 1) { int32_t t2 = lo; lo = hi; hi = t2; }                            // SKIP: paradox
-    int32_t v = p[k] + (d[k] > 0 ? fr_up[k] : -fr_dn[k]);
-    if (d[k] > 0 && v >= hi) { v = hi; d[k] = -1; }
-    else if (d[k] < 0 && v <= lo) { v = lo; d[k] = 1; }
-    if (v > 10 * FR_V) { v = 10 * FR_V; d[k] = -1; }                                      // (the rails)
-    if (v < -10 * FR_V) { v = -10 * FR_V; d[k] = 1; }
-    p[k] = v;
+  int32_t ht = (int32_t)(hum >> 16) - 32768; ht = ((ht < 0 ? -ht : ht) - 16384) / 55;   // (the mains, ±300 mV)
+  for (int i = 0; i < TP_NB; i++) {
+    int h = tp_h[i]; int32_t e = 4140, g = 372;
+    switch (tp_role[i]) {
+      case TP_POS: e = pos[h] / 1000; g = 0; break;                               // (a capacitor: below)
+      case TP_BUF: e = pos[h] / 1000; if (e > 6800) e = 6800; if (e < 50) e = 50; g = 20480; break;   // 358 A (2K)
+      case TP_PULSE: e = 4200 + out[h] - olp[h]; g = 4096; break;                 // through its capacitor
+      case TP_THR: e = bnd[h] + (out[h] - bnd[h]) * 105 / 2310; g = 390; break;   // bound (110K) · output (2.2M)
+      case TP_GATE: e = out[h]; g = 410; break;                                   // the output through 100K
+      case TP_NGATE: e = out[h] > 3400 ? 60 : 8300; g = 390; break;               // the inverter through 100K
+      case TP_BUP: if (h < 3) { e = pos[h + 1] / 1000; if (e > 6800) e = 6800; g = 410; } else { e = 6200; g = 819; } break;
+      case TP_BLO: if (h > 0) { e = pos[h - 1] / 1000; if (e > 6800) e = 6800; g = 410; } else { e = 2000; g = 819; } break;
+      case TP_LA: case TP_LB: e = 4140; g = 372; break;                           // 100K + 10K to the pairs' bias
+      case TP_LMID: e = 4140; g = 0; break;                                       // (only the ladder)
+    }
+    E[i] = e; G[i] = g;
   }
-  // the touch points: a finger across two neighbours — current both ways (they pull together), and the body's hum
-  for (int k = 0; k < 4; k++) {
-    int32_t g = fr_g[k];
-    if (g <= 0) continue;
-    int a = k, b = (k + 1) & 3;
-    int32_t x = (int32_t)(((int64_t)(p[a] - p[b]) * g) >> 12);
-    int32_t body = (int32_t)(((int64_t)(ht * 3 + (nz >> 1)) * fr_body[k] * (g >> 2)) >> 14);   // (only as much as it touches)
-    p[a] -= x - body; p[b] += x + body;
+  E[44] = 4200 + in * 2; G[44] = 4096;                                          // IN (10K)
+  E[45] = 4200 + pc_emod * 30; G[45] = 410;                                     // EARTH
+  E[46] = 4200; G[46] = 410; E[47] = 4200; G[47] = 410;                          // OUT: an amplifier's input
+  for (int f = 48; f < TP_N; f++) { E[f] = ht; G[f] = 41; }                     // a finger: the body (1M, the hum)
+  // the links: the ladders (always), the touches and the wires — solved (Jacobi, two rounds)
+  static int32_t num[TP_N], den[TP_N];
+  static bool act[TP_N];
+  for (int i = 0; i < TP_N; i++) { act[i] = false; V[i] = E[i]; }
+  for (int h = 0; h < 4; h++) { act[tp_ix[TP_LA][h]] = act[tp_ix[TP_LMID][h]] = act[tp_ix[TP_LB][h]] = true; }
+  for (int k = 0; k < TP_NL; k++) if (tp_lg[k]) { act[tp_la[k]] = true; act[tp_lb[k]] = true; }
+  for (int it = 0; it < 2; it++) {
+    for (int i = 0; i < TP_N; i++) if (act[i]) { num[i] = E[i] * G[i]; den[i] = G[i]; }
+    for (int h = 0; h < 4; h++) {                                               // (100K, 100K)
+      int a = tp_ix[TP_LA][h], m = tp_ix[TP_LMID][h], b = tp_ix[TP_LB][h];
+      num[a] += 410 * V[m]; den[a] += 410; num[m] += 410 * (V[a] + V[b]); den[m] += 820; num[b] += 410 * V[m]; den[b] += 410;
+    }
+    for (int k = 0; k < TP_NL; k++) {
+      int32_t g = tp_lg[k]; if (!g) continue;
+      int a = tp_la[k], b = tp_lb[k];
+      num[a] += g * V[b]; den[a] += g; num[b] += g * V[a]; den[b] += g;
+    }
+    for (int i = 0; i < TP_N; i++) {
+      if (!act[i]) continue;
+      if (i < TP_NB && tp_role[i] == TP_POS) { V[i] = E[i]; continue; }          // (the capacitor holds)
+      if (den[i] > 0) V[i] = num[i] / den[i];
+    }
   }
-  fr_gate = d[0] > 0;
-  // out: OP 1 + OP 3 (main) · OP 2 + OP 4 (ASH), DC out
-  int32_t l = (p[0] + p[2]) >> 12, r = (p[1] + p[3]) >> 12;                                // (±16 V -> ±4096)
+  // the horses
+  bool gate0 = false;
+  for (int h = 0; h < 4; h++) {
+    int32_t pv = pos[h] / 1000;
+    // the comparator: + = THR (as it is now, touched or not), - = the capacitor
+    int32_t thr = V[tp_ix[TP_THR][h]];
+    int32_t o = thr > pv ? 6800 : 50;
+    out[h] = o;
+    olp[h] += (o - olp[h]) >> 7;
+    bool ad = V[tp_ix[TP_GATE][h]] > 4200, bc = V[tp_ix[TP_NGATE][h]] > 4200;       // the 4066's controls
+    int32_t bu = V[tp_ix[TP_BUP][h]], bl = V[tp_ix[TP_BLO][h]];
+    bnd[h] = (ad && bc) ? (bu + bl) / 2 : (ad ? bu : (bc ? bl : out[h]));            // (none: only the hysteresis)
+    // the rates: the ladder's ends onto the pairs' bases (100K / 10K), σ over 26 mV
+    int32_t d = ((V[tp_ix[TP_LA][h]] - V[tp_ix[TP_LB][h]]) * 10) / 110;
+    int ix = d * 2 + 128; if (ix < 0) ix = 0; if (ix > 255) ix = 255;
+    int32_t fu = tp_sig[ix];                                                        // (Q12)
+    int32_t dp = 0;
+    if (ad) dp += (int32_t)(((int64_t)tp_up[h] * fu) >> 11);
+    if (bc) dp -= (int32_t)(((int64_t)tp_dn[h] * (4096 - fu)) >> 11);
+    // what the touches and wires pull out of the capacitor itself
+    int ip = tp_ix[TP_POS][h];
+    if (act[ip]) {
+      int32_t cur = 0;
+      for (int k = 0; k < TP_NL; k++) {
+        int32_t g = tp_lg[k]; if (!g) continue;
+        if (tp_la[k] == ip) cur += g * (V[tp_lb[k]] - pv) / 64;
+        else if (tp_lb[k] == ip) cur += g * (V[tp_la[k]] - pv) / 64;
+      }
+      dp += (int32_t)(((int64_t)cur * tp_kc) >> 10);
+    }
+    int32_t np = pos[h] + dp;
+    if (np > 8300000) np = 8300000; if (np < 0) np = 0;                             // (the mirrors run out)
+    pos[h] = np;
+    if (h == 0) gate0 = o > 3400;
+  }
+  fr_gate = gate0;
+  // out: what OUT L / OUT R are wired to (nothing: silent)
+  int32_t l = act[46] ? V[46] - 4200 : 0, r = act[47] ? V[47] - 4200 : 0;
+  l = l * 2047 / 3000; r = r * 2047 / 3000;
   dcl += ((l << 8) - dcl) >> 11; l -= dcl >> 8;
   dcr += ((r << 8) - dcr) >> 11; r -= dcr >> 8;
-  l >>= 1; r >>= 1;
   if (l > 2047) l = 2047; if (l < -2047) l = -2047;
   if (r > 2047) r = 2047; if (r < -2047) r = -2047;
   *rout = r;

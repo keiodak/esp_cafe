@@ -95,7 +95,7 @@ enum Preset {
         "four plates, one note each · press on one Cafe, it rings out on the other",
         "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
         "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
-        "four oscillators bounded by each other · TOUCH puts a finger across two · EARTH on the top, the input on the bottom",
+        "crucFX's TARPTERGE (A) / ARPSERGE (B) · a finger joins what it covers, lightly or flat · DRAW: lines are wires",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
@@ -433,14 +433,18 @@ final class Rig: ObservableObject {
     /// FOURSES
     let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO
-    @Published var frInput = true               // the Cafe's input onto the bottom bound
-    func frCommands(pad i: Int) -> [String] {
-        func v(_ x: Double) -> Int { Int((min(1, max(0, x)) * 1000).rounded()) }
-        let a = frAxes[i]
-        return i < 4 ? ["O \(i) \(v(a.x))", "O \(4 + i) \(v(a.y))"] : ["O \(5 + i) \(v(a.x))", "O \(9 + i) \(v(a.y))"]
+    @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
+    @Published var frDraw = false               // DRAW: lines are wires
+    /// the wires (node pairs), kept
+    @Published var frWires: [[Int]] = (Rig.d.array(forKey: "rig.frWires") as? [[Int]]) ?? FrBoard.defaultWires {
+        didSet { Self.d.set(frWires, forKey: "rig.frWires") }
     }
-    func frAll() -> [String] {
-        (0..<8).flatMap { frCommands(pad: $0) } + ["O 8 \(frRange * 500)", "O 17 \(frInput ? 300 : 0)"]
+    func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
+    /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
+    func frAll(slot: Int) -> [String] {
+        ["T", "O 9 \(slot == 1 ? 1000 : 0)", "O 8 \(frRange * 500)"]
+            + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }
+            + frWires.filter { $0.count == 2 }.map { "T \($0[0]) \($0[1]) 1000" }
     }
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)
     @Published var habitHold = false

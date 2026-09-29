@@ -155,13 +155,18 @@ final class CafeUnit: ObservableObject {
         guard rx != nil, let k = s.first else { return }
         if k == "Q" && !out.isEmpty { waitingQ = false; return }
         let key = Self.key(s)
-        if "SLJKXMBYNVCFO".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
+        if "SLJKXMBYNVCFOT".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
         out.append(s)
         pump()
     }
 
     private static func key(_ s: String) -> Substring {
         if s.first == "F" {                                // "F <effect> <id> <v>": effect and id are the key
+            let parts = s.split(separator: " ", maxSplits: 3)
+            if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
+            return Substring(s)
+        }
+        if s.first == "T" {                                // "T <a> <b> <v>": the two nodes are the key
             let parts = s.split(separator: " ", maxSplits: 3)
             if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
             return Substring(s)

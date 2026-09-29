@@ -1,0 +1,18 @@
+.model Q3904 NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2 ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4 VTF=4 XTF=2 RB=10)
+.model Q3906 PNP(IS=1.41f XTI=3 EG=1.11 VAF=18.7 BF=180.7 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0 RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6 RB=10)
+.model DMOD D
+.model DLED D(IS=1e-18 N=2)
+.subckt OPAMP inp inn out vcc gnd
+Bgm 0 int I = 9e-6*tanh(21*(v(inp)-v(inn)))
+Cc int 0 30p
+Rint int 0 5.3e8
+Bo o1 0 V = 0.05 + (v(vcc)-1.55)*0.5*(1+tanh((v(int)-(v(vcc)-1.5)/2)/((v(vcc)-1.55)/2)))
+Ro o1 out 50
+Ci inp 0 2p
+Cn inn 0 2p
+.ends
+.subckt SW4066 a b ctl vcc gnd
+Bs a b I = (v(a)-v(b)) * (1e-9 + 0.005*0.5*(1+tanh(4*(v(ctl)-v(vcc)/2))))
+Ca a 0 5p
+Cb b 0 5p
+.ends

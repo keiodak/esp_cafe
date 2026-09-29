@@ -143,7 +143,7 @@ final class Director: ObservableObject {
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
             case 5: rig.wvAll().forEach(u.send); sxRoles()
-            case 7: rig.frAll().forEach(u.send)
+            case 7: rig.frAll(slot: s).forEach(u.send); frSent = [:]
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -757,7 +757,33 @@ final class Director: ObservableObject {
     func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
     // MARK: FOURSES
     func setFrRange(_ r: Int) { rig.frRange = r; ctxUnits().forEach { $0.send("O 8 \(r * 500)") } }
-    func setFrInput(_ on: Bool) { rig.frInput = on; ctxUnits().forEach { $0.send("O 17 \(on ? 300 : 0)") } }
+    func setFrPot(_ h: Int, _ v: Double) {
+        rig.frPots[h] = v
+        ctxUnits().forEach { $0.send("O \(h) \(Int((v * 1000).rounded()))") }
+    }
+    func frToggleWire(_ a: Int, _ b: Int) {
+        let w = [min(a, b), max(a, b)]
+        let on = !rig.frWires.contains(w)
+        if on { rig.frWires.append(w) } else { rig.frWires.removeAll { $0 == w } }
+        ctxUnits().forEach { $0.send("T \(w[0]) \(w[1]) \(on ? 1000 : 0)") }
+    }
+    func frClearWires() {
+        rig.frWires = FrBoard.defaultWires
+        ctxUnits().forEach { u in rig.frAll(slot: u.slot).forEach(u.send) }
+        frSent = [:]
+    }
+    /// the fingers' links now (finger node -> node -> 0…1000): only what changed goes
+    var frSent: [String: Int] = [:]
+    func frTouches(_ links: [Int: [Int: Int]]) {
+        var now: [String: Int] = [:]
+        for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, v)) } }
+        var out: [String] = []
+        for (k, v) in now where frSent[k] != v { out.append("T \(k) \(v)") }
+        for k in frSent.keys where now[k] == nil { out.append("T \(k) 0") }
+        frSent = now
+        guard !out.isEmpty else { return }
+        ctxUnits().forEach { u in out.forEach(u.send) }
+    }
     func setHabitDub(_ on: Bool) { rig.habitDub = on; habits.forEach { $0.dub = on } }
     func setHabitSeconds(_ v: Double) {
         rig.habitSeconds = v; HabitEngine.shownSeconds = v
@@ -898,6 +924,9 @@ private struct MainScreen: View {
     @ViewBuilder private var pads: some View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rig.padSet == .fourses {
+            FoursesBoard(d: d, rig: rig)                                                  // FOURSES: the board itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
@@ -1354,9 +1383,9 @@ private struct HudBar: View {
         case .fourses:
             switch n {
             case 0: textKey(FrPad.rangeNames[rig.frRange], on: rig.frRange < 2) { d.setFrRange((rig.frRange + 1) % 3) }   // AUDIO -> CV -> LOW
-            case 1: textKey("IN", on: rig.frInput) { d.setFrInput(!rig.frInput) }                      // the input onto the bottom bound
-            case 2: textKey("FLIP") { d.ctxUnits().forEach { $0.send("O 18 1") } }                   // all turn round
-            default: textKey("RESET") { d.ctxUnits().forEach { $0.send("O 19 1") } }                 // back to their places
+            case 1: textKey("DRAW", on: rig.frDraw) { rig.frDraw.toggle() }                             // lines = wires
+            case 2: textKey("CLEAR") { d.frClearWires() }                                              // the wires back to OUT only
+            default: textKey("RESET") { d.ctxUnits().forEach { $0.send("O 19 1") } }                 // the capacitors back to their places
             }
         case .wave:
             switch n {

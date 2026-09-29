@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.12"
+#define FW_VERSION "4.13"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -837,9 +837,12 @@ void pc_line(char *s) {
               } break;
     case 'O': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // FOURSES: "O <id> <0..1000>"
                 if (val < 0) val = 0; if (val > 1000) val = 1000;
-                if (id >= 0 && id < 18) { fr_p[id] = (int16_t)val; fr_update(); }
-                else if (id == 18) fr_flip = true;
+                if (id >= 0 && id < 10) { fr_p[id] = (int16_t)val; fr_update(); }
                 else if (id == 19) fr_reset = true;
+              } break;
+    case 'T': { long a = -1, b2 = -1, v = 0; if (sscanf(s + 1, "%ld %ld %ld", &a, &b2, &v) == 3) {   // FOURSES: a touch / a wire
+                  if (v < 0) v = 0; if (v > 1000) v = 1000; tp_link((int)a, (int)b2, (int)v); }
+                else if (a == -1) for (int i = 0; i < TP_NL; i++) tp_lg[i] = 0;      // "T": every link off
               } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
                 cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;
