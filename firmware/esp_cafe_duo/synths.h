@@ -2614,11 +2614,12 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
   static uint32_t hum = 0, gen = 0xFFFFFFFF;
-  static int32_t dcl = 0, dcr = 0;
+  static int32_t dcl = 0, dcr = 0, yl = 0, yr = 0, sm = 4096;
   static uint8_t ph = 0;
   TpWs *w = TW;
   if (fr_reset) {                                                                 // (FOURSES starts: its working space anew)
     fr_reset = false;
+    sm = 16;                                                                      // (and eases in)
     for (int h = 0; h < 4; h++) { tp_pos[h] = (1500 + h * 1500) * 1000; tp_out[h] = (h & 1) ? 50 : 6800; tp_olp[h] = 3000; tp_bnd[h] = 4200; }
     memset(w, 0, sizeof(TpWs)); memset(TC, 0, sizeof(TpCl));
     tp_on = true;
@@ -2635,7 +2636,8 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   const bool fresh = gen != tp_gen; gen = tp_gen;
   const bool solve = fresh || ((++ph & 3) == 0);                                  // (the network: every 4th sample, 8 kHz)
   if (solve && na) {
-    for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(w, i, in); if (fresh) V[i] = w->E[i]; }
+    const uint8_t *was = w->af[1 - c];                                            // (a new wire: only the nodes new to the network start
+    for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(w, i, in); if (fresh && !was[i]) V[i] = w->E[i]; }   //  anew; the rest keep their voltage)
     int32_t *num = TW2->num, *den = TW2->den;
     for (int j = 0; j < na; j++) { int i = an[j]; num[i] = w->E[i] * w->G[i]; den[i] = w->G[i]; }
     for (int h = 0; h < 4; h++) {                                                 // the ladders (100K, 100K)
@@ -2704,6 +2706,11 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   l = l * 2047 / 3000; r = r * 2047 / 3000;
   dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
   dcr += ((r << 8) - dcr) >> 14; r -= dcr >> 8;
+  // no click as the wires change: a new network smooths the output for a moment (~600 Hz, back open in ~15 ms)
+  if (fresh && sm > 512) sm = 512;
+  if (sm < 4096) { sm += ((4096 - sm) >> 7) + 1; if (sm > 4096) sm = 4096; }
+  yl += ((l - yl) * sm) >> 12; yr += ((r - yr) * sm) >> 12;
+  l = yl; r = yr;
   if (l > 2047) l = 2047; if (l < -2047) l = -2047;
   if (r > 2047) r = 2047; if (r < -2047) r = -2047;
   *rout = r;
