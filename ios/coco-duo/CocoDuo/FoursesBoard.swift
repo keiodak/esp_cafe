@@ -29,7 +29,7 @@ enum FrBoard {
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
     /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
     static let nodes: [Int] = Array(0..<48) + Array(53..<80)
-    /// the outputs are each Cafe's own: MAIN / ASH / YELLOW A (46 · 47 · 76 on Cafe A) and B (77 · 78 · 79 here, 46 · 47 · 76
+    /// the outputs are each Cafe's own: OUT / ASH / YELLOW A (46 · 47 · 76 on Cafe A) and B (77 · 78 · 79 here, 46 · 47 · 76
     /// on Cafe B); a Cafe is never sent the other's
     static let outputs: Set<Int> = [46, 47, 73, 76, 77, 78, 79]
     static let count = nodes.count
@@ -47,8 +47,8 @@ enum FrBoard {
         let n = nodes[i]
         if n < 44 { return "" }
         if n == 45 { return "EARTH A" }; if n == 75 { return "EARTH B" }      // (Cafe A's, Cafe B's: each Cafe gets the other's by the phone)
-        if n == 46 { return "MAIN A" }; if n == 47 { return "ASH A" }; if n == 76 { return "YELLOW A" }
-        if n == 77 { return "MAIN B" }; if n == 78 { return "ASH B" }; if n == 79 { return "YELLOW B" }
+        if n == 46 { return "OUT A" }; if n == 47 { return "ASH A" }; if n == 76 { return "YELLOW A" }
+        if n == 77 { return "OUT B" }; if n == 78 { return "ASH B" }; if n == 79 { return "YELLOW B" }
         if n < 48 { return terms[n - 44] }
         if n == 73 { return "LINK OUT" }; if n == 74 { return "LINK IN" }
         let sh = ["A", "B", "C", "D"]
