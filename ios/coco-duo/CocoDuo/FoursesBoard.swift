@@ -338,14 +338,28 @@ struct FoursesBoard: View {
             ZStack(alignment: .topLeading) {
                 // the board: paper, a fine dot grid (CAMERA: the mosaic under it — each shape's LIGHT is its brightness)
                 Rectangle().fill(PastelTheme.padScreen)
-                if camOn {
+                if camOn {                                                   // CAMERA: the light, only inside the shapes
                     Canvas { ctx, s in
                         let g = cam.mosaicBrightness
                         guard g.count >= 8, g[0].count >= 16 else { return }
-                        let cw = s.width / 16, ch = s.height * FrBoard.yMax / 8
+                        let fh = s.height * FrBoard.yMax
+                        var clip = Path()
+                        for sh in rig.frShapes where sh.count >= 4 {
+                            if Int(sh[0]) == 3 && sh.count >= 5 {
+                                var l = Path()
+                                l.move(to: CGPoint(x: sh[1] * s.width, y: sh[2] * fh)); l.addLine(to: CGPoint(x: sh[3] * s.width, y: sh[4] * fh))
+                                clip.addPath(l.strokedPath(StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * fh * 2, lineCap: .round)))
+                            } else {
+                                let r = CGFloat(sh[3]) * fh
+                                clip.addPath(FrShapePath(type: Int(sh[0])).path(in: CGRect(x: sh[1] * s.width - r, y: sh[2] * fh - r, width: r * 2, height: r * 2)))
+                            }
+                        }
+                        ctx.clip(to: clip)
+                        let cw = s.width / 16, ch = fh / 8
                         for r in 0..<8 { for c in 0..<16 {
+                            let b = g[r][c]
                             ctx.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 0.5, height: ch + 0.5)),
-                                     with: .color(PastelTheme.hudBlack.opacity(0.28 * (1 - g[r][c]))))
+                                     with: .color(Color(hue: 0.58, saturation: 0.35 * (1 - b), brightness: 1).opacity(0.15 + 0.75 * b)))
                         } }
                     }
                 }
