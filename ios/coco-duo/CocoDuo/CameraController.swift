@@ -22,7 +22,7 @@ struct CameraFrame {
 }
 
 final class CameraController: NSObject {
-    private let session = AVCaptureSession()
+    let session = AVCaptureSession()          // (read by a preview: FOURSES shows the picture)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "cocoduo.camera.session")
     /// 現在セッションに繋がっている入力(前後切り替え時に外すため保持する)。

@@ -8,6 +8,7 @@
 // PLAY: a finger joins what it covers — lightly (a tip, ~10M) or flat (~20K) — and the body hums.
 // The four pots are sliders along the bottom.
 
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -183,6 +184,23 @@ enum FrBoard {
         let r = min(7, max(0, Int(s[2] * 8))), c = min(15, max(0, Int(s[1] * 16)))   // (smaller than a cell: the one under it)
         return grid[r][c]
     }
+    /// the camera's 8 × 16 mosaic (the whole picture) as it lies under the field when the picture fills it (cropped, not
+    /// stretched: a 3 : 4 picture), resampled to the field's own 8 × 16 — what the board shows and what each shape reads
+    static func fieldGrid(_ g: [[Double]], aspect: Double) -> [[Double]] {
+        guard g.count >= 8, g[0].count >= 16 else { return g }
+        let fa = 0.75
+        func at(_ u: Double, _ v: Double) -> Double {
+            let x = min(15, max(0, u * 16 - 0.5)), y = min(7, max(0, v * 8 - 0.5))
+            let c0 = Int(x), r0 = Int(y), c1 = min(15, c0 + 1), r1 = min(7, r0 + 1)
+            let fx = x - Double(c0), fy = y - Double(r0)
+            let top = g[r0][c0] + (g[r0][c1] - g[r0][c0]) * fx, bot = g[r1][c0] + (g[r1][c1] - g[r1][c0]) * fx
+            return top + (bot - top) * fy
+        }
+        return (0..<8).map { r in (0..<16).map { c in
+            let u = (Double(c) + 0.5) / 16, v = (Double(r) + 0.5) / 8
+            return aspect > fa ? at(u, 0.5 + (v - 0.5) * fa / aspect) : at(0.5 + (u - 0.5) * aspect / fa, v)
+        } }
+    }
     /// how much of an icon a shape covers (0…1: 5 × 5 points over the icon)
     static func cover(_ i: Int, _ p: [Double], _ s: [Double], aspect: Double) -> Double {
         let (hw, hh) = kind(i) >= 16 ? (0.15, 0.05) : (0.045, 0.045)       // (half its size, in heights)
@@ -347,25 +365,20 @@ struct FoursesBoard: View {
             ZStack(alignment: .topLeading) {
                 // the board: paper, a fine dot grid (CAMERA: the mosaic under it — each shape's LIGHT is its brightness)
                 Rectangle().fill(PastelTheme.padScreen)
-                if camOn {                                                   // CAMERA: the light, only inside the shapes
+                if camOn {                                                   // CAMERA: the picture (faint over the board, clear in the shapes) and its colour
+                    FrCameraView(session: d.camera.session)
+                        .frame(width: field.width, height: field.height)
+                        .mask(ZStack(alignment: .topLeading) {
+                            Rectangle().fill(Color.black.opacity(0.14))
+                            FrShapesArea(shapes: rig.frShapes).fill(Color.black)
+                        })
+                        .allowsHitTesting(false)
                     Canvas { ctx, s in
-                        let g = cam.mosaicBrightness
+                        let g = FrBoard.fieldGrid(cam.mosaicBrightness, aspect: Double(s.width / max(1, s.height)))
                         guard g.count >= 8, g[0].count >= 16 else { return }
-                        let fh = s.height * FrBoard.yMax
-                        var clip = Path()
-                        for sh in rig.frShapes where sh.count >= 4 {
-                            if Int(sh[0]) == 3 && sh.count >= 5 {
-                                var l = Path()
-                                l.move(to: CGPoint(x: sh[1] * s.width, y: sh[2] * fh)); l.addLine(to: CGPoint(x: sh[3] * s.width, y: sh[4] * fh))
-                                clip.addPath(l.strokedPath(StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * fh * 2, lineCap: .round)))
-                            } else {
-                                let r = CGFloat(sh[3]) * fh
-                                clip.addPath(FrShapePath(type: Int(sh[0])).path(in: CGRect(x: sh[1] * s.width - r, y: sh[2] * fh - r, width: r * 2, height: r * 2)))
-                            }
-                        }
-                        ctx.clip(to: clip)
-                        // a soft colour field, not tiles: each cell a glow, blurred into the next; the hues drift slowly
-                        let cw = s.width / 16, ch = fh / 8
+                        ctx.clip(to: FrShapesArea(shapes: rig.frShapes).path(in: CGRect(origin: .zero, size: s)))
+                        // a soft colour field over the picture: each cell a glow, blurred into the next; the hues drift slowly
+                        let cw = s.width / 16, ch = s.height / 8
                         let drift = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 40) / 40
                         ctx.drawLayer { l in
                             l.addFilter(.blur(radius: max(cw, ch) * 0.9))
@@ -373,10 +386,12 @@ struct FoursesBoard: View {
                                 let b = g[min(7, max(0, r))][min(15, max(0, c))]
                                 let hue = (0.58 - 0.50 * b + drift + Double(c) * 0.004).truncatingRemainder(dividingBy: 1)
                                 l.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 1, height: ch + 1)),
-                                       with: .color(Color(hue: hue < 0 ? hue + 1 : hue, saturation: 0.30 + 0.45 * b, brightness: 1.0).opacity(0.55 + 0.35 * b)))
+                                       with: .color(Color(hue: hue < 0 ? hue + 1 : hue, saturation: 0.30 + 0.45 * b, brightness: 1.0).opacity(0.30 + 0.25 * b)))
                             } }                                                           // (dark: a pale blue · bright: a warm, fuller colour)
                         }
                     }
+                    .frame(width: field.width, height: field.height)
+                    .allowsHitTesting(false)
                 }
                 Canvas { ctx, s in
                     let step: CGFloat = 16
@@ -676,4 +691,37 @@ struct FoursesBoard: View {
             d.frTouches(links, only: only)
         }
     }
+}
+
+/// every shape as one area (a line: its band), for the camera's picture and colour to show through
+struct FrShapesArea: Shape {
+    let shapes: [[Double]]
+    func path(in rect: CGRect) -> Path {
+        var clip = Path()
+        for sh in shapes where sh.count >= 4 {
+            if Int(sh[0]) == 3 && sh.count >= 5 {
+                var l = Path()
+                l.move(to: CGPoint(x: sh[1] * rect.width, y: sh[2] * rect.height)); l.addLine(to: CGPoint(x: sh[3] * rect.width, y: sh[4] * rect.height))
+                clip.addPath(l.strokedPath(StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * rect.height * 2, lineCap: .round)))
+            } else {
+                let r = CGFloat(sh[3]) * rect.height
+                clip.addPath(FrShapePath(type: Int(sh[0])).path(in: CGRect(x: sh[1] * rect.width - r, y: sh[2] * rect.height - r, width: r * 2, height: r * 2)))
+            }
+        }
+        return clip
+    }
+}
+
+/// the camera's live picture (filling, cropped)
+struct FrCameraView: UIViewRepresentable {
+    let session: AVCaptureSession
+    final class V: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    }
+    func makeUIView(context: Context) -> V {
+        let v = V(); v.preview.session = session; v.preview.videoGravity = .resizeAspectFill; v.isUserInteractionEnabled = false
+        return v
+    }
+    func updateUIView(_ v: V, context: Context) { if v.preview.session !== session { v.preview.session = session } }
 }

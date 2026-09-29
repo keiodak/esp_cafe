@@ -815,6 +815,7 @@ final class Director: ObservableObject {
     func frLight(_ grid: [[Double]]) {
         let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }
         guard !on.isEmpty, grid.count >= 8, grid[0].count >= 16 else { return }
+        let grid = FrBoard.fieldGrid(grid, aspect: frAspect)                   // (the picture as it lies under the board)
         if !frLightOn { frLightOn = true; frLightSent = [Int](repeating: -1, count: 16); frEnv = [Double](repeating: 0, count: 16); frSyncShapes() }
         // the room's own level follows slowly, so a shape reads light against the rest of the picture, not the lamp in the room
         let flat = grid.flatMap { $0 }

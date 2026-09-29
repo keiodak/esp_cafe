@@ -3,6 +3,7 @@
 // a 4 × 4 block, and every frame its pointer moves 30 % toward the cell that MOVES most / is BRIGHTEST / DARKEST.
 // While it is on, fingers don't move the pads; the pads' moves are sent to the Cafes as usual.
 
+import AVFoundation
 import Foundation
 import QuartzCore
 
@@ -26,6 +27,8 @@ final class CameraRig: ObservableObject {
     }
     /// 0 = MOTION / 1 = BRIGHT / 2 = DARK
     @Published var attractMode = 0
+    /// the capture session, for a live picture (FOURSES)
+    var session: AVCaptureSession { controller.session }
     @Published var usesFront = true { didSet { controller.setPosition(usesFront ? .front : .back) } }
     @Published var sensitivity = 0.5
     @Published var fps = 30 { didSet { controller.setFrameRate(fps) } }
