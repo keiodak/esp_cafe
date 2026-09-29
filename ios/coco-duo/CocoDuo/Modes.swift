@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "STUBER"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -111,7 +111,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, stuber, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
@@ -448,22 +448,6 @@ final class Rig: ObservableObject {
     }
     func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
     /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
-    // MARK: STUBER (BLE mode 8): its sandrodes on a board, patched by shapes and fingers (StuberBoard.swift)
-    @Published var stMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
-    @Published var stShape = 0                  // DRAW: ○ △ □ ／
-    @Published var stIcons: [[Double]] = (Rig.d.array(forKey: "rig.stIcons") as? [[Double]]).flatMap { $0.count == StBoard.count ? $0 : nil }
-        ?? StBoard.scatter(seed: 11) { didSet { Self.d.set(stIcons, forKey: "rig.stIcons") } }
-    @Published var stShapes: [[Double]] = (Rig.d.array(forKey: "rig.stShapes") as? [[Double]]) ?? [] {
-        didSet { Self.d.set(stShapes, forKey: "rig.stShapes") }
-    }
-    /// the wheels (x) and the resonance knobs (y): L, R
-    /// (both knobs clockwise = more resonance, singing past ~75 %: the left one is inverso on the Cafe, so it is sent turned)
-    let stAx: [PadAxis] = [PadAxis((0.4, 0.85)), PadAxis((0.6, 0.85))]
-    func stLines(_ h: Int) -> [String] {
-        let r = Int((stAx[h].y * 1000).rounded())
-        return ["A \(h) \(Int((stAx[h].x * 1000).rounded()))", "A \(2 + h) \(h == 0 ? 1000 - r : r)"]
-    }
-    func stParams() -> [String] { stLines(0) + stLines(1) }
     func frAll(slot: Int) -> [String] {
         ["T", "O 9 \(slot == 1 ? 1000 : 0)"] + (0..<4).map { "O \(4 + $0) \(frRanges[$0] * 500)" }
             + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }
@@ -559,7 +543,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .stuber][min(max(ctxMode, 0), 8)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses][min(max(ctxMode, 0), 7)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

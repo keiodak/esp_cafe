@@ -122,7 +122,6 @@ final class Director: ObservableObject {
         case .wave: return rig.wvAxes
         case .habit: return rig.habitAxes
         case .fourses: return rig.frAxes
-        case .stuber: return []
         case .harmony: return rig.hdAxes
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
@@ -165,11 +164,6 @@ final class Director: ObservableObject {
                 }
                 w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
-            case 8:                                                  // STUBER: no patches, the knobs, then what the board joins
-                u.send("T"); rig.stParams().forEach(u.send)
-                let w = StBoard.links(icons: rig.stIcons, shapes: rig.stShapes + stFingers, aspect: stAspect)
-                w.forEach { u.send("T \($0[0]) \($0[1]) \($0[2])") }
-                stSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
                 habits[s].div = rig.habit8k ? 8 : 4; habits[s].hold = rig.habitHold; habits[s].dub = rig.habitDub
@@ -280,8 +274,6 @@ final class Director: ObservableObject {
             break                                                // (the phone reads HABIT's pads itself)
         case .fourses:
             for u in ctxUnits() { rig.frCommands(pad: i).forEach(u.send) }
-        case .stuber:
-            break                                                // (its own board)
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -963,27 +955,6 @@ final class Director: ObservableObject {
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
 
-    // MARK: STUBER: the board's patches, as sent (each Cafe: node pair -> strength); the fingers as passing shapes
-    var stAspect: Double = 2.0 { didSet { if abs(stAspect - oldValue) > 0.02 { stSync() } } }
-    var stFingers: [[Double]] = []
-    private var stSent: [[[Int]: Int]] = [[:], [:]]
-    func stSync() {
-        let now = Dictionary(StBoard.links(icons: rig.stIcons, shapes: rig.stShapes + stFingers, aspect: stAspect).map { ([$0[0], $0[1]], $0[2]) },
-                             uniquingKeysWith: { a, _ in a })
-        for u in units where u.isConnected && rig.preset[u.slot] == Preset.ble && rig.mode[u.slot] == 8 {
-            let sl = u.slot == 1 ? 1 : 0
-            for (k, v) in now where stSent[sl][k] != v { u.send("T \(k[0]) \(k[1]) \(v)") }
-            for k in stSent[sl].keys where now[k] == nil { u.send("T \(k[0]) \(k[1]) 0") }
-            stSent[sl] = now
-        }
-    }
-    func stKnob(_ h: Int) {
-        for u in ctxUnits() { rig.stLines(h).forEach(u.send) }
-    }
-    func stAddShape(_ s: [Double]) { rig.stShapes.append(s); stSync() }
-    func stRemoveShape(_ k: Int) { if rig.stShapes.indices.contains(k) { rig.stShapes.remove(at: k); stSync() } }
-    func stRandom() { rig.stIcons = StBoard.scatter(aspect: stAspect); stSync() }
-    func stClear() { rig.stShapes = []; stSync() }
     func noiseDice() {
         rig.nzDice()
         for u in ctxUnits() { rig.nzAll(slot: u.slot).forEach(u.send) }
@@ -1076,9 +1047,6 @@ private struct MainScreen: View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if rig.padSet == .stuber {
-            StuberBoard(d: d, rig: rig)                                                   // STUBER: its jacks, wheels and knobs
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
             FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1115,7 +1083,6 @@ private struct MainScreen: View {
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
         case .habit: return (rig.habitAxes[i], HabitPad.titles[i])
         case .fourses: return (rig.frAxes[i], FrPad.titles[i])
-        case .stuber: return (rig.stAx[0], "")
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -1600,13 +1567,6 @@ private struct HudBar: View {
             case 1: key("forward.end") { d.fxNext(1) }
             case 2: key("dice") { d.fxRandom(0) }
             default: key("dice") { d.fxRandom(1) }
-            }
-        case .stuber:
-            switch n {
-            case 0: textKey("RESET") { d.ctxUnits().forEach { $0.send("A 19 1") } }                  // the Sh'mance: the base state
-            case 1: key("dice") { d.ctxUnits().forEach { $0.send("A 20 1") } }                         // ...a random one
-            case 2: textKey("RANDOM") { d.stRandom() }                                                // the jacks thrown anew
-            default: textKey("CLEAR") { d.stClear() }                                                 // every shape away
             }
         case .knob:
             blank
