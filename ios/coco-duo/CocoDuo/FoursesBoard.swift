@@ -414,7 +414,7 @@ struct FoursesBoard: View {
             let field = CGSize(width: size.width, height: size.height * FrBoard.yMax)
             let level: [Int: Double] = {                                  // how hard each icon is joined (0…1): the orange's depth
                 var m: [Int: Double] = [:]
-                for l in FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)) {
+                for l in FrBoard.iconLinks(icons: rig.frIcons, shapes: FrBoard.flickered(rig.frShapes, rig.frFlick, rig.frGrav), aspect: aspect(field)) {   // (as they are now: ◉ where gravity has it)
                     let v = Double(l[2]) / 1000
                     m[l[0]] = max(m[l[0]] ?? 0, v); m[l[1]] = max(m[l[1]] ?? 0, v)
                 }
@@ -462,7 +462,8 @@ struct FoursesBoard: View {
                 // the shapes
                 ForEach(Array(rig.frShapes.enumerated()), id: \.offset) { k, s in
                     // a shape is only its fill, no edge: deeper as it joins harder (its strongest link, 0…1)
-                    let amp = (FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).map { Double($0[2]) }.max() ?? 0) / 1000
+                    let now = FrBoard.flickered([s], [k < rig.frFlick.count ? rig.frFlick[k] : 1], [k < rig.frGrav.count ? rig.frGrav[k] : []])
+                    let amp = (FrBoard.links(icons: rig.frIcons, shapes: now, aspect: aspect(field)).map { Double($0[2]) }.max() ?? 0) / 1000
                     let live = amp > 0
                     let ink = FrBoard.targetInk[min(2, max(0, FrBoard.target(s)))]
                     let fl = Int(s[0]) == 4 ? (k < rig.frFlick.count ? rig.frFlick[k] : 1) : 1   // ◌: its contact, flickering
