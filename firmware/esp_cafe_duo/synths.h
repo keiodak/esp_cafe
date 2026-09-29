@@ -2524,6 +2524,7 @@ static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece
 volatile int16_t fr_p[10] = { 500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 0 };   // 4..7: each horse's range switch
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
 volatile int32_t tp_supply = 500;                             // STARVE: the supply (500 = its 8.4 V; 0 starved to ~0.3, 1000 ~1.7x)
+static int32_t tp_kick = 0;                                   // the rails' bounce as a comparator snaps (mV, decaying fast): the Fourses' crackle
 static int32_t tp_kq = 4096;                                  // (the supply now, Q12, sagging under the load)
 volatile uint16_t tp_led[4];                                  // the four LEDs: how long each horse's output has been high since the loop last looked
 volatile uint16_t tp_ledn = 0;
@@ -2648,7 +2649,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   const int16_t *lg = TC->cg[c];
   int16_t *V = w->V;
   const bool fresh = gen != tp_gen; gen = tp_gen;
-  const bool solve = fresh || ((++ph & 3) == 0);                                  // (the network: every 4th sample, 8 kHz)
+  const bool solve = fresh || ((++ph & 1) == 0);                                  // (the network: every 2nd sample, 16 kHz — its edges keep their bite)
   if (solve && na) {
     const uint8_t *was = w->af[1 - c];                                            // (a new wire: only the nodes new to the network start
     for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(w, i, in); if (fresh && !was[i]) V[i] = w->E[i]; }   //  anew; the rest keep their voltage)
@@ -2702,6 +2703,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     int32_t thr = af[ni] ? V[ni] : tp_bnd[h] + (((tp_out[h] - tp_bnd[h]) * 186) >> 12);
     int32_t o = thr > pv ? vh : 50;
     if (o > 1000) { o -= (o * 3) >> 7; if (tp_led[h] < 65000) tp_led[h]++; }         // (its LED: lit, and drawing on the output)
+    if ((o > 1000) != (tp_out[h] > 1000)) tp_kick += (o > 1000 ? 1400 : -1400) * 4096 / (kq < 1024 ? 1024 : kq);   // (an edge: the rails jump)
     tp_out[h] = o;
     tp_olp[h] += (o - tp_olp[h]) >> 7;
     ni = tp_ix[TP_GATE][h]; bool ad = (af[ni] ? V[ni] : o) > vt;                // the 4066's controls (its thresholds with its supply)
@@ -2731,6 +2733,11 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   for (int k = 0; k < 4; k++) if (af[57 + k] && V[57 + k] > 3000) tp_sh[k] = af[53 + k] ? V[53 + k] : tp_sh[k];
   fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 1000;                            // YELLOW (and the lamp)
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
+  if (tp_kick) {                                                                  // (the edges' crackle rides the outputs, as on the board's shared rails)
+    if (af[46]) l += tp_kick / 3;
+    if (af[47]) r += tp_kick / 3;
+    tp_kick -= tp_kick / 6 + (tp_kick > 0 ? 1 : -1);
+  }
   l = l * 2047 / 1800; r = r * 2047 / 1800;                                      // (louder: ±1.8 V is full scale)
   dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
   dcr += ((r << 8) - dcr) >> 14; r -= dcr >> 8;
