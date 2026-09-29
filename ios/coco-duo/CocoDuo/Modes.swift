@@ -111,7 +111,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, nobs, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, nobs, stuber, harmony, multi, arp, speech, pcoco, sun, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
