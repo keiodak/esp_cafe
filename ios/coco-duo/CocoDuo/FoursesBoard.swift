@@ -19,6 +19,8 @@ enum FrBoard {
     /// the terminals' colours: what comes in (IN, EARTH, LINK IN) · what goes out (OUT, LINK OUT)
     static let inInk = Color(hex: 0x3D5566)
     static let outInk = Color(hex: 0x5B6B2E)
+    /// the shapes: a light blue
+    static let shapeBlue = Color(hex: 0x6FA8DC)
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
     /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
     static let nodes: [Int] = Array(0..<48) + Array(53..<80)
@@ -305,7 +307,14 @@ struct FoursesBoard: View {
         GeometryReader { geo in
             let size = geo.size
             let field = CGSize(width: size.width, height: size.height * FrBoard.yMax)
-            let sounding = Set(FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)).flatMap { $0.prefix(2) })
+            let level: [Int: Double] = {                                  // how hard each icon is joined (0…1): the orange's depth
+                var m: [Int: Double] = [:]
+                for l in FrBoard.iconLinks(icons: rig.frIcons, shapes: rig.frShapes, aspect: aspect(field)) {
+                    let v = Double(l[2]) / 1000
+                    m[l[0]] = max(m[l[0]] ?? 0, v); m[l[1]] = max(m[l[1]] ?? 0, v)
+                }
+                return m
+            }()
             ZStack(alignment: .topLeading) {
                 // the board: paper, a fine dot grid
                 Rectangle().fill(PastelTheme.padScreen)
@@ -322,15 +331,15 @@ struct FoursesBoard: View {
                     if Int(s[0]) == 3 && s.count >= 5 {
                         let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(PastelTheme.hudOrange.opacity(live ? 0.12 : 0.05), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
+                            .stroke(FrBoard.shapeBlue.opacity(live ? 0.22 : 0.10), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(live ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.45), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
+                            .stroke(FrBoard.shapeBlue.opacity(live ? 1 : 0.6), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
                     } else if s.count == 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         FrShapePath(type: Int(s[0]))
-                            .fill(PastelTheme.hudOrange.opacity(live ? 0.10 : 0.04))
-                            .overlay(FrShapePath(type: Int(s[0])).stroke(live ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.45),
+                            .fill(FrBoard.shapeBlue.opacity(live ? 0.18 : 0.08))
+                            .overlay(FrShapePath(type: Int(s[0])).stroke(FrBoard.shapeBlue.opacity(live ? 1 : 0.6),
                                                                       style: StrokeStyle(lineWidth: live ? 1.4 : 1, dash: live ? [] : [3, 3])))
                             .frame(width: r * 2, height: r * 2)
                             .position(c)
@@ -338,16 +347,16 @@ struct FoursesBoard: View {
                 }
                 if let dr = draft, rig.frShape == 3 {
                     Path { p in p.move(to: dr.start); p.addLine(to: dr.now) }
-                        .stroke(PastelTheme.hudOrange, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3]))
+                        .stroke(FrBoard.shapeBlue, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3]))
                 } else if let dr = draft {
                     let r = hypot(dr.now.x - dr.start.x, dr.now.y - dr.start.y)
                     FrShapePath(type: rig.frShape)
-                        .stroke(PastelTheme.hudOrange, style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                        .stroke(FrBoard.shapeBlue, style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
                         .frame(width: r * 2, height: r * 2).position(dr.start)
                 }
                 // the icons
                 ForEach(0..<FrBoard.count, id: \.self) { i in
-                    icon(i, lit: sounding.contains(i) || touched(i, field), field: field)
+                    icon(i, level: touched(i, field) ? 1 : (level[i] ?? 0), field: field)
                 }
                 // the fingers
                 ForEach(Array(fingers.keys), id: \.self) { f in
@@ -408,31 +417,38 @@ struct FoursesBoard: View {
 
     // MARK: pieces
 
-    private func icon(_ i: Int, lit: Bool, field: CGSize) -> some View {
+    private func icon(_ i: Int, level: Double, field: CGSize) -> some View {
+        let lit = level > 0, deep = level > 0.55
+        let orange = PastelTheme.hudOrange.opacity(0.2 + 0.8 * level)
         let p = rig.frIcons.indices.contains(i) ? rig.frIcons[i] : [0.5, 0.5]
         let q = view(p[0], p[1], field), s = iconSize(field)
         let k = FrBoard.kind(i)
         return ZStack {
             if k < 11 {
-                RoundedRectangle(cornerRadius: 3).fill(lit ? PastelTheme.hudOrange : PastelTheme.padScreen)
+                RoundedRectangle(cornerRadius: 3).fill(PastelTheme.padScreen)
+                if lit { RoundedRectangle(cornerRadius: 3).fill(orange) }
                 RoundedRectangle(cornerRadius: 3).strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
                 FrGlyph(role: k)
-                    .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                    .stroke(deep ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.18)
             } else if k < 16 {                                                     // INTERSEXON: round
-                Circle().fill(lit ? PastelTheme.hudOrange : PastelTheme.padScreen)
+                Circle().fill(PastelTheme.padScreen)
+                if lit { Circle().fill(orange) }
                 Circle().strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
                 FrGlyph(role: k)
-                    .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                    .stroke(deep ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.22)
             } else {
                 let out = k == 17
                 Text(FrBoard.label(i))
                     .font(.hud(8, .semibold))
-                    .foregroundStyle(lit ? PastelTheme.selectionText : PastelTheme.padScreen)
+                    .foregroundStyle(PastelTheme.selectionText)
                     .padding(.horizontal, 5)
                     .frame(height: s * 0.8)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(lit ? PastelTheme.hudOrange : (out ? FrBoard.outInk : FrBoard.inInk)))
+                    .background(ZStack {
+                        RoundedRectangle(cornerRadius: 3).fill(out ? FrBoard.outInk : FrBoard.inInk)
+                        if lit { RoundedRectangle(cornerRadius: 3).fill(orange) }
+                    })
                     .fixedSize()
             }
         }
