@@ -34,7 +34,7 @@ enum FrBoard {
     /// what a shape passes: 0 both Cafes (light blue) · 1 TARPTERGE only (Cafe A, navy) · 2 ARPSERGE only (Cafe B, green)
     static let targetNames = ["A+B", "TARP", "ARP"]
     static let targetInk = [PastelTheme.hudOrange, Color(hex: 0x1F4E79), Color(hex: 0x2E7D4F)]
-    static func target(_ s: [Double]) -> Int { let i = Int(s[0]) == 3 ? 5 : 4; return s.count > i ? Int(s[i]) : 0 }
+    static func target(_ s: [Double]) -> Int { guard !s.isEmpty else { return 0 }; let i = Int(s[0]) == 3 ? 5 : 4; return s.count > i ? Int(s[i]) : 0 }
     static func passes(_ s: [Double], slot: Int) -> Bool { let t = target(s); return t == 0 || t == slot + 1 }
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
     /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
@@ -65,7 +65,17 @@ enum FrBoard {
         if n < 65 { return sh[(n - 53) % 4] }
         return ["D→A", "A→D", "B→C", "C→B"][(n - 65) / 2]
     }
-    static let shapeNames = ["○", "△", "□", "／"]
+    static let shapeNames = ["○", "△", "□", "／", "◌"]
+    /// an unsteady supply (◌, type 4): a circle whose contact comes and goes — each shape's state now (1 whole ·
+    /// less: it reaches less far · 0: gone for a moment), set by the Director
+    static func flickered(_ shapes: [[Double]], _ f: [Double]) -> [[Double]] {
+        shapes.enumerated().map { k, s in
+            guard s.count >= 4, Int(s[0]) == 4 else { return s }
+            let v = k < f.count ? f[k] : 1
+            if v <= 0 { return [] }
+            var t = s; t[0] = 0; t[3] = s[3] * v; return t
+        }
+    }
     /// the free field (the sliders take the bottom)
     static let yMax = 0.84
     static func buf(_ h: Int) -> Int { (0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0 }
@@ -449,6 +459,7 @@ struct FoursesBoard: View {
                     let amp = (FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).map { Double($0[2]) }.max() ?? 0) / 1000
                     let live = amp > 0
                     let ink = FrBoard.targetInk[min(2, max(0, FrBoard.target(s)))]
+                    let fl = Int(s[0]) == 4 ? (k < rig.frFlick.count ? rig.frFlick[k] : 1) : 1   // ◌: its contact, flickering
                     let lit = camOn && k < 16 && k < cam.shapeLight.count ? cam.shapeLight[k] : 0   // CAMERA: its LIGHT, a glow that breathes
                     if Int(s[0]) == 3 && s.count >= 5 {
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
@@ -459,7 +470,7 @@ struct FoursesBoard: View {
                     } else if s.count >= 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         FrShapePath(type: Int(s[0]))
-                            .fill(ink.opacity((live ? 0.15 + 0.40 * amp : 0.10) * (camOn ? 0.45 : 1)))   // (CAMERA: the colour shows through)
+                            .fill(ink.opacity((live ? 0.15 + 0.40 * amp : 0.10) * (camOn ? 0.45 : 1) * (0.35 + 0.65 * fl)))   // (CAMERA: the colour shows through)
                             .brightness(live && !camOn ? -0.25 * amp : 0)
                             .scaleEffect(1 + 0.08 * lit)
                             .shadow(color: ink.opacity(0.9 * lit), radius: 18 * lit)
@@ -494,7 +505,7 @@ struct FoursesBoard: View {
                 // DRAW: which shape
                 if rig.frMode == 1 {
                     HStack(spacing: 0) {
-                        ForEach(0..<4, id: \.self) { k in
+                        ForEach(0..<5, id: \.self) { k in
                             Text(FrBoard.shapeNames[k])
                                 .font(.system(size: 13, weight: .regular))
                                 .foregroundStyle(rig.frShape == k ? PastelTheme.selectionText : PastelTheme.hudBlack)

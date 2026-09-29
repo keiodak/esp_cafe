@@ -56,6 +56,7 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
+            self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
@@ -155,10 +156,10 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
-                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
+                let w = FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
                 frLightSent = [Int](repeating: -1, count: 16)
                 if !frLightOn {                                             // (the empty shapes' pulls, before their wires)
-                    let v = FrBoard.drift(icons: rig.frIcons, shapes: rig.frShapes.map { FrBoard.passes($0, slot: s == 1 ? 1 : 0) ? $0 : [] }, aspect: frAspect).volts
+                    let v = FrBoard.drift(icons: rig.frIcons, shapes: frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: s == 1 ? 1 : 0) ? $0 : [] }, aspect: frAspect).volts
                     v.forEach { u.send("O \(30 + $0.key) \($0.value)") }; frDriftSent[s == 1 ? 1 : 0] = v
                 }
                 w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
@@ -789,10 +790,10 @@ final class Director: ObservableObject {
     func frSyncShapes() {
         for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
             let sl = u.slot == 1 ? 1 : 0
-            let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
+            let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
                                  uniquingKeysWith: { a, _ in a })
             if !frLightOn {                                                 // an empty shape's pull: its voltage (the CAMERA's light instead, when on)
-                let shapes = rig.frShapes.map { FrBoard.passes($0, slot: sl) ? $0 : [] }
+                let shapes = frLive.map { !$0.isEmpty && FrBoard.passes($0, slot: sl) ? $0 : [] }
                 let v = FrBoard.drift(icons: rig.frIcons, shapes: shapes, aspect: frAspect).volts
                 for (k, x) in v where frDriftSent[sl][k] != x { u.send("O \(30 + k) \(x)") }
                 frDriftSent[sl] = v
@@ -860,6 +861,25 @@ final class Director: ObservableObject {
             let o = units[u.slot == 1 ? 0 : 1]
             let e = o.isConnected ? o.earth : 0
             if abs(e - frEarthSent[u.slot]) >= 2 { frEarthSent[u.slot] = e; u.send("O 21 \(e)") }
+        }
+    }
+    /// the shapes as they are now (◌ flickering)
+    var frLive: [[Double]] { FrBoard.flickered(rig.frShapes, rig.frFlick) }
+    /// ◌ an unsteady supply: mostly on and wavering a little, now and then dropping out for a moment (~12x a second)
+    private var frFlickT = 0.0, frFlickGone: [Int: Int] = [:]
+    func frFlickTick() {
+        let has = rig.frShapes.contains { $0.count >= 4 && Int($0[0]) == 4 }
+        guard has else { if !rig.frFlick.isEmpty { rig.frFlick = [] }; return }
+        let t = CACurrentMediaTime(); guard t - frFlickT >= 0.08 else { return }; frFlickT = t
+        var f = rig.frShapes.map { _ in 1.0 }
+        for (k, s) in rig.frShapes.enumerated() where s.count >= 4 && Int(s[0]) == 4 {
+            if let g = frFlickGone[k], g > 0 { frFlickGone[k] = g - 1; f[k] = 0; continue }
+            if Double.random(in: 0..<1) < 0.10 { frFlickGone[k] = Int.random(in: 0...3); f[k] = 0; continue }   // (a drop)
+            f[k] = (Double.random(in: 0.7...1.0) * 4).rounded() / 4                                            // (a waver: a few steps)
+        }
+        if f != rig.frFlick {
+            rig.frFlick = f
+            if units.contains(where: { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }) { frSyncShapes() }
         }
     }
     func frAddShape(_ s: [Double]) { rig.frShapes.append(s); frSyncShapes() }
