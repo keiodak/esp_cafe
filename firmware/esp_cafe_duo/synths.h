@@ -2481,7 +2481,7 @@ void hb_write(const uint8_t *d, size_t n) {
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
 #define TP_N 77
-#define TP_NL 64
+#define TP_NL 48
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
                                         0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6 };
