@@ -1,6 +1,6 @@
 // NobsBoard.swift — coco duo (k.odk)
-// NOBSRINE (BLE mode 8): each Cafe a row — its two knobs, big (turning them is the sound: as loud as they turn, where
-// they stand sets the pitch), a LO / HI switch under each, and DECAY · PITCH · SPREAD · BEND · MIX.
+// NOBSRINE (BLE mode 8): one instrument, L and R — two big knobs (it sounds only while one turns; where a turn begins
+// sets a pitch), a LO / HI switch under each, and DECAY · PITCH · SPREAD · MIX.
 import SwiftUI
 
 struct NobsBoard: View {
@@ -8,51 +8,49 @@ struct NobsBoard: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
-        VStack(spacing: 8) {
-            row(0)
-            Rectangle().fill(PastelTheme.hudLine).frame(height: 1)
-            row(1)
-        }
-        .padding(.horizontal, 6)
-    }
-
-    private func row(_ r: Int) -> some View {
-        HStack(spacing: 10) {
-            Text(r == 0 ? "A" : "B")
-                .font(.hud(9, .semibold))
-                .foregroundStyle(d.units[r].isConnected ? PastelTheme.hudBlack : PastelTheme.textSecondary)
-                .frame(width: 10)
-            NbKnob(a: rig.nbAxes[r * 4], y: false) { d.padMoved(r * 4) }
-            switchChip(r, 0)
-            NbKnob(a: rig.nbAxes[r * 4], y: true) { d.padMoved(r * 4) }
-            switchChip(r, 1)
-            VStack(spacing: 2) {
-                NbSlider(label: "DECAY", a: rig.nbAxes[r * 4 + 1], y: false) { d.padMoved(r * 4 + 1) }
-                NbSlider(label: "PITCH", a: rig.nbAxes[r * 4 + 1], y: true) { d.padMoved(r * 4 + 1) }
-                NbSlider(label: "SPREAD", a: rig.nbAxes[r * 4 + 2], y: false) { d.padMoved(r * 4 + 2) }
-                NbSlider(label: "BEND", a: rig.nbAxes[r * 4 + 2], y: true) { d.padMoved(r * 4 + 2) }
-                NbSlider(label: "MIX", a: rig.nbAxes[r * 4 + 3], y: false) { d.padMoved(r * 4 + 3) }
+        HStack(spacing: 14) {
+            knob(0)
+            knob(1)
+            VStack(spacing: 4) {
+                NbSlider(label: "DECAY", a: rig.nbAxes[1], y: false) { d.padMoved(1) }
+                NbSlider(label: "PITCH", a: rig.nbAxes[1], y: true) { d.padMoved(1) }
+                NbSlider(label: "SPREAD", a: rig.nbAxes[2], y: false) { d.padMoved(2) }
+                NbSlider(label: "MIX", a: rig.nbAxes[3], y: false) { d.padMoved(3) }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: 220)
         }
-        .frame(maxHeight: .infinity)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// LO / HI (the second: two octaves up)
-    private func switchChip(_ r: Int, _ h: Int) -> some View {
-        let on = rig.nbSw[r * 2 + h]
-        return VStack(spacing: 0) {
-            ForEach([true, false], id: \.self) { hi in
+    /// a knob (L / R) with its switch under it
+    private func knob(_ h: Int) -> some View {
+        VStack(spacing: 6) {
+            NbKnob(a: rig.nbAxes[0], y: h == 1) { d.padMoved(0) }
+            HStack(spacing: 8) {
+                Text(h == 0 ? "L" : "R")
+                    .font(.hud(9, .semibold))
+                    .foregroundStyle(PastelTheme.hudBlack)
+                switchChip(h)
+            }
+        }
+    }
+
+    /// LO / HI (HI: two octaves up)
+    private func switchChip(_ h: Int) -> some View {
+        let on = rig.nbSw[h]
+        return HStack(spacing: 0) {
+            ForEach([false, true], id: \.self) { hi in
                 Text(hi ? "HI" : "LO")
                     .font(.hud(8, .semibold))
                     .foregroundStyle(on == hi ? PastelTheme.selectionText : PastelTheme.hudBlack)
-                    .frame(width: 26, height: 20)
+                    .frame(width: 28, height: 20)
                     .background(Rectangle().fill(on == hi ? PastelTheme.hudBlack : Color.clear))
             }
         }
         .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
         .contentShape(Rectangle())
-        .onTapGesture { d.setNbSw(r, h, !on) }
+        .onTapGesture { d.setNbSw(h, !on) }
     }
 }
 

@@ -2597,7 +2597,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
       default: break;                                                             // the ladder's ends: 110K to the bias
     }
   } else if (i == 44) { e = 4200 + in * 2; g = 4096; }                            // IN (10K)
-  else if (i == 45) { e = 4200 + pc_emod * 30; g = 4096; }                        // EARTH (10K: it is heard)
+  else if (i == 45) { e = 4200 + pc_emod * 30; g = 1241; }                        // EARTH (33K: heard, not holding the rest)
   else if (i < 48) { e = 4200; g = 410; }                                         // OUT: an amplifier's input
   else if (i < 53) { e = tp_hum; g = 41; }                                        // a finger: the body (1M, the hum)
   else if (i < 57) { e = tp_sh[i - 53]; g = 1; }                                  // S&H IN (floats: reads what it holds)
@@ -2607,19 +2607,18 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
   else if (i == 74) { e = tp_linkin; g = 4096; }                                  // LINK IN (10K)
   else if (i == 76) { e = 0; g = 410; }                                           // YELLOW (a pin's input, 100K down)
-  else if (i >= 77) { e = TL->light[i - 77]; g = 4096; }                          // LIGHT: a shape's brightness (10K)
+  else if (i >= 77) { e = TL->light[i - 77]; g = 1241; }                          // LIGHT: a shape's brightness / pull (33K)
   else if (i == 75) { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
-         e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 4096; }                     //  own average)
+         e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 1241; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
   static uint32_t hum = 0, gen = 0xFFFFFFFF;
-  static int32_t dcl = 0, dcr = 0, yl = 0, yr = 0, sm = 4096;
+  static int32_t dcl = 0, dcr = 0;
   static uint8_t ph = 0;
   TpWs *w = TW;
   if (fr_reset) {                                                                 // (FOURSES starts: its working space anew)
     fr_reset = false;
-    sm = 16;                                                                      // (and eases in)
     for (int h = 0; h < 4; h++) { tp_pos[h] = (1500 + h * 1500) * 1000; tp_out[h] = (h & 1) ? 50 : 6800; tp_olp[h] = 3000; tp_bnd[h] = 4200; }
     memset(w, 0, sizeof(TpWs)); memset(TC, 0, sizeof(TpCl));
     tp_on = true;
@@ -2706,52 +2705,45 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   l = l * 2047 / 1800; r = r * 2047 / 1800;                                      // (louder: ±1.8 V is full scale)
   dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
   dcr += ((r << 8) - dcr) >> 14; r -= dcr >> 8;
-  // no click as the wires change: a new network smooths the output for a moment (~2 kHz, back open in ~10 ms)
-  if (fresh && sm > 1536) sm = 1536;                                            // (gentle: ~2 kHz, the level kept)
-  if (sm < 4096) { sm += ((4096 - sm) >> 7) + 1; if (sm > 4096) sm = 4096; }
-  yl += ((l - yl) * sm) >> 12; yr += ((r - yr) * sm) >> 12;
-  l = yl; r = yr;
   if (l > 2047) l = 2047; if (l < -2047) l = -2047;
   if (r > 2047) r = 2047; if (r < -2047) r = -2047;
   *rout = r;
   return l;
 }
 
-// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two halves, each a knob:
-// turning it is what makes the sound — how fast it turns charges an ENERGY that leaks away, and that is the tail current
-// of the differential pairs its two triangle oscillators (LM324) go through, so it is as loud as the knob is being turned;
-// where the knob is sets their pitch (freely, no steps). A switch per half: LO / HI (two octaves up).
-// OUT = half A, ASH = half B ("E <id> <0..1000>"):
-//   0 KNOB A · 1 KNOB B · 3 DECAY · 4 PITCH · 5 SPREAD · 6 BEND (energy into the second oscillator's pitch) · 7 MIX ·
-//   8 SWITCH A · 9 SWITCH B
+// ==== NOBSRINE (BLE mode 8): after Blasser's paper circuit (crucFX's PCB read from its Gerbers). Two knobs; each one's
+// buffer goes through a capacitor into a Schmitt comparator — turning it one way flips it up, the other way down, and each
+// flip (through a capacitor into the 4066) samples the knob: one hold where a clockwise turn began, one where an
+// anticlockwise turn began. Each hold sets one triangle oscillator's pitch (LM324). How fast the knob turns, rectified,
+// is an envelope — the tail current of the differential pairs the oscillators go through: it sounds only while it turns.
+// L (OUT) = knob A's two oscillators, R (ASH) = knob B's. "E <id> <0..1000>":
+//   0 KNOB A · 1 KNOB B · 3 DECAY (20 ms … 2 s) · 4 PITCH (30 … 960 Hz) · 5 SPREAD (0 … 6 oct) · 7 MIX ·
+//   8 SWITCH A · 9 SWITCH B (LO / HI: two octaves up)
 #define nb_p fr_p                                             // (FOURSES' settings: the two modes never run together)
 volatile bool nb_reset = true, nb_gate = false;
-struct NbState {                                              // (all of it in a piece of the tape: no RAM of its own)
-  int32_t kn[2], kp[2], e[2], es[2], lem[2];
+struct NbState {
+  int32_t kn[2], kp[2], dv[2], e[2], es[2], s1[2], s2[2], pv[2][2], lem[2];
   uint32_t ph[2][2], inc[2][2];
   uint32_t sub, inc0;
   int32_t dk, spread;
+  uint8_t st[2];
 };
 static_assert(sizeof(NbState) <= DCHUNK_BYTES, "NOBSRINE: its state must fit a piece of the tape");
 #define NB ((NbState *)dchunk[100])
-static inline uint32_t nb_exp2(uint32_t base, int32_t x) {   // base × 2^(x / 4096), no tables, no floats
+static inline uint32_t nb_exp2(uint32_t base, int32_t x) {
   int32_t o = x >> 12;
-  uint64_t t = (uint64_t)(x & 4095) << 4;                     // (the fraction, Q16)
-  uint64_t m = 65536 + ((t * (43025 + ((22512 * t) >> 16))) >> 16);   // 2^t ≈ 1 + t (0.6565 + 0.3435 t)
+  uint64_t t = (uint64_t)(x & 4095) << 4;
+  uint64_t m = 65536 + ((t * (43025 + ((22512 * t) >> 16))) >> 16);
   uint64_t v = ((uint64_t)base * m) >> 16;
   if (o > 0) v <<= (o > 12 ? 12 : o); else if (o < 0) v >>= (-o > 30 ? 30 : -o);
   return v > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)v;
 }
-static void nb_settings(NbState *n) {                         // (every 16th sample, from the settings; 32 kHz taken as is)
-  n->dk = (int32_t)nb_exp2(3495, -(nb_p[3] * 31310 / 1000)); if (n->dk < 1) n->dk = 1;   // DECAY: 0.15 … 30 s
-  n->inc0 = nb_exp2(4026532, nb_p[4] * 20480 / 1000);         // PITCH: 30 … 960 Hz
-  n->spread = nb_p[5] * 24576 / 1000;                         // SPREAD: 0 … 6 octaves over the knob
+static void nb_settings(NbState *n) {
+  n->dk = (int32_t)nb_exp2(26214, -(nb_p[3] * 27213 / 1000)); if (n->dk < 1) n->dk = 1;
+  n->inc0 = nb_exp2(4026532, nb_p[4] * 20480 / 1000);
+  n->spread = nb_p[5] * 24576 / 1000;
 }
-static inline uint32_t nb_pitch(NbState *n, int32_t x) {
-  uint32_t v = nb_exp2(n->inc0, x);
-  return v > 900000000u ? 900000000u : v;                     // (~6.7 kHz at most)
-}
-static inline int32_t nb_sat(int32_t x) {                    // a differential pair: tanh-ish, Q15
+static inline int32_t nb_sat(int32_t x) {
   if (x >= 32768) return 21845;
   if (x <= -32768) return -21845;
   return x - ((((x * x) >> 15) * x) >> 15) / 3;
@@ -2761,39 +2753,48 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
   if (nb_reset) {
     nb_reset = false;
     memset(n, 0, sizeof(NbState));
-    for (int h = 0; h < 2; h++) { n->kn[h] = n->kp[h] = (nb_p[h] * 65) << 8; n->lem[h] = pc_emod; }
+    for (int h = 0; h < 2; h++) {
+      n->kn[h] = n->kp[h] = (nb_p[h] * 65) << 8;
+      n->s1[h] = n->s2[h] = n->pv[h][0] = n->pv[h][1] = nb_p[h] * 65;
+      n->lem[h] = pc_emod;
+    }
     nb_settings(n);
   }
   const bool sub = (++n->sub & 15) == 0;
   if (sub) nb_settings(n);
   int32_t o[2];
   for (int h = 0; h < 2; h++) {
-    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) >> 8;                        // the knob (Q24; its steps smoothed, ~8 ms)
-    int32_t d = n->kn[h] - n->kp[h]; if (d < 0) d = -d; n->kp[h] = n->kn[h];     // how fast it turns
-    int32_t de = pc_emod - n->lem[h]; if (de < 0) de = -de; n->lem[h] = pc_emod; // (EARTH moving turns it too)
-    int32_t e = n->e[h] + d * 5 + de * 60000;                                   // the energy gathers...
-    if (e > 16777215) e = 16777215;
-    e -= ((e >> 12) * n->dk) >> 12;                                             // ...and leaks away
+    n->kn[h] += (((nb_p[h] * 65) << 8) - n->kn[h]) / 1024;
+    int32_t v = n->kn[h] - n->kp[h]; n->kp[h] = n->kn[h];
+    int32_t de = pc_emod - n->lem[h]; n->lem[h] = pc_emod;
+    n->dv[h] = (n->dv[h] * 511) / 512 + ((v + de * 3000) * 16) / 512;
+    int32_t dv = n->dv[h];
+    if (!n->st[h] && dv > 2400) { n->st[h] = 1; n->s1[h] = n->kn[h] >> 8; }
+    else if (n->st[h] && dv < -2400) { n->st[h] = 0; n->s2[h] = n->kn[h] >> 8; }
+    int32_t a = dv < 0 ? -dv : dv;
+    int32_t t = a > 8191 ? 16777215 : a << 11;
+    int32_t e = n->e[h] - (((n->e[h] >> 12) * n->dk) >> 12);
+    if (t > e) e = t;
     n->e[h] = e;
-    n->es[h] += ((e >> 8) - n->es[h]) >> 7;                                     // (the tail current: no click)
+    n->es[h] = (n->es[h] * 31) / 32 + (e >> 8) / 32;
+    n->pv[h][0] += (n->s1[h] - n->pv[h][0]) / 64;
+    n->pv[h][1] += (n->s2[h] - n->pv[h][1]) / 64;
     if (sub) {
-      int32_t x = (int32_t)(((int64_t)n->spread * ((n->kn[h] >> 8) - 32768)) >> 16) + (nb_p[8 + h] >= 500 ? 8192 : 0);
-      n->inc[h][0] = nb_pitch(n, x);
-      n->inc[h][1] = nb_pitch(n, x + 2396 + 23);                                // (a fifth above, a hair wide)
+      int32_t up = nb_p[8 + h] >= 500 ? 8192 : 0;
+      for (int k = 0; k < 2; k++) {
+        uint32_t i = nb_exp2(n->inc0, (int32_t)(((int64_t)n->spread * (n->pv[h][k] - 32768)) >> 16) + up);
+        n->inc[h][k] = i > 900000000u ? 900000000u : i;
+      }
     }
-    int32_t tri[2];
+    int32_t w = 0;
     for (int k = 0; k < 2; k++) {
-      int32_t t = (int32_t)(n->ph[h][k] >> 16);
-      tri[k] = t < 32768 ? t * 2 - 32768 : (65535 - t) * 2 - 32768;
+      int32_t p = (int32_t)(n->ph[h][k] >> 16);
+      w += p < 32768 ? p * 2 - 32768 : (65535 - p) * 2 - 32768;
+      n->ph[h][k] += n->inc[h][k];
     }
-    n->ph[h][0] += n->inc[h][0];
-    int32_t fm = (int32_t)((((int64_t)tri[0] * n->es[h]) >> 16) * nb_p[6] / 1000);   // BEND: the energy pushes the second
-    n->ph[h][1] += n->inc[h][1] + (uint32_t)(((int64_t)n->inc[h][1] * fm) >> 15);
-    int32_t v = 0;
-    for (int k = 0; k < 2; k++) v += (nb_sat(tri[k] * 3 / 2) * n->es[h]) >> 16;    // through the pairs: as loud as the energy
-    o[h] = (v * 3) >> 6;
+    o[h] = (nb_sat(((w >> 1) * n->es[h]) >> 15) * 3) >> 5;
   }
-  nb_gate = n->es[0] > 8000;                                                    // YELLOW / the lamp: half A sounding
+  nb_gate = n->es[0] > 6000 || n->es[1] > 6000;
   int32_t l = o[0] + (((o[1] - o[0]) * nb_p[7]) / 2000), r = o[1] + (((o[0] - o[1]) * nb_p[7]) / 2000);
   if (l > 2047) l = 2047;
   if (l < -2047) l = -2047;

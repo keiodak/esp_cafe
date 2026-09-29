@@ -276,9 +276,8 @@ final class Director: ObservableObject {
             break                                                // (the phone reads HABIT's pads itself)
         case .fourses:
             for u in ctxUnits() { rig.frCommands(pad: i).forEach(u.send) }
-        case .nobs:                                              // (each row its own Cafe)
-            let row = i / 4
-            if rig.inCtx(row) && units[row].isConnected { rig.nbCommands(pad: i).forEach(units[row].send) }
+        case .nobs:
+            for u in ctxUnits() { rig.nbCommands(pad: i).forEach(u.send) }
         case .coco:
             for u in ctxUnits() { rig.coCommands(pad: i, slot: u.slot).forEach(u.send) }
         case .byte:
@@ -960,13 +959,13 @@ final class Director: ObservableObject {
 
     func setNzDist(_ on: Bool) { rig.nzDist = on; ctxUnits().forEach { $0.send("N 16 \(on ? 1 : 0)") } }
 
-    func setNbSw(_ row: Int, _ h: Int, _ on: Bool) {
-        rig.nbSw[row * 2 + h] = on
-        if rig.inCtx(row) && units[row].isConnected { units[row].send("E \(8 + h) \(on ? 1000 : 0)") }
+    func setNbSw(_ h: Int, _ on: Bool) {
+        rig.nbSw[h] = on
+        for u in ctxUnits() { u.send("E \(8 + h) \(on ? 1000 : 0)") }
     }
-    func nbDice(_ row: Int) {
-        rig.nbDice(row: row)
-        if rig.inCtx(row) && units[row].isConnected { (0..<4).forEach { k in rig.nbCommands(pad: row * 4 + k).forEach(units[row].send) } }
+    func nbDice() {
+        rig.nbDice()
+        for u in ctxUnits() { (1..<3).forEach { rig.nbCommands(pad: $0).forEach(u.send) } }
         refresh()
     }
     func noiseDice() {
@@ -1100,7 +1099,7 @@ private struct MainScreen: View {
         case .wave: return (rig.wvAxes[i], WvPad.titles[i])
         case .habit: return (rig.habitAxes[i], HabitPad.titles[i])
         case .fourses: return (rig.frAxes[i], FrPad.titles[i])
-        case .nobs: return (rig.nbAxes[i], NbPad.titles[i % 4])
+        case .nobs: return (rig.nbAxes[i % 4], NbPad.titles[i % 4])
         case .harmony: return (rig.hdAxes[i], HdPad(rawValue: i % 4)!.title)
         case .multi: let e = rig.fxLocal[i / 4]; return (rig.fxAxes[i / 4][e][i % 4], Fx.titles[e][i % 4])
         case .arp: return (rig.arpAxes[i], i == 6 ? (rig.arpStereo ? "RATE · SWING (R)" : "—") : ArpPad.titles[i])
@@ -1591,9 +1590,9 @@ private struct HudBar: View {
             }
         case .nobs:
             switch n {
-            case 0: key("dice") { d.nbDice(0) }                                                      // Cafe A's settings anew
-            case 1: key("dice") { d.nbDice(1) }                                                      // Cafe B's
-            case 2: textKey("RESET") { d.ctxUnits().forEach { $0.send("E 19 1") } }                  // the energy and holds away
+            case 0: key("dice") { d.nbDice() }                                                       // DECAY · PITCH · SPREAD anew
+            case 1: blank
+            case 2: textKey("RESET") { d.ctxUnits().forEach { $0.send("E 19 1") } }                  // the holds back to the knobs
             default: key("arrow.triangle.2.circlepath") { d.sync() }
             }
         case .knob:

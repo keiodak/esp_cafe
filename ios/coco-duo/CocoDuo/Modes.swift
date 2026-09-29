@@ -127,11 +127,11 @@ enum FrPad {
     }
 }
 
-/// NOBSRINE (BLE mode 8): each row a Cafe's own — two big knobs (turning them is what sounds), a LO / HI switch each,
-/// DECAY · PITCH · SPREAD · BEND · MIX — "E <id> <0..1000>"
+/// NOBSRINE (BLE mode 8): one instrument — two big knobs (L · R), a LO / HI switch each, DECAY · PITCH · SPREAD · MIX;
+/// it sounds only while a knob turns — "E <id> <0..1000>"
 enum NbPad {
-    static let titles = ["KNOB A · KNOB B", "DECAY · PITCH", "SPREAD · BEND", "MIX"]
-    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.5, 0.4), (0.5, 0.3), (0.0, 0.0)]
+    static let titles = ["KNOB L · KNOB R", "DECAY · PITCH", "SPREAD", "MIX"]
+    static let starts: [(Double, Double)] = [(0.5, 0.5), (0.4, 0.4), (0.5, 0.0), (0.0, 0.0)]
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String? { nil }
 }
 
@@ -443,23 +443,23 @@ final class Rig: ObservableObject {
     /// NOBSRINE: top row Cafe A, bottom row Cafe B
     let nbAxes: [PadAxis] = (0..<8).map { PadAxis(NbPad.starts[$0 % 4]) }
     func nbCommands(pad i: Int) -> [String] {
-        let a = nbAxes[i], x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
+        let a = nbAxes[i % 4], x = Int((a.x * 1000).rounded()), y = Int((a.y * 1000).rounded())
         switch i % 4 {
         case 0: return ["E 0 \(x)", "E 1 \(y)"]            // the knobs
         case 1: return ["E 3 \(x)", "E 4 \(y)"]            // DECAY · PITCH
-        case 2: return ["E 5 \(x)", "E 6 \(y)"]            // SPREAD · BEND
+        case 2: return ["E 5 \(x)"]                         // SPREAD
         default: return ["E 7 \(x)"]                        // MIX
         }
     }
-    /// each Cafe's two switches (LO / HI), top row A's
-    @Published var nbSw: [Bool] = [false, false, false, false]
+    /// the two switches (LO / HI)
+    @Published var nbSw: [Bool] = [false, false]
     func nbAll(slot: Int) -> [String] {
-        let r = slot == 1 ? 1 : 0
-        return (0..<4).flatMap { nbCommands(pad: r * 4 + $0) } + (0..<2).map { "E \(8 + $0) \(nbSw[r * 2 + $0] ? 1000 : 0)" }
+        (0..<4).flatMap { nbCommands(pad: $0) } + (0..<2).map { "E \(8 + $0) \(nbSw[$0] ? 1000 : 0)" }
     }
-    func nbDice(row: Int) {
-        for k in 1..<3 { nbAxes[row * 4 + k].x = Double.random(in: 0.1...0.9); nbAxes[row * 4 + k].y = Double.random(in: 0.1...0.9) }
+    func nbDice() {
+        nbAxes[1].x = Double.random(in: 0.1...0.9); nbAxes[1].y = Double.random(in: 0.1...0.9); nbAxes[2].x = Double.random(in: 0.1...0.9)
     }
+
     @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO (all four, from the key)
     @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
@@ -573,7 +573,7 @@ final class Rig: ObservableObject {
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .nobs][min(max(ctxMode, 0), 8)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
-    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi || padSet == .nobs }
+    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
     /// the TAP pad (tempo): the 4th pad of each row where there is a tempo (ARP: only the bottom row's)
     func isTapPad(_ i: Int) -> Bool {
         switch padSet {
