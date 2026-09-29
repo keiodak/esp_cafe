@@ -1,7 +1,8 @@
 // FoursesBoard.swift — coco duo (k.odk)
 // FOURSES (BLE mode 7): crucFX's TARPTERGE (Cafe A) / ARPSERGE (Cafe B) as one open board over the whole pad area.
 // Its 44 touch nodes (Blasser's glyphs) and four terminals (IN · EARTH · OUT L · OUT R) are icons lying on it.
-// DRAW: a drag draws a shape (circle · triangle · square; the drag sets its size) — every icon inside a shape is
+// DRAW: a drag draws a shape (circle · triangle · square; the drag sets its size) or a line (from where the drag
+//   starts to where it ends: every icon it passes over) — every icon inside a shape is
 //   joined (a wire, 2K), shapes that overlap join their icons too. A tap on a shape takes it away.
 // EDIT: the icons (and the shapes) are moved by dragging them. RANDOM throws the icons across the board.
 // PLAY: a finger joins what it covers — lightly (a tip, ~10M) or flat (~20K) — and the body hums.
@@ -16,7 +17,7 @@ enum FrBoard {
     static let horse: [Int] = [0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0]
     static let terms = ["IN", "EARTH", "OUT L", "OUT R"]
     static let count = 48
-    static let shapeNames = ["○", "△", "□"]
+    static let shapeNames = ["○", "△", "□", "／"]
     /// the free field (the sliders take the bottom)
     static let yMax = 0.84
     static func buf(_ h: Int) -> Int { (0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0 }
@@ -48,7 +49,14 @@ enum FrBoard {
     }
 
     /// is (x, y) inside a shape [type, cx, cy, r]? (x scaled by the board's aspect: r is in heights)
+    static let lineWidth = 0.035                                        // (a line reaches this far either side, in heights)
     static func inside(_ x: Double, _ y: Double, _ s: [Double], aspect: Double) -> Bool {
+        if Int(s[0]) == 3 && s.count >= 5 {                              // a line [3, x1, y1, x2, y2]: near it
+            let ax = s[1] * aspect, ay = s[2], bx = s[3] * aspect, by = s[4], px = x * aspect
+            let vx = bx - ax, vy = by - ay, L = vx * vx + vy * vy
+            let t = L > 0 ? max(0, min(1, ((px - ax) * vx + (y - ay) * vy) / L)) : 0
+            return hypot(px - (ax + vx * t), y - (ay + vy * t)) <= lineWidth
+        }
         let dx = (x - s[1]) * aspect, dy = y - s[2], r = s[3]
         switch Int(s[0]) {
         case 1:                                                          // a triangle, point up (y grows down)
@@ -60,20 +68,29 @@ enum FrBoard {
         default: return dx * dx + dy * dy <= r * r
         }
     }
+    /// points on a shape (for overlaps): a line along its length, the others their centre and outline
+    static func samples(_ s: [Double], aspect: Double) -> [(Double, Double)] {
+        if Int(s[0]) == 3 && s.count >= 5 { return (0...12).map { k in let t = Double(k) / 12; return (s[1] + (s[3] - s[1]) * t, s[2] + (s[4] - s[2]) * t) } }
+        var p = [(s[1], s[2])]
+        for k in 0..<12 { let a = Double(k) * .pi / 6; p.append((s[1] + cos(a) * s[3] * 0.97 / aspect, s[2] + sin(a) * s[3] * 0.97)) }
+        return p.filter { inside($0.0, $0.1, s, aspect: aspect) }
+    }
     /// the wires the shapes make: the icons in each shape joined; overlapping shapes joined (a star from the first)
     static func links(icons: [[Double]], shapes: [[Double]], aspect: Double) -> [[Int]] {
         var parent = Array(0..<(count + shapes.count))
         func find(_ i: Int) -> Int { var i = i; while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }; return i }
         func join(_ a: Int, _ b: Int) { parent[find(a)] = find(b) }
         var hasIcon = [Bool](repeating: false, count: shapes.count)
-        for (k, s) in shapes.enumerated() where s.count == 4 {
+        for (k, s) in shapes.enumerated() where s.count >= 4 {
             for i in 0..<count where i < icons.count && inside(icons[i][0], icons[i][1], s, aspect: aspect) {
                 join(i, count + k); hasIcon[k] = true
             }
         }
         for a in 0..<shapes.count { for b in (a + 1)..<shapes.count {        // (overlapping: centres closer than the radii)
             let s = shapes[a], t = shapes[b]
-            if hypot((s[1] - t[1]) * aspect, s[2] - t[2]) < (s[3] + t[3]) * 0.9 { join(count + a, count + b) }
+            guard s.count >= 4, t.count >= 4 else { continue }
+            if samples(s, aspect: aspect).contains(where: { inside($0.0, $0.1, t, aspect: aspect) })
+                || samples(t, aspect: aspect).contains(where: { inside($0.0, $0.1, s, aspect: aspect) }) { join(count + a, count + b) }
         } }
         var groups: [Int: [Int]] = [:]
         for i in 0..<count { groups[find(i), default: []].append(i) }
@@ -191,7 +208,13 @@ struct FoursesBoard: View {
                 }
                 // the shapes
                 ForEach(Array(rig.frShapes.enumerated()), id: \.offset) { k, s in
-                    if s.count == 4 {
+                    if Int(s[0]) == 3 && s.count >= 5 {
+                        let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
+                        Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
+                            .stroke(PastelTheme.hudOrange.opacity(live ? 0.12 : 0.05), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
+                        Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
+                            .stroke(live ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.45), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
+                    } else if s.count == 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         FrShapePath(type: Int(s[0]))
@@ -202,7 +225,10 @@ struct FoursesBoard: View {
                             .position(c)
                     }
                 }
-                if let dr = draft {
+                if let dr = draft, rig.frShape == 3 {
+                    Path { p in p.move(to: dr.start); p.addLine(to: dr.now) }
+                        .stroke(PastelTheme.hudOrange, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3]))
+                } else if let dr = draft {
                     let r = hypot(dr.now.x - dr.start.x, dr.now.y - dr.start.y)
                     FrShapePath(type: rig.frShape)
                         .stroke(PastelTheme.hudOrange, style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
@@ -225,7 +251,7 @@ struct FoursesBoard: View {
                 // DRAW: which shape
                 if rig.frMode == 1 {
                     HStack(spacing: 0) {
-                        ForEach(0..<3, id: \.self) { k in
+                        ForEach(0..<4, id: \.self) { k in
                             Text(FrBoard.shapeNames[k])
                                 .font(.system(size: 13, weight: .regular))
                                 .foregroundStyle(rig.frShape == k ? PastelTheme.selectionText : PastelTheme.hudBlack)
@@ -343,6 +369,7 @@ struct FoursesBoard: View {
             if t.ended, let dr = draft {
                 let r = hypot(dr.now.x - dr.start.x, dr.now.y - dr.start.y)
                 if r < 10 { if let k = shapeAt(dr.start, f) { d.frRemoveShape(k) } }         // a tap: the shape goes
+                else if rig.frShape == 3 { let a = norm(dr.start, f), b = norm(dr.now, f); d.frAddShape([3, a[0], a[1], b[0], b[1]]) }
                 else { let c = norm(dr.start, f); d.frAddShape([Double(rig.frShape), c[0], c[1], Double(r / f.height)]) }
                 draft = nil
             }
@@ -359,7 +386,13 @@ struct FoursesBoard: View {
             }
             if let g = grab {
                 let n = norm(CGPoint(x: t.p.x + g.offset.width, y: t.p.y + g.offset.height), f)
-                if g.kind == 0 { rig.frIcons[g.index] = n } else if rig.frShapes.indices.contains(g.index) { rig.frShapes[g.index][1] = n[0]; rig.frShapes[g.index][2] = n[1] }
+                if g.kind == 0 { rig.frIcons[g.index] = n }
+                else if rig.frShapes.indices.contains(g.index) {
+                    var sh = rig.frShapes[g.index]
+                    if Int(sh[0]) == 3 && sh.count >= 5 { sh[3] += n[0] - sh[1]; sh[4] += n[1] - sh[2] }   // (a line: both ends)
+                    sh[1] = n[0]; sh[2] = n[1]
+                    rig.frShapes[g.index] = sh
+                }
             }
             if t.ended { grab = nil; d.frSyncShapes() }
         default:                                                                 // PLAY: fingers
