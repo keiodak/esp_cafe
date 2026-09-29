@@ -2596,8 +2596,10 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   const bool *af = tp_af[c];
   static uint32_t gen = 0xFFFFFFFF;
   const bool fresh = gen != tp_gen; gen = tp_gen;
-  for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(i, in); if (fresh) tp_V[i] = tp_E[i]; }
-  if (na) for (int it = 0; it < 1; it++) {                                        // (one round a sample: it goes on from the last)
+  static uint8_t ph = 0;
+  const bool solve = fresh || ((++ph & 3) == 0);                                   // (the network: every 4th sample, 8 kHz)
+  if (solve) for (int j = 0; j < na; j++) { int i = an[j]; tp_eg(i, in); if (fresh) tp_V[i] = tp_E[i]; }
+  if (na && solve) for (int it = 0; it < 1; it++) {                               // (one round: it goes on from the last)
     for (int j = 0; j < na; j++) { int i = an[j]; num[i] = tp_E[i] * tp_G[i]; den[i] = tp_G[i]; }
     for (int h = 0; h < 4; h++) {                                                 // the ladders (100K, 100K)
       if (!tp_lad[c][h]) continue;
