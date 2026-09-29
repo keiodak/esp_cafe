@@ -2473,13 +2473,14 @@ void hb_write(const uint8_t *d, size_t n) {
 // cells (an op-amp forcing a push-pull pair's emitters, 10K between two held values; the collectors are the
 // nodes: 65+2j SOURCE (the PNP, △), 66+2j SINK (the NPN, ▽)) — D→A, A→D, B→C, C→B. 73 LINK OUT (reported to the
 // phone, "t <0..1000>", which hands it to the other Cafe's LINK IN, 74): slow (the link), but it crosses.
-// 75: the other Cafe's EARTH ("O 21 <0..255>", from the phone: slow too).
+// 75: the other Cafe's EARTH ("O 21 <0..255>", from the phone: slow too). 76: YELLOW (a gate: above 3 V it is high;
+// nothing on it: H1's comparator, as before).
 // (Memory: the heap has nothing to spare — the tape takes all of it. So the solver's working space is a piece of
 //  the tape (FOURSES does not use it), set up again each time FOURSES starts; the links are kept in RTC memory.)
 // ==========================================
 static inline float clock_hz();   // (in the sketch)
 #define TP_NB 44
-#define TP_N 76
+#define TP_N 77
 #define TP_NL 64
 enum { TP_POS, TP_BUF, TP_PULSE, TP_THR, TP_GATE, TP_NGATE, TP_BUP, TP_BLO, TP_LA, TP_LMID, TP_LB };
 static const uint8_t tp_role[TP_NB] = { 4, 3, 2, 1, 0, 7, 9, 10, 8, 5, 6, 4, 3, 2, 1, 0, 9, 10, 8, 7, 5, 6, 4, 3, 2, 1,
@@ -2596,6 +2597,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i < 73) { e = 4200; g = 0; }                                           // a collector: only a current (below)
   else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
   else if (i == 74) { e = tp_linkin; g = 4096; }                                  // LINK IN (10K)
+  else if (i == 76) { e = 0; g = 410; }                                           // YELLOW (a pin's input, 100K down)
   else { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
          e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 410; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
@@ -2687,7 +2689,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   }
   // INTERSEXON: a gate above ~3 V samples (its own regulated supply: a lower threshold than the Fourses) (the 4066 on: the capacitor follows its IN)
   for (int k = 0; k < 4; k++) if (af[57 + k] && V[57 + k] > 3000) tp_sh[k] = af[53 + k] ? V[53 + k] : tp_sh[k];
-  fr_gate = tp_out[0] > 3400;
+  fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 3400;                            // YELLOW (and the lamp)
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
   l = l * 2047 / 3000; r = r * 2047 / 3000;
   dcl += ((l << 8) - dcl) >> 11; l -= dcl >> 8;

@@ -21,14 +21,17 @@ enum FrBoard {
     static let outInk = Color(hex: 0x5B6B2E)
     /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
     /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
-    static let nodes: [Int] = Array(0..<48) + Array(53..<76)
+    static let nodes: [Int] = Array(0..<48) + Array(53..<80)
+    /// the outputs are each Cafe's own: MAIN / ASH / YELLOW A (46 · 47 · 76 on Cafe A) and B (77 · 78 · 79 here, 46 · 47 · 76
+    /// on Cafe B); a Cafe is never sent the other's
+    static let outputs: Set<Int> = [46, 47, 73, 76, 77, 78, 79]
     static let count = nodes.count
     /// what an icon is: < 44 a Fourses glyph (role) · 44…47 a terminal · 11 S&H IN · 12 S&H GATE · 13 S&H OUT ·
     /// 14 SOURCE · 15 SINK · 16 an input terminal (IN, EARTH, LINK IN) · 17 an output (OUT, LINK OUT)
     static func kind(_ i: Int) -> Int {
         let n = nodes[i]
         if n < 44 { return role[n] }
-        if n == 46 || n == 47 || n == 73 { return 17 }                 // an output terminal
+        if outputs.contains(n) { return 17 }                            // an output terminal
         if n < 48 || n >= 73 { return 16 }                              // an input terminal
         if n < 57 { return 11 }; if n < 61 { return 12 }; if n < 65 { return 13 }
         return (n - 65) % 2 == 0 ? 14 : 15
@@ -37,6 +40,8 @@ enum FrBoard {
         let n = nodes[i]
         if n < 44 { return "" }
         if n == 45 { return "EARTH A" }; if n == 75 { return "EARTH B" }      // (Cafe A's, Cafe B's: each Cafe gets the other's by the phone)
+        if n == 46 { return "MAIN A" }; if n == 47 { return "ASH A" }; if n == 76 { return "YELLOW A" }
+        if n == 77 { return "MAIN B" }; if n == 78 { return "ASH B" }; if n == 79 { return "YELLOW B" }
         if n < 48 { return terms[n - 44] }
         if n == 73 { return "LINK OUT" }; if n == 74 { return "LINK IN" }
         let sh = ["A", "B", "C", "D"]
@@ -49,20 +54,53 @@ enum FrBoard {
     static func buf(_ h: Int) -> Int { (0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0 }
     static func icon(ofNode n: Int) -> Int { nodes.firstIndex(of: n) ?? 0 }
 
-    /// the icons thrown across the board (none too near another)
-    static func scatter(seed: UInt64? = nil) -> [[Double]] {
+    /// the icons thrown across the board, none on another (their boxes kept apart, in heights: aspect = width / height)
+    static func scatter(seed: UInt64? = nil, aspect: Double = 2.5) -> [[Double]] {
         var s = seed ?? UInt64.random(in: 1...UInt64.max)
         func rnd() -> Double { s = s &* 6364136223846793005 &+ 1442695040888963407; return Double(s >> 11) / Double(1 << 53) }
+        let a = max(0.5, aspect)
+        func ok(_ c: [Double]) -> Bool { !((c[0] < 0.36 || c[0] > 0.66) && c[1] < 0.17) }       // (the corners: DRAW, the mode)
         var out: [[Double]] = []
-        for _ in 0..<count {
-            var best = [0.5, 0.5], bestD = -1.0
-            for _ in 0..<24 {                                            // (the candidate farthest from the others)
+        for i in 0..<count {
+            var best = [0.5, 0.4], bestD = -1.0
+            for _ in 0..<40 {                                            // (the candidate farthest from the others)
                 let c = [0.05 + rnd() * 0.90, 0.07 + rnd() * (yMax - 0.12)]
-                if c[0] < 0.36 && c[1] < 0.17 { continue }                  // (the DRAW palette's corner)
-                let d = out.map { hypot(($0[0] - c[0]) * 2, $0[1] - c[1]) }.min() ?? 1
+                if !ok(c) { continue }
+                let d = out.map { hypot(($0[0] - c[0]) * a, $0[1] - c[1]) }.min() ?? 1
                 if d > bestD { bestD = d; best = c }
             }
+            _ = i
             out.append(best)
+        }
+        return relax(out, aspect: a)
+    }
+    /// pushed apart until no two icons' boxes overlap
+    static func relax(_ o: [[Double]], aspect: Double = 2.5) -> [[Double]] {
+        var out = o
+        let a = max(0.5, aspect)
+        func half(_ i: Int) -> (Double, Double) { kind(i) >= 16 ? (0.15, 0.055) : (0.06, 0.06) }
+        for _ in 0..<120 {
+            var moved = false
+            for i in 0..<count {
+                for j in (i + 1)..<count {
+                    let (hwi, hhi) = half(i), (hwj, hhj) = half(j)
+                    let dx = (out[j][0] - out[i][0]) * a, dy = out[j][1] - out[i][1]
+                    let ox = hwi + hwj + 0.012 - abs(dx), oy = hhi + hhj + 0.012 - abs(dy)
+                    guard ox > 0 && oy > 0 else { continue }
+                    moved = true
+                    if ox / a < oy {                                     // (along the shorter way out)
+                        let m = ox / a / 2 * (dx >= 0 ? 1 : -1)
+                        out[i][0] -= m; out[j][0] += m
+                    } else {
+                        let m = oy / 2 * (dy >= 0 ? 1 : -1)
+                        out[i][1] -= m; out[j][1] += m
+                    }
+                }
+            }
+            for i in 0..<count {                                         // (kept on the board)
+                out[i][0] = min(0.97, max(0.03, out[i][0])); out[i][1] = min(yMax - 0.05, max(0.05, out[i][1]))
+            }
+            if !moved { break }
         }
         return out
     }
@@ -70,9 +108,19 @@ enum FrBoard {
     static func defaultLayout() -> (icons: [[Double]], shapes: [[Double]]) {
         var ic = scatter(seed: 7)
         let b0 = ic[buf(0)], b2 = ic[buf(2)]
-        ic[icon(ofNode: 46)] = [min(0.95, b0[0] + 0.06), b0[1]]
-        ic[icon(ofNode: 47)] = [min(0.95, b2[0] + 0.06), b2[1]]
-        let sh = [[0, b0[0] + 0.03, b0[1], 0.09], [0, b2[0] + 0.03, b2[1], 0.09]]
+        ic[icon(ofNode: 46)] = [min(0.95, b0[0] + 0.05), max(0.05, b0[1] - 0.05)]
+        ic[icon(ofNode: 77)] = [min(0.95, b0[0] + 0.05), min(yMax - 0.05, b0[1] + 0.05)]
+        ic[icon(ofNode: 47)] = [min(0.95, b2[0] + 0.05), max(0.05, b2[1] - 0.05)]
+        ic[icon(ofNode: 78)] = [min(0.95, b2[0] + 0.05), min(yMax - 0.05, b2[1] + 0.05)]
+        ic = relax(ic)
+        // a circle round each buffer and its two outputs (after they were pushed apart)
+        func ring(_ m: [Int]) -> [Double] {
+            let p = m.map { ic[$0] }
+            let cx = p.map { $0[0] }.reduce(0, +) / Double(p.count), cy = p.map { $0[1] }.reduce(0, +) / Double(p.count)
+            let r = p.map { hypot(($0[0] - cx) * 2.5, $0[1] - cy) }.max() ?? 0.1
+            return [0, cx, cy, r + 0.05]
+        }
+        let sh = [ring([buf(0), icon(ofNode: 46), icon(ofNode: 77)]), ring([buf(2), icon(ofNode: 47), icon(ofNode: 78)])]
         return (ic, sh)
     }
 
@@ -127,7 +175,10 @@ enum FrBoard {
         var groups: [Int: [Int]] = [:]
         for i in 0..<count { groups[find(i), default: []].append(i) }
         var out: [[Int]] = []
-        for (_, g) in groups where g.count >= 2 { for m in g.dropFirst() { out.append([min(g[0], m), max(g[0], m)]) } }
+        for (_, g0) in groups where g0.count >= 2 {
+            let g = g0.sorted { (outputs.contains(nodes[$0]) ? 1 : 0) < (outputs.contains(nodes[$1]) ? 1 : 0) }   // (the star's centre: not an output —
+            for m in g.dropFirst() { out.append([min(g[0], m), max(g[0], m)]) }                                       //  each Cafe drops the other's)
+        }
         return out
     }
 }
@@ -307,6 +358,21 @@ struct FoursesBoard: View {
                     .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
                     .padding(6)
                 }
+                // the mode: PLAY · DRAW · EDIT, always there (top right)
+                HStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { m in
+                        Text(["PLAY", "DRAW", "EDIT"][m])
+                            .font(.hud(8, .semibold))
+                            .foregroundStyle(rig.frMode == m ? PastelTheme.selectionText : PastelTheme.hudBlack)
+                            .frame(width: 40, height: 22)
+                            .background(rig.frMode == m ? PastelTheme.hudBlack : PastelTheme.padScreen)
+                            .contentShape(Rectangle())
+                            .onTapGesture { rig.frMode = m }
+                    }
+                }
+                .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+                .padding(6)
+                .frame(width: size.width, alignment: .trailing)
                 // the pots: four sliders along the bottom
                 HStack(spacing: 10) {
                     ForEach(0..<4, id: \.self) { h in slider(h) }
@@ -336,17 +402,12 @@ struct FoursesBoard: View {
                 FrGlyph(role: k)
                     .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.18)
-            } else if k < 16 {                                                     // INTERSEXON: round, with its letter
+            } else if k < 16 {                                                     // INTERSEXON: round
                 Circle().fill(lit ? PastelTheme.hudOrange : PastelTheme.padScreen)
                 Circle().strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
                 FrGlyph(role: k)
                     .stroke(lit ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.22)
-                Text(FrBoard.label(i))
-                    .font(.hud(6, .semibold))
-                    .foregroundStyle(PastelTheme.textSecondary)
-                    .fixedSize()
-                    .offset(y: s * 0.72)
             } else {
                 let out = k == 17
                 Text(FrBoard.label(i))

@@ -785,10 +785,17 @@ final class Director: ObservableObject {
         frWireSent = now
         if !out.isEmpty { ctxUnits().forEach { u in out.forEach { frT($0.0, $0.1, $0.2, u) } } }
     }
-    /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75); EARTH B the reverse
-    func frNode(_ n: Int, _ slot: Int) -> Int { slot == 1 ? (n == 45 ? 75 : (n == 75 ? 45 : n)) : n }
+    /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75), EARTH B the reverse;
+    /// MAIN / ASH / YELLOW A are Cafe A's 46 · 47 · 76, B's (77 · 78 · 79 here) are Cafe B's 46 · 47 · 76 — nil: not that Cafe's
+    func frNode(_ n: Int, _ slot: Int) -> Int? {
+        if slot == 1 {
+            switch n { case 45: return 75; case 75: return 45; case 46, 47, 76: return nil
+                       case 77: return 46; case 78: return 47; case 79: return 76; default: return n }
+        }
+        return (77...79).contains(n) ? nil : n
+    }
     func frT(_ a: Int, _ b: Int, _ v: Int, _ u: CafeUnit) {
-        let x = frNode(a, u.slot), y = frNode(b, u.slot)
+        guard let x = frNode(a, u.slot), let y = frNode(b, u.slot) else { return }
         u.send("T \(min(x, y)) \(max(x, y)) \(v)")
     }
     /// each Cafe's EARTH to the other (~30x a second, only when it moves): its EARTH A / EARTH B
@@ -802,7 +809,7 @@ final class Director: ObservableObject {
     }
     func frAddShape(_ s: [Double]) { rig.frShapes.append(s); frSyncShapes() }
     func frRemoveShape(_ k: Int) { if rig.frShapes.indices.contains(k) { rig.frShapes.remove(at: k); frSyncShapes() } }
-    func frRandom() { rig.frIcons = FrBoard.scatter(); frSyncShapes() }
+    func frRandom() { rig.frIcons = FrBoard.scatter(aspect: frAspect); frSyncShapes() }
     func frClearShapes() { rig.frShapes = []; frSyncShapes() }
     /// the fingers' links now (finger node -> node -> 0…1000): only what changed goes
     var frSent: [String: Int] = [:]
