@@ -364,12 +364,18 @@ struct FoursesBoard: View {
                             }
                         }
                         ctx.clip(to: clip)
+                        // a soft colour field, not tiles: each cell a glow, blurred into the next; the hues drift slowly
                         let cw = s.width / 16, ch = fh / 8
-                        for r in 0..<8 { for c in 0..<16 {
-                            let b = g[r][c]
-                            ctx.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 0.5, height: ch + 0.5)),
-                                     with: .color(Color(hue: 0.58, saturation: 0.15 + 0.45 * (1 - b), brightness: 0.30 + 0.70 * b).opacity(0.85)))   // (dark: deep blue · bright: a light)
-                        } }
+                        let drift = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 40) / 40
+                        ctx.drawLayer { l in
+                            l.addFilter(.blur(radius: max(cw, ch) * 0.9))
+                            for r in -1...8 { for c in -1...16 {                            // (a cell beyond each edge: no fade at the rim)
+                                let b = g[min(7, max(0, r))][min(15, max(0, c))]
+                                let hue = (0.58 - 0.50 * b + drift + Double(c) * 0.004).truncatingRemainder(dividingBy: 1)
+                                l.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 1, height: ch + 1)),
+                                       with: .color(Color(hue: hue < 0 ? hue + 1 : hue, saturation: 0.30 + 0.45 * b, brightness: 1.0).opacity(0.55 + 0.35 * b)))
+                            } }                                                           // (dark: a pale blue · bright: a warm, fuller colour)
+                        }
                     }
                 }
                 Canvas { ctx, s in
@@ -389,15 +395,15 @@ struct FoursesBoard: View {
                     let lit = camOn && k < 16 && k < cam.shapeLight.count ? cam.shapeLight[k] : 0   // CAMERA: its LIGHT, a glow that breathes
                     if Int(s[0]) == 3 && s.count >= 5 {
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(ink.opacity(live ? 0.2 + 0.45 * amp : 0.12), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2 * (1 + 0.5 * lit), lineCap: .round))
-                            .brightness(live ? -0.25 * amp : 0)
+                            .stroke(ink.opacity((live ? 0.2 + 0.45 * amp : 0.12) * (camOn ? 0.45 : 1)), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2 * (1 + 0.5 * lit), lineCap: .round))
+                            .brightness(live && !camOn ? -0.25 * amp : 0)
                             .shadow(color: ink.opacity(0.9 * lit), radius: 14 * lit)
                             .animation(.easeOut(duration: 0.12), value: lit)
                     } else if s.count >= 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         FrShapePath(type: Int(s[0]))
-                            .fill(ink.opacity(live ? 0.15 + 0.40 * amp : 0.10))
-                            .brightness(live ? -0.25 * amp : 0)
+                            .fill(ink.opacity((live ? 0.15 + 0.40 * amp : 0.10) * (camOn ? 0.45 : 1)))   // (CAMERA: the colour shows through)
+                            .brightness(live && !camOn ? -0.25 * amp : 0)
                             .scaleEffect(1 + 0.08 * lit)
                             .shadow(color: ink.opacity(0.9 * lit), radius: 18 * lit)
                             .animation(.easeOut(duration: 0.12), value: lit)
