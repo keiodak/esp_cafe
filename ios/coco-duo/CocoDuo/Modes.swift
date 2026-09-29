@@ -432,7 +432,8 @@ final class Rig: ObservableObject {
     let habitAxes: [PadAxis] = HabitPad.starts.map { PadAxis($0) }
     /// FOURSES
     let frAxes: [PadAxis] = FrPad.starts.map { PadAxis($0) }
-    @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO
+    @Published var frRange = 2                  // 0 CV · 1 LOW · 2 AUDIO (all four, from the key)
+    @Published var frRanges = [2, 2, 2, 2]      // each horse's own range switch
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
     @Published var frMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
     @Published var frShape = 0                  // DRAW: 0 circle · 1 triangle · 2 square
@@ -445,7 +446,7 @@ final class Rig: ObservableObject {
     func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
     /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
     func frAll(slot: Int) -> [String] {
-        ["T", "O 9 \(slot == 1 ? 1000 : 0)", "O 8 \(frRange * 500)"]
+        ["T", "O 9 \(slot == 1 ? 1000 : 0)"] + (0..<4).map { "O \(4 + $0) \(frRanges[$0] * 500)" }
             + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }
     }
     @Published var habit8k = true               // (the low rate: true = 4K — what the link carries — false = 8K)

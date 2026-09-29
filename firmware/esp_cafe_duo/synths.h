@@ -2467,7 +2467,7 @@ void hb_write(const uint8_t *d, size_t n) {
 // (1000 = a wire, 2K; 0 = off; between: a finger, light ~10M .. firm ~20K), and the node voltages are solved
 // with it. Nodes 44 IN (the Cafe's input), 45 EARTH, 46 OUT L (main), 47 OUT R (ASH), 48..52 the fingers (each
 // also leaks to the body: the mains' hum). "O <id> <v>": 0..3 the pots · 8 RANGE (0 CV · 500 LOW · 1000 AUDIO)
-// · 9 the board (0 TARPTERGE · 1 ARPSERGE) · 19 RESET · 20 LINK IN (0..1000 = 0..8.4 V: the other Cafe's LINK OUT).
+// (all four; 4..7 each horse's own switch) · 9 the board (0 TARPTERGE · 1 ARPSERGE) · 19 RESET · 20 LINK IN (0..1000 = 0..8.4 V: the other Cafe's LINK OUT).
 // And half of crucFX's INTERSEXON on every Cafe (read from its Gerbers too): four sample & holds (4066 + LM324
 // followers: 53+k IN · 57+k GATE (100K down: a touch of a gate samples) · 61+k OUT) and four voltage-to-current
 // cells (an op-amp forcing a push-pull pair's emitters, 10K between two held values; the collectors are the
@@ -2510,12 +2510,12 @@ static_assert(sizeof(TpWs) <= DCHUNK_BYTES, "FOURSES: the working space must fit
 static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece of the tape");
 #define TW ((TpWs *)dchunk[100])
 #define TW2 ((TpWs2 *)dchunk[101])
-volatile int16_t fr_p[10] = { 500, 500, 500, 500, 0, 0, 0, 0, 1000, 0 };
+volatile int16_t fr_p[10] = { 500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 0 };   // 4..7: each horse's range switch
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
 volatile int32_t tp_earth2 = 0;                               // the other Cafe's EARTH (0..255, as its status line has it)
 static const uint8_t tp_vx[4] = { 3, 0, 1, 2 }, tp_vy[4] = { 0, 3, 2, 1 };   // the V→I cells: I = (X - Y) / 10K
 volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
-volatile int32_t tp_kc = 5000;                                // a node's current into the capacitor (Q16)
+volatile int32_t tp_kc[4] = { 5000, 5000, 5000, 5000 };      // a node's current into each capacitor (Q16)
 volatile bool fr_flip = false, fr_reset = true, fr_gate = false;
 volatile bool tp_on = false;                                  // (FOURSES is running: its working space is set up)
 volatile uint8_t tp_cur = 0;
@@ -2547,16 +2547,17 @@ static void fr_update() {                                    // (the loop: float
   static bool once = false;
   if (!once) { once = true; for (int r = 0; r < 11; r++) for (int h = 0; h < 4; h++) tp_ix[r][h] = (int8_t)tp_node(r, h); }
   float hz = clock_hz();
-  float c = fr_p[8] >= 750 ? 1.0f : (fr_p[8] >= 250 ? 30.0f : 1000.0f);   // the capacitor: AUDIO · LOW (x30) · CV (x1000)
-  float base = 150000.0f * 32000.0f / hz / c;                            // µV a sample, pot in the middle, pairs balanced
   bool arp = fr_p[9] >= 500;
   for (int h = 0; h < 4; h++) {
+    // each horse's range switch — its capacitor: AUDIO · LOW (x30) · CV (x1000)
+    float c = fr_p[4 + h] >= 750 ? 1.0f : (fr_p[4 + h] >= 250 ? 30.0f : 1000.0f);
+    float base = 150000.0f * 32000.0f / hz / c;                          // µV a sample, pot in the middle, pairs balanced
+    tp_kc[h] = (int32_t)(5000.0f * 32000.0f / hz / c);
     float p = fr_p[h] / 1000.0f - 0.5f;
     float e = expf(6.7f * p);                                             // 470K / 10K onto a base: ×800 over the pot
     tp_up[h] = (int32_t)fminf(base * e, 3000000.0f);
     tp_dn[h] = (int32_t)fminf(base * (arp ? e : 1.0f / e), 3000000.0f);   // (ARPSERGE: one rate)
   }
-  tp_kc = (int32_t)(5000.0f * 32000.0f / hz / c);
 }
 static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
   if (pc_mode != 7) return;                                    // (the tape is someone else's)
@@ -2606,7 +2607,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i == 73) { e = 4200; g = 410; }                                        // LINK OUT
   else if (i == 74) { e = tp_linkin; g = 4096; }                                  // LINK IN (10K)
   else if (i == 76) { e = 0; g = 410; }                                           // YELLOW (a pin's input, 100K down)
-  else if (i < 93) { e = TL->light[i - 77]; g = 4096; }                          // LIGHT: a shape's brightness (10K)
+  else if (i >= 77) { e = TL->light[i - 77]; g = 4096; }                          // LIGHT: a shape's brightness (10K)
   else if (i == 75) { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
          e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 410; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
@@ -2691,7 +2692,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     int32_t dp = 0;
     if (ad) dp += (int32_t)(((int64_t)tp_up[h] * fu) >> 11);
     if (bc) dp -= (int32_t)(((int64_t)tp_dn[h] * (4096 - fu)) >> 11);
-    if (cur[h]) dp += (int32_t)(((int64_t)cur[h] * tp_kc) >> 10);
+    if (cur[h]) dp += (int32_t)(((int64_t)cur[h] * tp_kc[h]) >> 10);
     int32_t np = tp_pos[h] + dp;
     if (np > 8300000) np = 8300000; if (np < 0) np = 0;                           // (the mirrors run out)
     tp_pos[h] = np;

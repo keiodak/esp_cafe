@@ -771,7 +771,9 @@ final class Director: ObservableObject {
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
     func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
     // MARK: FOURSES
-    func setFrRange(_ r: Int) { rig.frRange = r; ctxUnits().forEach { $0.send("O 8 \(r * 500)") } }
+    func setFrRange(_ r: Int) { rig.frRange = r; rig.frRanges = [r, r, r, r]; ctxUnits().forEach { $0.send("O 8 \(r * 500)") } }
+    /// one horse's range switch
+    func setFrRange(_ h: Int, _ r: Int) { rig.frRanges[h] = r; ctxUnits().forEach { $0.send("O \(4 + h) \(r * 500)") } }
     func setFrPot(_ h: Int, _ v: Double) {
         rig.frPots[h] = v
         ctxUnits().forEach { $0.send("O \(h) \(Int((v * 1000).rounded()))") }

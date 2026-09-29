@@ -359,7 +359,7 @@ struct FoursesBoard: View {
                         for r in 0..<8 { for c in 0..<16 {
                             let b = g[r][c]
                             ctx.fill(Path(CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw + 0.5, height: ch + 0.5)),
-                                     with: .color(Color(hue: 0.58, saturation: 0.35 * (1 - b), brightness: 1).opacity(0.15 + 0.75 * b)))
+                                     with: .color(Color(hue: 0.58, saturation: 0.15 + 0.45 * (1 - b), brightness: 0.30 + 0.70 * b).opacity(0.85)))   // (dark: deep blue · bright: a light)
                         } }
                     }
                 }
@@ -506,9 +506,20 @@ struct FoursesBoard: View {
     private func slider(_ h: Int) -> some View {
         let v = rig.frPots[h]
         return VStack(alignment: .leading, spacing: 3) {
-            Text("H\(h + 1)")
-                .font(.hud(7, .semibold))
-                .foregroundStyle(PastelTheme.textSecondary)
+            HStack(spacing: 5) {
+                Text("H\(h + 1)")
+                    .font(.hud(7, .semibold))
+                    .foregroundStyle(PastelTheme.textSecondary)
+                // its range switch: AUDIO · LOW · CV (a tap: the next)
+                Text(["CV", "LOW", "AUDIO"][rig.frRanges[h]])
+                    .font(.hud(7, .semibold))
+                    .foregroundStyle(rig.frRanges[h] < 2 ? PastelTheme.selectionText : PastelTheme.hudBlack)
+                    .padding(.horizontal, 4).frame(height: 12)
+                    .background(Rectangle().fill(rig.frRanges[h] < 2 ? PastelTheme.hudBlack : Color.clear))
+                    .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { d.setFrRange(h, (rig.frRanges[h] + 2) % 3) }
+            }
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Rectangle().fill(PastelTheme.trackOff).frame(height: 2)
@@ -601,6 +612,17 @@ struct FoursesBoard: View {
                     let firm = min(1, max(0, (t.r - 7) / 22))                    // the finger's contact: tip … flat
                     let near = 1 - dd / R * 0.6                                   // (the edge of the finger touches less)
                     links[48 + fi, default: [:]][FrBoard.nodes[i]] = Int((150 + firm * 780) * near)
+                }
+                // a finger on a shape touches the shape: everything the shape covers, through the finger
+                let n = norm(t.p, f)
+                for sh in rig.frShapes where sh.count >= 4 && FrBoard.inside(n[0], n[1], sh, aspect: aspect(f)) {
+                    let firm = min(1, max(0, (t.r - 7) / 22))
+                    for i in 0..<min(FrBoard.count, rig.frIcons.count) {
+                        let c = FrBoard.cover(i, rig.frIcons[i], sh, aspect: aspect(f))
+                        guard c > 0 else { continue }
+                        let v = Int((150 + firm * 780) * (0.4 + 0.6 * c))
+                        links[48 + fi, default: [:]][FrBoard.nodes[i]] = max(links[48 + fi]?[FrBoard.nodes[i]] ?? 0, v)
+                    }
                 }
             }
             d.frTouches(links)
