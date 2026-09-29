@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.41"
+#define FW_VERSION "4.42"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -912,6 +912,14 @@ void tp_service() {
   static uint32_t t = 0; static int last = -1;
   if (pc_mode != 7 || !tp_on || !ble_conn || millis() - t < 33) return;
   t = millis();
+  {                                                   // the four LEDs: each horse's time lit, 0…15, when it changes
+    static int lastl = -1;
+    uint32_t n = tp_ledn; if (!n) n = 1;
+    int l = 0;
+    for (int h = 0; h < 4; h++) { int b = (int)((uint32_t)tp_led[h] * 15 / n); if (b > 15) b = 15; l |= b << (4 * h); tp_led[h] = 0; }
+    tp_ledn = 0;
+    if (l != lastl) { lastl = l; char b[16]; snprintf(b, sizeof(b), "f %d", l); pc_out(b); }
+  }
   if (!TW->af[tp_cur][73]) return;
   int v = TW->V[73] * 10 / 84; if (v < 0) v = 0; if (v > 1000) v = 1000;
   if (abs(v - last) < 3) return;

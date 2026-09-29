@@ -2514,6 +2514,8 @@ volatile int16_t fr_p[10] = { 500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
 volatile int32_t tp_supply = 500;                             // STARVE: the supply (500 = its 8.4 V; 0 starved to ~0.3, 1000 ~1.7x)
 static int32_t tp_kq = 4096;                                  // (the supply now, Q12, sagging under the load)
+volatile uint16_t tp_led[4];                                  // the four LEDs: how long each horse's output has been high since the loop last looked
+volatile uint16_t tp_ledn = 0;
 volatile int32_t tp_earth2 = 0;                               // the other Cafe's EARTH (0..255, as its status line has it)
 static const uint8_t tp_vx[4] = { 3, 0, 1, 2 }, tp_vy[4] = { 0, 3, 2, 1 };   // the V→I cells: I = (X - Y) / 10K
 volatile int32_t tp_up[4], tp_dn[4];                          // µV a sample at the middle of the pairs
@@ -2679,6 +2681,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     tp_kq = k;
   }
   const int32_t kq = tp_kq;
+  if (tp_ledn < 65000) tp_ledn++;
   const int32_t vh = (6800 * kq) >> 12, vt = (4200 * kq) >> 12, vn = (3400 * kq) >> 12;
   int32_t rf = ((8400 * kq) >> 12) - 700; if (rf < 0) rf = 0; rf = rf * 4096 / 7700;   // (the mirrors: the supply less a Vbe)
   for (int h = 0; h < 4; h++) {
@@ -2687,7 +2690,7 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     ni = tp_ix[TP_THR][h];                                                        // the comparator: + THR, - the capacitor
     int32_t thr = af[ni] ? V[ni] : tp_bnd[h] + (((tp_out[h] - tp_bnd[h]) * 186) >> 12);
     int32_t o = thr > pv ? vh : 50;
-    if (o > 1000) o -= (o * 3) >> 7;                                              // (its LED: lit, drawing on the output)
+    if (o > 1000) { o -= (o * 3) >> 7; if (tp_led[h] < 65000) tp_led[h]++; }         // (its LED: lit, and drawing on the output)
     tp_out[h] = o;
     tp_olp[h] += (o - tp_olp[h]) >> 7;
     ni = tp_ix[TP_GATE][h]; bool ad = (af[ni] ? V[ni] : o) > vt;                // the 4066's controls (its thresholds with its supply)
