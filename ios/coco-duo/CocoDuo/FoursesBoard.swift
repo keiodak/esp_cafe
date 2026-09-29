@@ -66,7 +66,7 @@ enum FrBoard {
         var s = seed ?? UInt64.random(in: 1...UInt64.max)
         func rnd() -> Double { s = s &* 6364136223846793005 &+ 1442695040888963407; return Double(s >> 11) / Double(1 << 53) }
         let a = max(0.5, aspect)
-        func ok(_ c: [Double]) -> Bool { !((c[0] < 0.36 || c[0] > 0.66) && c[1] < 0.17) }       // (the corners: DRAW, the mode)
+        func ok(_ c: [Double]) -> Bool { !((c[0] < 0.36 && c[1] < 0.24) || (c[0] > 0.66 && c[1] < 0.17)) }       // (the corners: DRAW, the mode)
         var out: [[Double]] = []
         for i in 0..<count {
             var best = [0.5, 0.4], bestD = -1.0
@@ -382,20 +382,23 @@ struct FoursesBoard: View {
                 }
                 // the shapes
                 ForEach(Array(rig.frShapes.enumerated()), id: \.offset) { k, s in
+                    // a shape with current through it: deeper as it joins harder (its strongest link, 0…1)
+                    let amp = (FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).map { Double($0[2]) }.max() ?? 0) / 1000
+                    let live = amp > 0
                     let ink = FrBoard.targetInk[min(2, max(0, FrBoard.target(s)))]
                     if Int(s[0]) == 3 && s.count >= 5 {
-                        let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(ink.opacity(live ? 0.22 : 0.10), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
+                            .stroke(ink.opacity(live ? 0.2 + 0.45 * amp : 0.10), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(ink.opacity(live ? 1 : 0.6), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
+                            .stroke(live ? ink : ink.opacity(0.6), style: StrokeStyle(lineWidth: live ? 1.2 + 1.8 * amp : 1, lineCap: .round, dash: live ? [] : [3, 3]))
+                            .brightness(live ? -0.25 * amp : 0)
                     } else if s.count >= 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
-                        let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         FrShapePath(type: Int(s[0]))
-                            .fill(ink.opacity(live ? 0.18 : 0.08))
-                            .overlay(FrShapePath(type: Int(s[0])).stroke(ink.opacity(live ? 1 : 0.6),
-                                                                      style: StrokeStyle(lineWidth: live ? 1.4 : 1, dash: live ? [] : [3, 3])))
+                            .fill(ink.opacity(live ? 0.15 + 0.40 * amp : 0.06))
+                            .overlay(FrShapePath(type: Int(s[0])).stroke(live ? ink : ink.opacity(0.6),
+                                                                      style: StrokeStyle(lineWidth: live ? 1.2 + 1.8 * amp : 1, dash: live ? [] : [3, 3])))
+                            .brightness(live ? -0.25 * amp : 0)
                             .frame(width: r * 2, height: r * 2)
                             .position(c)
                     }
