@@ -164,15 +164,48 @@ enum FrBoard {
         // (for one Cafe: only the shapes that pass it; the LIGHT keeps each shape's own number)
         let shapes = slot.map { sl in allShapes.map { passes($0, slot: sl) ? $0 : [] } } ?? allShapes
         var out = iconLinks(icons: icons, shapes: shapes.filter { $0.count >= 4 }, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
-        if light {                                                       // CAMERA: each shape's LIGHT (node 77 + k) on what it covers
+        out += drift(icons: icons, shapes: shapes, aspect: aspect).links         // an empty shape on a joined one: its pull (LIGHT node 100 + k)
+        if light {                                                       // CAMERA: each shape's LIGHT (node 100 + k here: 77 + k on the Cafe) on what it covers
             for (k, s) in shapes.prefix(16).enumerated() where s.count >= 4 {
                 for i in 0..<min(count, icons.count) {
                     let c = cover(i, icons[i], s, aspect: aspect)
-                    if c > 0 { out.append([nodes[i], 77 + k, Int(150 + 850 * c)]) }
+                    if c > 0 { out.append([nodes[i], 100 + k, Int(150 + 850 * c)]) }
                 }
             }
         }
         return out
+    }
+    /// a shape that covers no icon but lies on a shape that does: it pulls that shape's icons (through its LIGHT node,
+    /// 100 + k here, 77 + k on the Cafe) toward a voltage its size sets — a small one a little under the middle (4.2 V), a big one down to 0 V;
+    /// how much of it lies on the other sets how hard. [k: 0…500 as sent (×8.4 mV)] and the links
+    static func drift(icons: [[Double]], shapes: [[Double]], aspect: Double) -> (volts: [Int: Int], links: [[Int]]) {
+        let n = min(count, icons.count)
+        let covered: [[Int]] = shapes.map { s in s.count >= 4 ? (0..<n).filter { cover($0, icons[$0], s, aspect: aspect) > 0 } : [] }
+        var volts: [Int: Int] = [:], out: [[Int]] = []
+        for (k, s) in shapes.prefix(16).enumerated() where s.count >= 4 && covered[k].isEmpty {
+            let mine = samples(s, aspect: aspect)
+            var group = Set<Int>(), f = 0.0
+            for (j, t) in shapes.enumerated() where j != k && t.count >= 4 && !covered[j].isEmpty {
+                let a = mine.isEmpty ? 0 : Double(mine.filter { inside($0.0, $0.1, t, aspect: aspect) }.count) / Double(mine.count)
+                let theirs = samples(t, aspect: aspect)
+                let b = theirs.isEmpty ? 0 : Double(theirs.filter { inside($0.0, $0.1, s, aspect: aspect) }.count) / Double(theirs.count)
+                let o = max(a, b)
+                if o > 0 { group.formUnion(covered[j]); f = max(f, o) }
+            }
+            guard !group.isEmpty else { continue }
+            let area: Double = {                                                   // (of the field: 1 = all of it)
+                switch Int(s[0]) {
+                case 3: return s.count >= 5 ? hypot((s[3] - s[1]) * aspect, s[4] - s[2]) * lineWidth * 2 / aspect : 0
+                case 2: return 4 * s[3] * s[3] / aspect
+                case 1: return 1.3 * s[3] * s[3] / aspect
+                default: return .pi * s[3] * s[3] / aspect
+                }
+            }()
+            volts[k] = Int((500 * (1 - min(1, area / 0.12))).rounded())            // (4.2 V → 0 V as it grows to an eighth of the field)
+            let v = Int(200 + 600 * f)
+            for i in group { out.append([nodes[i], 100 + k, v]) }
+        }
+        return (volts, out)
     }
     /// the icons in each shape joined; overlapping shapes joined (a star from the first)
     /// how bright the camera is inside a shape (the 8 × 16 mosaic over the field; 0…1)

@@ -56,7 +56,7 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
-            if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
+            if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 1 }) ?? on.last { self.arp.earth2 = Double(u.earth) / 255 }
             if self.rig.arpStereo, let u = on.first(where: { $0.slot == 0 }) { self.arp.earth = Double(u.earth) / 255 }
             // a Cafe left ARP_DELAY (from the app or its own BUTTON menu): the arpeggio stops too
@@ -157,6 +157,10 @@ final class Director: ObservableObject {
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
                 let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
                 frLightSent = [Int](repeating: -1, count: 16)
+                if !frLightOn {                                             // (the empty shapes' pulls, before their wires)
+                    let v = FrBoard.drift(icons: rig.frIcons, shapes: rig.frShapes.map { FrBoard.passes($0, slot: s == 1 ? 1 : 0) ? $0 : [] }, aspect: frAspect).volts
+                    v.forEach { u.send("O \(30 + $0.key) \($0.value)") }; frDriftSent[s == 1 ? 1 : 0] = v
+                }
                 w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
             case 6:
@@ -787,14 +791,22 @@ final class Director: ObservableObject {
             let sl = u.slot == 1 ? 1 : 0
             let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
                                  uniquingKeysWith: { a, _ in a })
+            if !frLightOn {                                                 // an empty shape's pull: its voltage (the CAMERA's light instead, when on)
+                let shapes = rig.frShapes.map { FrBoard.passes($0, slot: sl) ? $0 : [] }
+                let v = FrBoard.drift(icons: rig.frIcons, shapes: shapes, aspect: frAspect).volts
+                for (k, x) in v where frDriftSent[sl][k] != x { u.send("O \(30 + k) \(x)") }
+                frDriftSent[sl] = v
+            }
             for (k, v) in now where frWireSent[sl][k] != v { frT(k[0], k[1], v, u) }
             for k in frWireSent[sl].keys where now[k] == nil { frT(k[0], k[1], 0, u) }
             frWireSent[sl] = now
         }
     }
+    private var frDriftSent: [[Int: Int]] = [[:], [:]]
     /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75), EARTH B the reverse;
     /// OUT / ASH / YELLOW A are Cafe A's 46 · 47 · 76, B's (77 · 78 · 79 here) are Cafe B's 46 · 47 · 76 — nil: not that Cafe's
     func frNode(_ n: Int, _ slot: Int) -> Int? {
+        if n >= 100 { return n - 23 }                                   // (a shape's LIGHT: 100 + k here, 77 + k on both Cafes)
         if slot == 1 {
             switch n { case 45: return 75; case 75: return 45; case 46, 47, 76: return nil
                        case 77: return 46; case 78: return 47; case 79: return 76; default: return n }

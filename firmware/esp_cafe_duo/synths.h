@@ -2597,7 +2597,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
       default: break;                                                             // the ladder's ends: 110K to the bias
     }
   } else if (i == 44) { e = 4200 + in * 2; g = 4096; }                            // IN (10K)
-  else if (i == 45) { e = 4200 + pc_emod * 30; g = 410; }                         // EARTH
+  else if (i == 45) { e = 4200 + pc_emod * 30; g = 4096; }                        // EARTH (10K: it is heard)
   else if (i < 48) { e = 4200; g = 410; }                                         // OUT: an amplifier's input
   else if (i < 53) { e = tp_hum; g = 41; }                                        // a finger: the body (1M, the hum)
   else if (i < 57) { e = tp_sh[i - 53]; g = 1; }                                  // S&H IN (floats: reads what it holds)
@@ -2609,7 +2609,7 @@ static inline void tp_eg(TpWs *w, int i, int32_t in) {
   else if (i == 76) { e = 0; g = 410; }                                           // YELLOW (a pin's input, 100K down)
   else if (i >= 77) { e = TL->light[i - 77]; g = 4096; }                          // LIGHT: a shape's brightness (10K)
   else if (i == 75) { static int32_t avg = 0; avg += ((tp_earth2 << 8) - avg) >> 12;          // the other EARTH (as ours: around its
-         e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 410; }                     //  own average)
+         e = 4200 + (tp_earth2 - (avg >> 8)) * 30; g = 4096; }                     //  own average)
   w->E[i] = (int16_t)e; w->G[i] = (int16_t)g;
 }
 static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool flip, bool skip) {
