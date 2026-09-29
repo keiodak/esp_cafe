@@ -2373,7 +2373,7 @@ static inline int32_t hb_dec(uint8_t n, int32_t &pred, int &ix) {           // 4
 
 // a 4th-order Butterworth low-pass (two biquads, Q28) at ~0.42 of the link's rate: before the samples are taken for the
 // phone (no aliasing) and after the tape (no images of its steps) — [rate: 0 ~8K, 1 ~4K][stage][b0 b1 b2 a1 a2]
-DRAM_ATTR static const int32_t hb_lp[2][2][5] = {
+RTC_DATA_ATTR static int32_t hb_lp[2][2][5] = {           // (RTC memory: the heap stays for BLE)
   { { 18330109, 36660218, 18330109, -268208298, 73093278 }, { 23295363, 46590726, 23295363, -340860467, 165606463 } },   // 3.4 kHz
   { { 5983498, 11966997, 5983498, -385502510, 141001048 }, { 6949857, 13899715, 6949857, -447762718, 207126692 } } };    // 1.75 kHz
 struct HbBq { int32_t x1, x2, y1, y2; };
@@ -2390,7 +2390,7 @@ static int32_t __attribute__((noinline)) hb_tick(int32_t in, int32_t *rout) {
   if (hb_reset) { hb_reset = false; acc = 0; accn = 0; pred = 0; ix = 0; pkn = 0; hb_rp = hb_wp; }
   // up: the input (its hiss gated out), low-passed under the link's rate, every RATE-th sample into packets for the phone
   static InGate ig = { 0, 0, 0 };
-  static HbBq u1 = { 0, 0, 0, 0 }, u2 = { 0, 0, 0, 0 }, d1 = { 0, 0, 0, 0 }, d2 = { 0, 0, 0, 0 };
+  RTC_DATA_ATTR static HbBq u1 = { 0, 0, 0, 0 }, u2 = { 0, 0, 0, 0 }, d1 = { 0, 0, 0, 0 }, d2 = { 0, 0, 0, 0 };   // (RTC memory)
   const int32_t (*lc)[5] = hb_lp[hb_div >= 8 ? 1 : 0];
   in = in_gate(in, ig);
   int32_t fl = hb_bq(u2, lc[1], hb_bq(u1, lc[0], in << 4));
@@ -2524,7 +2524,7 @@ static_assert(sizeof(TpWs2) <= DCHUNK_BYTES, "FOURSES: the sums must fit a piece
 volatile int16_t fr_p[10] = { 500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 0 };   // 4..7: each horse's range switch
 volatile int32_t tp_linkin = 4200;                            // LINK IN (mV)
 volatile int32_t tp_supply = 500;                             // STARVE: the supply (500 = its 8.4 V; 0 starved to ~0.3, 1000 ~1.7x)
-static int32_t tp_kick = 0;                                   // the rails' bounce as a comparator snaps (mV, decaying fast): the Fourses' crackle
+RTC_DATA_ATTR static int32_t tp_kick = 0;                                   // the rails' bounce as a comparator snaps (mV, decaying fast): the Fourses' crackle
 static int32_t tp_kq = 4096;                                  // (the supply now, Q12, sagging under the load)
 volatile uint16_t tp_led[4];                                  // the four LEDs: how long each horse's output has been high since the loop last looked
 volatile uint16_t tp_ledn = 0;
