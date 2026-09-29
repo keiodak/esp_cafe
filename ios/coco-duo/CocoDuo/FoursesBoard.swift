@@ -92,7 +92,7 @@ enum FrBoard {
         var s = seed ?? UInt64.random(in: 1...UInt64.max)
         func rnd() -> Double { s = s &* 6364136223846793005 &+ 1442695040888963407; return Double(s >> 11) / Double(1 << 53) }
         let a = max(0.5, aspect)
-        func ok(_ c: [Double]) -> Bool { !((c[0] < 0.36 && c[1] < 0.24) || (c[0] > 0.66 && c[1] < 0.17)) }       // (the corners: DRAW, the mode)
+        func ok(_ c: [Double]) -> Bool { !keepOut.contains { c[0] > $0[0] - 0.06 && c[0] < $0[1] + 0.06 && c[1] < $0[2] + 0.06 } }   // (the corners: DRAW, the mode)
         var out: [[Double]] = []
         for i in 0..<count {
             var best = [0.5, 0.4], bestD = -1.0
@@ -107,6 +107,8 @@ enum FrBoard {
         }
         return relax(out, aspect: a)
     }
+    /// the corners the icons keep out of: DRAW's shapes and passes (top left), the mode (top right) — [x0, x1, y bottom]
+    static let keepOut: [[Double]] = [[0, 0.38, 0.27], [0.66, 1, 0.17]]
     /// pushed apart until no two icons' boxes overlap
     static func relax(_ o: [[Double]], aspect: Double = 2.5) -> [[Double]] {
         var out = o
@@ -132,6 +134,17 @@ enum FrBoard {
             }
             for i in 0..<count {                                         // (kept on the board)
                 out[i][0] = min(0.97, max(0.03, out[i][0])); out[i][1] = min(yMax - 0.05, max(0.05, out[i][1]))
+            }
+            for i in 0..<count {                                         // (and out of the corners: DRAW's shapes, the mode)
+                let (hw, hh) = half(i), hx = hw / a
+                for z in keepOut {                                       // [x0, x1, y1]: from the top
+                    guard out[i][0] + hx > z[0], out[i][0] - hx < z[1], out[i][1] - hh < z[2] else { continue }
+                    moved = true
+                    let down = z[2] + hh + 0.01 - out[i][1]
+                    let side = z[0] <= 0 ? z[1] + hx + 0.01 - out[i][0] : out[i][0] - (z[0] - hx - 0.01)
+                    if down < side * a { out[i][1] += down }                // (the shorter way out: across, in heights)
+                    else if z[0] <= 0 { out[i][0] += side } else { out[i][0] -= side }
+                }
             }
             if !moved { break }
         }
