@@ -155,9 +155,9 @@ final class Director: ObservableObject {
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
-                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn)   // (what the shapes join)
+                let w = FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: s == 1 ? 1 : 0)   // (what the shapes join, for this Cafe)
                 frLightSent = [Int](repeating: -1, count: 16)
-                w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
+                w.forEach { frT($0[0], $0[1], $0[2], u) }; frWireSent[s == 1 ? 1 : 0] = Dictionary(w.map { ([$0[0], $0[1]], $0[2]) }, uniquingKeysWith: { a, _ in a })
                 frEarthSent[s] = -1
             case 6:
                 u.send("B 0 \(rig.habit8k ? 1000 : 0)"); rig.habitLevels().forEach(u.send)
@@ -781,23 +781,25 @@ final class Director: ObservableObject {
     /// the board's shape (width / height of the field): what lies inside a shape depends on it
     var frAspect: Double = 2.5 { didSet { if abs(frAspect - oldValue) > 0.02 { frSyncShapes() } } }
     /// the wires the shapes make, as sent: only what changed goes
-    private var frWireSent: [[Int]: Int] = [:]                    // (node pair -> strength)
+    private var frWireSent: [[[Int]: Int]] = [[:], [:]]           // (each Cafe: node pair -> strength)
     func frSyncShapes() {
-        let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn).map { ([$0[0], $0[1]], $0[2]) },
-                             uniquingKeysWith: { a, _ in a })
-        var out: [(Int, Int, Int)] = []
-        for (k, v) in now where frWireSent[k] != v { out.append((k[0], k[1], v)) }
-        for k in frWireSent.keys where now[k] == nil { out.append((k[0], k[1], 0)) }
-        frWireSent = now
-        if !out.isEmpty { ctxUnits().forEach { u in out.forEach { frT($0.0, $0.1, $0.2, u) } } }
+        for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
+            let sl = u.slot == 1 ? 1 : 0
+            let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: rig.frShapes, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
+                                 uniquingKeysWith: { a, _ in a })
+            for (k, v) in now where frWireSent[sl][k] != v { frT(k[0], k[1], v, u) }
+            for k in frWireSent[sl].keys where now[k] == nil { frT(k[0], k[1], 0, u) }
+            frWireSent[sl] = now
+        }
     }
-    /// a node as that Cafe has it: the board's icons are Cafe A's nodes (0…99) or Cafe B's (+100); a finger (48…52) is on
-    /// both; the other Cafe's EARTH is its node 75; anything else of the other Cafe: nil (not sent)
-    func frNode(_ id: Int, _ slot: Int) -> Int? {
-        if (48...52).contains(id) { return id }
-        let sd = id >= 100 ? 1 : 0, n = id % 100
-        if sd == (slot == 1 ? 1 : 0) { return n }
-        return n == 45 ? 75 : nil
+    /// a node as that Cafe has it: EARTH A is Cafe A's own (45) and Cafe B's "other" (75), EARTH B the reverse;
+    /// OUT / ASH / YELLOW A are Cafe A's 46 · 47 · 76, B's (77 · 78 · 79 here) are Cafe B's 46 · 47 · 76 — nil: not that Cafe's
+    func frNode(_ n: Int, _ slot: Int) -> Int? {
+        if slot == 1 {
+            switch n { case 45: return 75; case 75: return 45; case 46, 47, 76: return nil
+                       case 77: return 46; case 78: return 47; case 79: return 76; default: return n }
+        }
+        return (77...79).contains(n) ? nil : n
     }
     func frT(_ a: Int, _ b: Int, _ v: Int, _ u: CafeUnit) {
         guard let x = frNode(a, u.slot), let y = frNode(b, u.slot) else { return }
@@ -834,7 +836,9 @@ final class Director: ObservableObject {
     func frClearShapes() { rig.frShapes = []; frSyncShapes() }
     /// the fingers' links now (finger node -> node -> 0…1000): only what changed goes
     var frSent: [String: Int] = [:]
-    func frTouches(_ links: [Int: [Int: Int]]) {
+    private var frOnly: [Int: Int] = [:]
+    func frTouches(_ links: [Int: [Int: Int]], only: [Int: Int] = [:]) {
+        frOnly = only                                                   // (a node a finger reaches through a shape that passes one Cafe)
         var now: [String: Int] = [:]
         for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, (v / 50) * 50 + 25)) } }   // (steps of 50: fewer lines)
         var out: [(String, Int)] = []
@@ -845,6 +849,7 @@ final class Director: ObservableObject {
         ctxUnits().forEach { u in
             for (k, v) in out {
                 let ab = k.split(separator: " ").compactMap { Int($0) }
+                if ab.count == 2, let o = frOnly[ab[1]] ?? frOnly[ab[0]], o != (u.slot == 1 ? 1 : 0), v > 0 { continue }
                 if ab.count == 2 { frT(ab[0], ab[1], v, u) }
             }
         }

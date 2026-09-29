@@ -437,6 +437,7 @@ final class Rig: ObservableObject {
     @Published var frPots: [Double] = [0.5, 0.5, 0.5, 0.5]
     @Published var frMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
     @Published var frShape = 0                  // DRAW: 0 circle · 1 triangle · 2 square
+    @Published var frTarget = 0                 // DRAW: what a new shape passes: 0 both · 1 TARPTERGE (A) · 2 ARPSERGE (B)
     /// where the icons lie (0…1 across, 0…1 down the field) and the shapes drawn ([type, x, y, radius in heights]), kept
     @Published var frIcons: [[Double]] = (Rig.d.array(forKey: "rig.frIcons") as? [[Double]]).flatMap { $0.count == FrBoard.count ? $0 : nil }
         ?? FrBoard.defaultLayout().icons { didSet { Self.d.set(frIcons, forKey: "rig.frIcons") } }

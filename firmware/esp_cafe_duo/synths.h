@@ -2702,8 +2702,8 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   fr_gate = af[76] ? V[76] > 3000 : tp_out[0] > 3400;                            // YELLOW (and the lamp)
   int32_t l = af[46] ? V[46] - 4200 : 0, r = af[47] ? V[47] - 4200 : 0;         // out: what OUT L / R are wired to
   l = l * 2047 / 3000; r = r * 2047 / 3000;
-  dcl += ((l << 8) - dcl) >> 11; l -= dcl >> 8;
-  dcr += ((r << 8) - dcr) >> 11; r -= dcr >> 8;
+  dcl += ((l << 8) - dcl) >> 14; l -= dcl >> 8;                                  // (DC out below ~0.3 Hz: CV and LOW pass)
+  dcr += ((r << 8) - dcr) >> 14; r -= dcr >> 8;
   if (l > 2047) l = 2047; if (l < -2047) l = -2047;
   if (r > 2047) r = 2047; if (r < -2047) r = -2047;
   *rout = r;

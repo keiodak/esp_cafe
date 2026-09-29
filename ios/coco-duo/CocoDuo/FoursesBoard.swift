@@ -21,45 +21,44 @@ enum FrBoard {
     static let outInk = Color(hex: 0x5B6B2E)
     /// the shapes: a light blue
     static let shapeBlue = Color(hex: 0x6FA8DC)
-    /// the icons are nodes of one Cafe or the other: Cafe A's as they are (0…99), Cafe B's + 100. Each Cafe: its board
-    /// (0…43: TARPTERGE on A, ARPSERGE on B), its terminals (44 IN · 45 EARTH · 46 OUT · 47 ASH · 73 LINK OUT · 74 LINK IN ·
-    /// 76 YELLOW) and its half of INTERSEXON (53…72: four sample & holds' IN · GATE · OUT, four current cells' SOURCE △ ·
-    /// SINK ▽). What joins icons of the two Cafes is dropped — but for EARTH (the other Cafe's reaches over, slowly).
-    static let one: [Int] = Array(0..<44) + [44, 45, 46, 47, 73, 74, 76] + Array(53..<73)
-    static let nodes: [Int] = one + one.map { $0 + 100 }
-    static let outputs: Set<Int> = [46, 47, 73, 76]                    // (per Cafe)
+    /// what a shape passes: 0 both Cafes (light blue) · 1 TARPTERGE only (Cafe A, navy) · 2 ARPSERGE only (Cafe B, green)
+    static let targetNames = ["A+B", "TARP", "ARP"]
+    static let targetInk = [Color(hex: 0x6FA8DC), Color(hex: 0x1F4E79), Color(hex: 0x2E7D4F)]
+    static func target(_ s: [Double]) -> Int { let i = Int(s[0]) == 3 ? 5 : 4; return s.count > i ? Int(s[i]) : 0 }
+    static func passes(_ s: [Double], slot: Int) -> Bool { let t = target(s); return t == 0 || t == slot + 1 }
+    /// the icons are these nodes: the board (0…43), the terminals (44…47), INTERSEXON's half (53…72: four sample &
+    /// holds' IN · GATE · OUT, four current cells' SOURCE △ · SINK ▽), LINK OUT / IN (73 / 74: to / from the other Cafe)
+    static let nodes: [Int] = Array(0..<48) + Array(53..<80)
+    /// the outputs are each Cafe's own: MAIN / ASH / YELLOW A (46 · 47 · 76 on Cafe A) and B (77 · 78 · 79 here, 46 · 47 · 76
+    /// on Cafe B); a Cafe is never sent the other's
+    static let outputs: Set<Int> = [46, 47, 73, 76, 77, 78, 79]
     static let count = nodes.count
-    static func side(_ i: Int) -> Int { nodes[i] >= 100 ? 1 : 0 }
-    /// 0 TARPTERGE · 1 ARPSERGE · 2 INTERSEXON · 3 a terminal
-    static func family(_ i: Int) -> Int { let n = nodes[i] % 100; return n < 44 ? side(i) : (n >= 53 && n < 73 ? 2 : 3) }
-    static let familyInk = [Color(hex: 0x1F4E79), Color(hex: 0x2E7D4F), Color(hex: 0x6B4FA0)]   // TARP navy · ARP green · INTER violet
-    /// what an icon is: < 11 a Fourses glyph (role) · 11 S&H IN · 12 S&H GATE · 13 S&H OUT · 14 SOURCE · 15 SINK ·
-    /// 16 an input terminal (IN, EARTH, LINK IN) · 17 an output (OUT, ASH, YELLOW, LINK OUT)
+    /// what an icon is: < 44 a Fourses glyph (role) · 44…47 a terminal · 11 S&H IN · 12 S&H GATE · 13 S&H OUT ·
+    /// 14 SOURCE · 15 SINK · 16 an input terminal (IN, EARTH, LINK IN) · 17 an output (OUT, LINK OUT)
     static func kind(_ i: Int) -> Int {
-        let n = nodes[i] % 100
+        let n = nodes[i]
         if n < 44 { return role[n] }
-        if outputs.contains(n) { return 17 }
-        if n < 48 || n >= 73 { return 16 }
+        if outputs.contains(n) { return 17 }                            // an output terminal
+        if n < 48 || n >= 73 { return 16 }                              // an input terminal
         if n < 57 { return 11 }; if n < 61 { return 12 }; if n < 65 { return 13 }
         return (n - 65) % 2 == 0 ? 14 : 15
     }
     static func label(_ i: Int) -> String {
-        let n = nodes[i] % 100, ab = side(i) == 0 ? " A" : " B"
-        switch n {
-        case 44: return "IN" + ab
-        case 45: return "EARTH" + ab
-        case 46: return "OUT" + ab
-        case 47: return "ASH" + ab
-        case 73: return "LINK OUT" + ab
-        case 74: return "LINK IN" + ab
-        case 76: return "YELLOW" + ab
-        default: return ""
-        }
+        let n = nodes[i]
+        if n < 44 { return "" }
+        if n == 45 { return "EARTH A" }; if n == 75 { return "EARTH B" }      // (Cafe A's, Cafe B's: each Cafe gets the other's by the phone)
+        if n == 46 { return "MAIN A" }; if n == 47 { return "ASH A" }; if n == 76 { return "YELLOW A" }
+        if n == 77 { return "MAIN B" }; if n == 78 { return "ASH B" }; if n == 79 { return "YELLOW B" }
+        if n < 48 { return terms[n - 44] }
+        if n == 73 { return "LINK OUT" }; if n == 74 { return "LINK IN" }
+        let sh = ["A", "B", "C", "D"]
+        if n < 65 { return sh[(n - 53) % 4] }
+        return ["D→A", "A→D", "B→C", "C→B"][(n - 65) / 2]
     }
     static let shapeNames = ["○", "△", "□", "／"]
     /// the free field (the sliders take the bottom)
     static let yMax = 0.84
-    static func buf(_ h: Int, _ side: Int = 0) -> Int { icon(ofNode: ((0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0) + side * 100) }
+    static func buf(_ h: Int) -> Int { (0..<44).first { role[$0] == 1 && horse[$0] == h } ?? 0 }
     static func icon(ofNode n: Int) -> Int { nodes.firstIndex(of: n) ?? 0 }
 
     /// the icons thrown across the board, none on another (their boxes kept apart, in heights: aspect = width / height)
@@ -86,7 +85,7 @@ enum FrBoard {
     static func relax(_ o: [[Double]], aspect: Double = 2.5) -> [[Double]] {
         var out = o
         let a = max(0.5, aspect)
-        func half(_ i: Int) -> (Double, Double) { kind(i) >= 16 ? (0.13, 0.042) : (0.042, 0.042) }
+        func half(_ i: Int) -> (Double, Double) { kind(i) >= 16 ? (0.15, 0.055) : (0.06, 0.06) }
         for _ in 0..<120 {
             var moved = false
             for i in 0..<count {
@@ -115,11 +114,11 @@ enum FrBoard {
     /// the first board: scattered, OUT L beside H1's buffer and OUT R beside H3's, each in a circle
     static func defaultLayout() -> (icons: [[Double]], shapes: [[Double]]) {
         var ic = scatter(seed: 7)
-        for sd in 0..<2 {                                                // each Cafe: OUT beside its H1's buffer, ASH beside its H3's
-            let b0 = ic[buf(0, sd)], b2 = ic[buf(2, sd)]
-            ic[icon(ofNode: 46 + sd * 100)] = [min(0.95, b0[0] + 0.05), b0[1]]
-            ic[icon(ofNode: 47 + sd * 100)] = [min(0.95, b2[0] + 0.05), b2[1]]
-        }
+        let b0 = ic[buf(0)], b2 = ic[buf(2)]
+        ic[icon(ofNode: 46)] = [min(0.95, b0[0] + 0.05), max(0.05, b0[1] - 0.05)]
+        ic[icon(ofNode: 77)] = [min(0.95, b0[0] + 0.05), min(yMax - 0.05, b0[1] + 0.05)]
+        ic[icon(ofNode: 47)] = [min(0.95, b2[0] + 0.05), max(0.05, b2[1] - 0.05)]
+        ic[icon(ofNode: 78)] = [min(0.95, b2[0] + 0.05), min(yMax - 0.05, b2[1] + 0.05)]
         ic = relax(ic)
         // a circle round each buffer and its two outputs (after they were pushed apart)
         func ring(_ m: [Int]) -> [Double] {
@@ -128,8 +127,7 @@ enum FrBoard {
             let r = p.map { hypot(($0[0] - cx) * 2.5, $0[1] - cy) }.max() ?? 0.1
             return [0, cx, cy, r + 0.05]
         }
-        let sh = [ring([buf(0), icon(ofNode: 46)]), ring([buf(2), icon(ofNode: 47)]),
-                  ring([buf(0, 1), icon(ofNode: 146)]), ring([buf(2, 1), icon(ofNode: 147)])]
+        let sh = [ring([buf(0), icon(ofNode: 46), icon(ofNode: 77)]), ring([buf(2), icon(ofNode: 47), icon(ofNode: 78)])]
         return (ic, sh)
     }
 
@@ -161,13 +159,15 @@ enum FrBoard {
         return p.filter { inside($0.0, $0.1, s, aspect: aspect) }
     }
     /// the wires the shapes make, as node pairs
-    static func links(icons: [[Double]], shapes: [[Double]], aspect: Double, light: Bool = false) -> [[Int]] {
-        var out = iconLinks(icons: icons, shapes: shapes, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
-        if light {                                                       // CAMERA: each shape's LIGHT (node 77 + k, on that icon's Cafe)
+    static func links(icons: [[Double]], shapes allShapes: [[Double]], aspect: Double, light: Bool = false, slot: Int? = nil) -> [[Int]] {
+        // (for one Cafe: only the shapes that pass it; the LIGHT keeps each shape's own number)
+        let shapes = slot.map { sl in allShapes.map { passes($0, slot: sl) ? $0 : [] } } ?? allShapes
+        var out = iconLinks(icons: icons, shapes: shapes.filter { $0.count >= 4 }, aspect: aspect).map { [min(nodes[$0[0]], nodes[$0[1]]), max(nodes[$0[0]], nodes[$0[1]]), $0[2]] }
+        if light {                                                       // CAMERA: each shape's LIGHT (node 77 + k) on what it covers
             for (k, s) in shapes.prefix(16).enumerated() where s.count >= 4 {
                 for i in 0..<min(count, icons.count) {
                     let c = cover(i, icons[i], s, aspect: aspect)
-                    if c > 0 { out.append([nodes[i], 77 + k + side(i) * 100, Int(150 + 850 * c)]) }
+                    if c > 0 { out.append([nodes[i], 77 + k, Int(150 + 850 * c)]) }
                 }
             }
         }
@@ -185,7 +185,7 @@ enum FrBoard {
     }
     /// how much of an icon a shape covers (0…1: 5 × 5 points over the icon)
     static func cover(_ i: Int, _ p: [Double], _ s: [Double], aspect: Double) -> Double {
-        let (hw, hh) = kind(i) >= 16 ? (0.13, 0.04) : (0.035, 0.035)       // (half its size, in heights)
+        let (hw, hh) = kind(i) >= 16 ? (0.15, 0.05) : (0.045, 0.045)       // (half its size, in heights)
         var n = 0
         for a in 0..<5 { for b in 0..<5 {
             let x = p[0] + (Double(a) - 2) / 2 * hw / aspect, y = p[1] + (Double(b) - 2) / 2 * hh
@@ -216,17 +216,12 @@ enum FrBoard {
         for i in 0..<count { groups[find(i), default: []].append(i) }
         var out: [[Int]] = []
         for (_, g0) in groups where g0.count >= 2 {
-            // a star on each Cafe (its centre: not an output, the most covered); the other Cafe's EARTH joins it too
-            for sd in 0..<2 {
-                let g = g0.filter { side($0) == sd }.sorted { a, b in
-                    let oa = outputs.contains(nodes[a] % 100), ob = outputs.contains(nodes[b] % 100)
-                    return oa != ob ? !oa : cov[a] > cov[b]
-                }
-                guard let c = g.first else { continue }
-                var ms = Array(g.dropFirst())
-                ms += g0.filter { side($0) != sd && nodes[$0] % 100 == 45 }     // (EARTH reaches over)
-                for m in ms { out.append([min(c, m), max(c, m), Int(150 + 850 * min(cov[c], cov[m]))]) }
+            // (the star's centre: not an output — each Cafe drops the other's — and the most covered)
+            let g = g0.sorted { a, b in
+                let oa = outputs.contains(nodes[a]), ob = outputs.contains(nodes[b])
+                return oa != ob ? !oa : cov[a] > cov[b]
             }
+            for m in g.dropFirst() { out.append([min(g[0], m), max(g[0], m), Int(150 + 850 * min(cov[g[0]], cov[m]))]) }
         }
         return out
     }
@@ -334,6 +329,8 @@ struct FoursesBoard: View {
     @State private var fingers: [Int: (p: CGPoint, r: CGFloat)] = [:]
     @State private var draft: (start: CGPoint, now: CGPoint)? = nil
     @State private var grab: (kind: Int, index: Int, offset: CGSize)? = nil    // EDIT: 0 an icon, 1 a shape
+    @State private var grabAt: CGPoint = .zero
+    @State private var grabMoved = false
 
     var body: some View {
         GeometryReader { geo in
@@ -385,18 +382,19 @@ struct FoursesBoard: View {
                 }
                 // the shapes
                 ForEach(Array(rig.frShapes.enumerated()), id: \.offset) { k, s in
+                    let ink = FrBoard.targetInk[min(2, max(0, FrBoard.target(s)))]
                     if Int(s[0]) == 3 && s.count >= 5 {
                         let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(FrBoard.shapeBlue.opacity(live ? 0.22 : 0.10), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
+                            .stroke(ink.opacity(live ? 0.22 : 0.10), style: StrokeStyle(lineWidth: CGFloat(FrBoard.lineWidth) * field.height * 2, lineCap: .round))
                         Path { p in p.move(to: view(s[1], s[2], field)); p.addLine(to: view(s[3], s[4], field)) }
-                            .stroke(FrBoard.shapeBlue.opacity(live ? 1 : 0.6), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
-                    } else if s.count == 4 {
+                            .stroke(ink.opacity(live ? 1 : 0.6), style: StrokeStyle(lineWidth: live ? 1.6 : 1, lineCap: .round, dash: live ? [] : [3, 3]))
+                    } else if s.count >= 4 {
                         let c = view(s[1], s[2], field), r = CGFloat(s[3]) * field.height
                         let live = FrBoard.links(icons: rig.frIcons, shapes: [s], aspect: aspect(field)).count > 0
                         FrShapePath(type: Int(s[0]))
-                            .fill(FrBoard.shapeBlue.opacity(live ? 0.18 : 0.08))
-                            .overlay(FrShapePath(type: Int(s[0])).stroke(FrBoard.shapeBlue.opacity(live ? 1 : 0.6),
+                            .fill(ink.opacity(live ? 0.18 : 0.08))
+                            .overlay(FrShapePath(type: Int(s[0])).stroke(ink.opacity(live ? 1 : 0.6),
                                                                       style: StrokeStyle(lineWidth: live ? 1.4 : 1, dash: live ? [] : [3, 3])))
                             .frame(width: r * 2, height: r * 2)
                             .position(c)
@@ -404,11 +402,11 @@ struct FoursesBoard: View {
                 }
                 if let dr = draft, rig.frShape == 3 {
                     Path { p in p.move(to: dr.start); p.addLine(to: dr.now) }
-                        .stroke(FrBoard.shapeBlue, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3]))
+                        .stroke(FrBoard.targetInk[rig.frTarget], style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3]))
                 } else if let dr = draft {
                     let r = hypot(dr.now.x - dr.start.x, dr.now.y - dr.start.y)
                     FrShapePath(type: rig.frShape)
-                        .stroke(FrBoard.shapeBlue, style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                        .stroke(FrBoard.targetInk[rig.frTarget], style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
                         .frame(width: r * 2, height: r * 2).position(dr.start)
                 }
                 // the icons
@@ -440,6 +438,20 @@ struct FoursesBoard: View {
                     }
                     .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
                     .padding(6)
+                    // what a new shape passes: both Cafes · TARPTERGE only · ARPSERGE only
+                    HStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { t in
+                            Text(FrBoard.targetNames[t])
+                                .font(.hud(7, .semibold))
+                                .foregroundStyle(rig.frTarget == t ? PastelTheme.selectionText : FrBoard.targetInk[t])
+                                .frame(width: 40, height: 18)
+                                .background(rig.frTarget == t ? FrBoard.targetInk[t] : Color.clear)
+                                .contentShape(Rectangle())
+                                .onTapGesture { rig.frTarget = t }
+                        }
+                    }
+                    .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
+                    .padding(.leading, 6).padding(.top, 34)
                 }
                 // the mode: PLAY · DRAW · EDIT, always there (top right)
                 HStack(spacing: 0) {
@@ -480,26 +492,25 @@ struct FoursesBoard: View {
         let p = rig.frIcons.indices.contains(i) ? rig.frIcons[i] : [0.5, 0.5]
         let q = view(p[0], p[1], field), s = iconSize(field)
         let k = FrBoard.kind(i)
-        let fam = FrBoard.family(i), ink = fam < 3 ? FrBoard.familyInk[fam] : PastelTheme.hudBlack   // TARP · ARP · INTER
         return ZStack {
             if k < 11 {
                 RoundedRectangle(cornerRadius: 3).fill(PastelTheme.padScreen)
                 if lit { RoundedRectangle(cornerRadius: 3).fill(orange) }
-                RoundedRectangle(cornerRadius: 3).strokeBorder(lit ? PastelTheme.hudOrange : ink, lineWidth: 1.2)
+                RoundedRectangle(cornerRadius: 3).strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
                 FrGlyph(role: k)
-                    .stroke(deep ? PastelTheme.selectionText : ink, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                    .stroke(deep ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.18)
             } else if k < 16 {                                                     // INTERSEXON: round
                 Circle().fill(PastelTheme.padScreen)
                 if lit { Circle().fill(orange) }
-                Circle().strokeBorder(lit ? PastelTheme.hudOrange : ink, lineWidth: 1.2)
+                Circle().strokeBorder(lit ? PastelTheme.hudOrange : PastelTheme.hudBlack.opacity(0.55), lineWidth: 1)
                 FrGlyph(role: k)
-                    .stroke(deep ? PastelTheme.selectionText : ink, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+                    .stroke(deep ? PastelTheme.selectionText : PastelTheme.hudBlack, style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                     .padding(s * 0.22)
             } else {
                 let out = k == 17
                 Text(FrBoard.label(i))
-                    .font(.hud(7, .semibold))
+                    .font(.hud(8, .semibold))
                     .foregroundStyle(PastelTheme.selectionText)
                     .padding(.horizontal, 5)
                     .frame(height: s * 0.8)
@@ -558,7 +569,7 @@ struct FoursesBoard: View {
     private func norm(_ p: CGPoint, _ f: CGSize) -> [Double] {
         [min(0.98, max(0.02, Double(p.x / f.width))), min(0.98, max(0.02, Double(p.y / f.height)))]
     }
-    private func iconSize(_ f: CGSize) -> CGFloat { max(13, min(20, f.height * 0.07)) }
+    private func iconSize(_ f: CGSize) -> CGFloat { max(16, min(26, f.height * 0.085)) }
     private func reach(_ r: CGFloat) -> CGFloat { 12 + r * 0.9 }
     private func touched(_ i: Int, _ f: CGSize) -> Bool {
         guard rig.frMode == 0, rig.frIcons.indices.contains(i) else { return false }
@@ -588,8 +599,8 @@ struct FoursesBoard: View {
             if t.ended, let dr = draft {
                 let r = hypot(dr.now.x - dr.start.x, dr.now.y - dr.start.y)
                 if r < 10 { if let k = shapeAt(dr.start, f) { d.frRemoveShape(k) } }         // a tap: the shape goes
-                else if rig.frShape == 3 { let a = norm(dr.start, f), b = norm(dr.now, f); d.frAddShape([3, a[0], a[1], b[0], b[1]]) }
-                else { let c = norm(dr.start, f); d.frAddShape([Double(rig.frShape), c[0], c[1], Double(r / f.height)]) }
+                else if rig.frShape == 3 { let a = norm(dr.start, f), b = norm(dr.now, f); d.frAddShape([3, a[0], a[1], b[0], b[1], Double(rig.frTarget)]) }
+                else { let c = norm(dr.start, f); d.frAddShape([Double(rig.frShape), c[0], c[1], Double(r / f.height), Double(rig.frTarget)]) }
                 draft = nil
             }
         case 2:                                                                  // EDIT: move what is grabbed
@@ -602,8 +613,18 @@ struct FoursesBoard: View {
                     let q = view(rig.frShapes[k][1], rig.frShapes[k][2], f)
                     grab = (1, k, CGSize(width: q.x - t.p.x, height: q.y - t.p.y))
                 } else { return }
+                grabAt = t.p; grabMoved = false
             }
-            if let g = grab {
+            if hypot(t.p.x - grabAt.x, t.p.y - grabAt.y) > 6 { grabMoved = true }
+            if let g = grab, !grabMoved, t.ended, g.kind == 1, rig.frShapes.indices.contains(g.index) {   // a tap on a shape: A+B → TARP → ARP
+                var sh = rig.frShapes[g.index]
+                let i = Int(sh[0]) == 3 ? 5 : 4
+                while sh.count <= i { sh.append(0) }
+                sh[i] = Double((Int(sh[i]) + 1) % 3)
+                rig.frShapes[g.index] = sh
+                grab = nil; d.frSyncShapes(); return
+            }
+            if let g = grab, grabMoved {
                 let n = norm(CGPoint(x: t.p.x + g.offset.width, y: t.p.y + g.offset.height), f)
                 if g.kind == 0 { rig.frIcons[g.index] = n }
                 else if rig.frShapes.indices.contains(g.index) {
@@ -617,6 +638,7 @@ struct FoursesBoard: View {
         default:                                                                 // PLAY: fingers
             for t in ts { if t.ended { fingers[t.id] = nil } else { fingers[t.id] = (t.p, t.r) } }
             var links: [Int: [Int: Int]] = [:]
+            var only: [Int: Int] = [:]                                           // (node -> the one Cafe a finger's shape passes)
             for (fi, t) in fingers {
                 let R = reach(t.r)
                 for i in 0..<min(FrBoard.count, rig.frIcons.count) {
@@ -635,10 +657,12 @@ struct FoursesBoard: View {
                         guard c > 0 else { continue }
                         let v = Int((150 + firm * 780) * (0.4 + 0.6 * c))
                         links[48 + fi, default: [:]][FrBoard.nodes[i]] = max(links[48 + fi]?[FrBoard.nodes[i]] ?? 0, v)
+                        let tg = FrBoard.target(sh)
+                        if tg > 0 { only[FrBoard.nodes[i]] = tg - 1 }
                     }
                 }
             }
-            d.frTouches(links)
+            d.frTouches(links, only: only)
         }
     }
 }
