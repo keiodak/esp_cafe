@@ -85,7 +85,7 @@ enum Preset {
     static let harmony = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "NOBSRINE"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "NOBSRINE", "STUBER"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -475,6 +475,19 @@ final class Rig: ObservableObject {
     }
     func frCommands(pad i: Int) -> [String] { [] }  // (no pads: the board)
     /// slot 0 = TARPTERGE, slot 1 = ARPSERGE
+    // MARK: STUBER (BLE mode 9): its sandrodes on a board, patched by shapes and fingers (StuberBoard.swift)
+    @Published var stMode = 0                   // 0 PLAY · 1 DRAW · 2 EDIT
+    @Published var stShape = 0                  // DRAW: ○ △ □ ／
+    @Published var stIcons: [[Double]] = (Rig.d.array(forKey: "rig.stIcons") as? [[Double]]).flatMap { $0.count == StBoard.count ? $0 : nil }
+        ?? StBoard.scatter(seed: 11) { didSet { Self.d.set(stIcons, forKey: "rig.stIcons") } }
+    @Published var stShapes: [[Double]] = (Rig.d.array(forKey: "rig.stShapes") as? [[Double]]) ?? [] {
+        didSet { Self.d.set(stShapes, forKey: "rig.stShapes") }
+    }
+    /// the wheels (x) and the resonance knobs (y): L, R
+    let stAx: [PadAxis] = [PadAxis((0.4, 0.45)), PadAxis((0.6, 0.45))]
+    func stParams() -> [String] {
+        (0..<2).flatMap { h in ["A \(h) \(Int((stAx[h].x * 1000).rounded()))", "A \(2 + h) \(Int((stAx[h].y * 1000).rounded()))"] }
+    }
     func frAll(slot: Int) -> [String] {
         ["T", "O 9 \(slot == 1 ? 1000 : 0)"] + (0..<4).map { "O \(4 + $0) \(frRanges[$0] * 500)" }
             + (0..<4).map { "O \($0) \(Int((frPots[$0] * 1000).rounded()))" }
@@ -570,7 +583,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .nobs][min(max(ctxMode, 0), 8)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .nobs, .stuber][min(max(ctxMode, 0), 9)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }

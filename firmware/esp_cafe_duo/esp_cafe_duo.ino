@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.31"
+#define FW_VERSION "4.32"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -776,7 +776,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { int m = val < 0 ? 0 : (val > 8 ? 8 : (int)val); if (m == 7 && pc_mode != 7) tp_enter(); pc_mode = m; }
+                else if (id == 25) { int m = val < 0 ? 0 : (val > 9 ? 9 : (int)val); if ((m == 7 || m == 9) && pc_mode != m) tp_enter(); pc_mode = m; }
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -834,6 +834,12 @@ void pc_line(char *s) {
                 if (s[0] == 'N' && id >= 0 && id < 16) { nz_p[id] = (int16_t)val; nz_update(); }
                 if (s[0] == 'N' && id == 16) nz_dist = val > 0;   // DIST
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
+              } break;
+    case 'A': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // STUBER: "A <id> <0..1000>"
+                if (val < 0) val = 0; if (val > 1000) val = 1000;
+                if (id >= 0 && id < 4) st_p[id] = (int16_t)val;
+                else if (id == 19) st_base = true;
+                else if (id == 20) st_rand = true;
               } break;
     case 'E': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // NOBSRINE: "E <id> <0..1000>"
                 if (val < 0) val = 0; if (val > 1000) val = 1000;

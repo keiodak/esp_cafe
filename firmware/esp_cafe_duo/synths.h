@@ -1128,7 +1128,7 @@ static inline uint32_t IRAM_ATTR mo_rnd(uint32_t n, uint32_t k) {
   return (uint32_t)(c + (((o - c) * mo_sep) >> 12));
 }
 
-volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES, 8 = NOBSRINE ("M 25 <0..8>")
+volatile int pc_mode = 0;       // BLE preset: 0 = GRAIN, 1 = BYTEBEAT, 2 = DELAY, 3 = NOISE, 4 = SIDRAX, 5 = WAVE, 6 = HABIT, 7 = FOURSES, 8 = NOBSRINE, 9 = STUBER ("M 25 <0..9>")
 volatile int32_t pc_emod = 0;   // EARTH, AC-coupled: -128 .. 127 around its own average (0 = unplugged)
 volatile bool mo_reset = true;  // set when the preset wakes up: the grain engine starts clean
 volatile int mo_pulse = 0;      // YELLOW pulse length after a grain (read by coco_pc)
@@ -2559,21 +2559,23 @@ static void fr_update() {                                    // (the loop: float
     tp_dn[h] = (int32_t)fminf(base * (arp ? e : 1.0f / e), 3000000.0f);   // (ARPSERGE: one rate)
   }
 }
+static void st_rebuild();                                     // (STUBER: its patches are these too)
 static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
-  if (pc_mode != 7) return;                                    // (the tape is someone else's)
+  if (pc_mode != 7 && pc_mode != 9) return;                    // (the tape is someone else's)
   if (a > b) { int t = a; a = b; b = t; }
   if (a < 0 || b >= TP_N || a == b) return;
   int32_t g = 0;
   if (v > 0) { float R = 2000.0f * powf(5000.0f, (1000 - v) / 1000.0f); g = (int32_t)(4096.0f * 10000.0f / R); if (g < 1) g = 1; if (g > 20480) g = 20480; }
   int free_ = -1;
   for (int i = 0; i < TP_NL; i++) {
-    if (tp_lg[i] && tp_la[i] == a && tp_lb[i] == b) { tp_lg[i] = (int16_t)g; tp_rebuild(); return; }
+    if (tp_lg[i] && tp_la[i] == a && tp_lb[i] == b) { tp_lg[i] = (int16_t)g; tp_rebuild(); st_rebuild(); return; }
     if (!tp_lg[i] && free_ < 0) free_ = i;
   }
   if (g && free_ >= 0) { tp_la[free_] = (uint8_t)a; tp_lb[free_] = (uint8_t)b; tp_lg[free_] = (int16_t)g; }
   tp_rebuild();
+  st_rebuild();
 }
-static void tp_clear() { if (pc_mode != 7) return; memset(TL, 0, sizeof(TpLinks)); tp_rebuild(); }
+static void tp_clear() { if (pc_mode != 7 && pc_mode != 9) return; memset(TL, 0, sizeof(TpLinks)); tp_rebuild(); st_rebuild(); }
 static void tp_enter() { memset(TL, 0, sizeof(TpLinks)); }    // (the loop, as FOURSES is chosen: no links from the tape's old sound)
 // the horses' state (the audio)
 static int32_t tp_pos[4], tp_out[4], tp_olp[4], tp_bnd[4];
@@ -2794,6 +2796,160 @@ static int32_t __attribute__((noinline)) nb_tick(int32_t *rout) {
   return l;
 }
 
+// ==== STUBER (BLE mode 9): after Blasser's Din Datin Dudero Stuber (as its Surfing Guide lays it out). Four identical
+// state-variable filters (12 dB, resonant, rails soft): B and D the audio (the Cafe's IN; B → OUT, D → ASH), A and C the
+// gesture — each wheel's position through a slow resonant filter, so turning it rings a "heartbeat", and that ripple
+// shakes the other channel's resonance. Left wheel: B's cutoff, right wheel: D's; the resonance knobs mirrored (left
+// inverso, right verso); past ~75 % the audio filters sing on their own. Two 16-stage binary dividers (from D and from B),
+// two parasites (crackle), and the Sh'mance: a shift register per side, clocked at [A] / [B], that re-routes which wheel
+// and knob reach which filter and which way (base state after RESET; random at power).
+// The 42 sandrodes are nodes; a patch (a wire, a touch) between two joins them by the difference of their potentials —
+// a current, not a voltage: it modulates what an input node governs, and is injected into what a filter node holds.
+// "A <id> <0..1000>": 0 / 1 the wheels (L / R) · 2 / 3 the resonance knobs (L / R) · 19 RESET (base state) · 20 random.
+// "T a b v": a patch (as FOURSES').
+#define ST_N 42
+enum { ST_LP, ST_BP, ST_MP, ST_MN, ST_RES, ST_RP, ST_RN };      // per filter (×7: B 0, D 7, A 14, C 21)
+volatile int16_t st_p[4] = { 400, 600, 450, 450 };
+volatile bool st_reset = true, st_base = false, st_on = false, st_gate = false;
+volatile bool st_rand = false;
+struct StState {                                              // (in a piece of the tape: no RAM of its own)
+  int32_t V[ST_N], I[ST_N];
+  int32_t lp[4], bp[4];
+  int32_t wh[2], rs[2], whp[2];
+  uint32_t cnt[2], rng;
+  uint8_t hy[2], reg[2], ck[2];
+  int32_t par[2];
+  uint32_t sub;
+  uint8_t nl[2], cur;
+};
+static_assert(sizeof(StState) <= DCHUNK_BYTES, "STUBER: its state must fit a piece of the tape");
+#define ST ((StState *)dchunk[100])
+static void st_rebuild() {                                    // (the loop) the patches, compact, into the buffer the audio is not reading
+  if (!st_on || pc_mode != 9) return;
+  StState *s = ST;
+  int b = 1 - s->cur, n = 0;
+  for (int k = 0; k < TP_NL; k++) {
+    if (!tp_lg[k] || tp_la[k] >= ST_N || tp_lb[k] >= ST_N) continue;
+    TC->ca[b][n] = tp_la[k]; TC->cb[b][n] = tp_lb[k]; TC->cg[b][n] = tp_lg[k]; n++;
+  }
+  s->nl[b] = (uint8_t)n;
+  s->cur = (uint8_t)b;
+}
+static inline int32_t st_sat(int32_t x) {                     // the op-amps' rails, soft
+  if (x > 24000) { x = 24000 + ((x - 24000) >> 2); if (x > 32000) x = 32000; }
+  else if (x < -24000) { x = -24000 + ((x + 24000) >> 2); if (x < -32000) x = -32000; }
+  return x;
+}
+static inline void st_svf(int32_t *lp, int32_t *bp, int32_t x, int32_t f, int32_t q) {   // Chamberlin: f Q15, q Q14 (damping)
+  *lp = st_sat(*lp + ((f * *bp) >> 15));
+  int32_t hp = x - *lp - ((q * *bp) >> 14);
+  if (hp > 90000) hp = 90000; if (hp < -90000) hp = -90000;
+  *bp = st_sat(*bp + ((f * hp) >> 15));
+}
+static inline uint32_t st_rnd(StState *s) { s->rng = s->rng * 1664525u + 1013904223u; return s->rng; }
+static int32_t __attribute__((noinline)) st_tick(int32_t in, int32_t *rout) {
+  StState *s = ST;
+  if (st_reset) {
+    st_reset = false;
+    uint32_t seed = s->rng ^ (uint32_t)esp_timer_get_time();
+    memset(s, 0, sizeof(StState));                                            // (no patches until they are rebuilt, below)
+    s->rng = seed | 1;
+    for (int h = 0; h < 2; h++) { s->wh[h] = s->whp[h] = st_p[h] * 65; s->rs[h] = st_p[2 + h] * 65; }
+    s->reg[0] = (uint8_t)st_rnd(s); s->reg[1] = (uint8_t)(st_rnd(s) >> 8);     // (every power-up its own routing)
+    st_on = true;
+    st_rebuild();                                                              // (the patches that came before it was on)
+  }
+  if (st_base) { st_base = false; s->reg[0] = s->reg[1] = 0; }                  // RESET: the base state
+  if (st_rand) { st_rand = false; s->reg[0] = (uint8_t)st_rnd(s); s->reg[1] = (uint8_t)(st_rnd(s) >> 8); }
+  int32_t *V = s->V, *I = s->I;
+  // the patches: a current between each two joined nodes, as their potentials differ
+  for (int i = 0; i < ST_N; i++) I[i] = 0;
+  const int c = s->cur, nl = s->nl[c];
+  const uint8_t *la = TC->ca[c], *lb = TC->cb[c]; const int16_t *lg = TC->cg[c];
+  for (int k = 0; k < nl; k++) {
+    int a = la[k], b = lb[k];
+    if (a >= ST_N || b >= ST_N) continue;
+    int32_t d = (int32_t)(((int64_t)(V[b] - V[a]) * lg[k]) >> 12);
+    I[a] += d; I[b] -= d;
+  }
+  // the wheels and the knobs (the phone's steps smoothed)
+  for (int h = 0; h < 2; h++) { s->wh[h] += (st_p[h] * 65 - s->wh[h]) / 256; s->rs[h] += (st_p[2 + h] * 65 - s->rs[h]) / 256; }
+  // the Sh'mance: a rising current at [A] (38) / [B] (39) steps its side's register; the data: its own wheel, past the
+  // middle, against the register's last bit (as a Rungler)
+  for (int h = 0; h < 2; h++) {
+    bool hi = I[38 + h] > 3000 || (s->ck[h] && I[38 + h] > 1000);
+    if (hi && !s->ck[h]) {
+      uint8_t bit = (uint8_t)((s->wh[h] > 32768) ^ (s->reg[h] >> 7));
+      s->reg[h] = (uint8_t)((s->reg[h] << 1) | bit);
+    }
+    s->ck[h] = hi;
+  }
+  // the gesture filters, A (right wheel → left channel) and C (left wheel → right), at 1 kHz
+  const bool sub = (++s->sub & 31) == 0;
+  static const int GF[2] = { 2, 3 };                                            // (A, C in lp/bp)
+  if (sub) {
+    for (int h = 0; h < 2; h++) {                                               // h 0: A (for B), 1: C (for D)
+      uint8_t r = s->reg[h];
+      int src = ((r >> 4) & 1) ? h : 1 - h;                                     // (its wheel: the other one; swapped)
+      int base = (GF[h] == 2 ? 14 : 21);
+      int32_t x = (s->wh[src] - 32768) / 2 + I[base + ST_LP] / 4;               // the wheel's position (and what is patched in)
+      int32_t oct = (I[base + ST_MP] - I[base + ST_MN]) * 3 / 8;               // its speed: verso / inverso
+      int32_t f = (int32_t)nb_exp2(620, oct); if (f > 12000) f = 12000;        // (~3 Hz)
+      int32_t rq = s->rs[h == 0 ? 0 : 1];                                       // (A tracks the left knob, C the right)
+      if (h == 0) rq = 65000 - rq;
+      int32_t q = 12000 - rq / 8 - (I[base + ST_RP] - I[base + ST_RN]) / 2; if (q < 1500) q = 1500; if (q > 30000) q = 30000;
+      s->bp[GF[h]] += I[base + ST_BP] / 8 + I[base + ST_RES] / 8;
+      st_svf(&s->lp[GF[h]], &s->bp[GF[h]], x, f, q);
+      V[base + ST_LP] = s->lp[GF[h]]; V[base + ST_BP] = s->bp[GF[h]];
+      V[base + ST_RES] = s->bp[GF[h]] / 3;                                      // the ripple, ±1 V
+    }
+  }
+  // the audio filters, B (left) and D (right), twice a sample
+  int32_t o[2];
+  for (int h = 0; h < 2; h++) {
+    uint8_t r = s->reg[h];
+    int base = h ? 7 : 0, g = h ? 21 : 14;                                      // (B: A's ripple · D: C's)
+    int cw = (r & 1) ? 1 - h : h;                                               // the cutoff: its own wheel (or the other)
+    int32_t wv = s->wh[cw]; if ((r >> 1) & 1) wv = 65000 - wv;                  // (verso / inverso)
+    int32_t rip = V[g + ST_BP]; if ((r >> 5) & 1) rip = -rip;
+    int32_t oct = wv * 8 / 16 + (I[base + ST_MP] - I[base + ST_MN]) * 3 / 8 + rip / 4;    // 8 octaves over the wheel
+    int32_t f = (int32_t)nb_exp2(97, oct); if (f > 20000) f = 20000;            // (30 Hz … ~6 kHz)
+    int rk = ((r >> 2) & 1) ? 1 - h : h;                                        // the resonance knob
+    int32_t rv = s->rs[rk]; if ((rk == 0) != (((r >> 3) & 1) != 0)) rv = 65000 - rv;   // (the left one inverso)
+    int32_t q = 22000 - (int32_t)(((int64_t)rv * 29000) >> 16) - (I[base + ST_RP] - I[base + ST_RN]) / 2 - (rip < 0 ? -rip : rip);
+    if (q < -3000) q = -3000; if (q > 30000) q = 30000;                         // (past ~75 %: it sings)
+    int32_t x = in * 12 + (int32_t)((st_rnd(s) >> 22) & 255) - 128 + s->par[h] / 64;   // the input (and a breath of the parasites)
+    s->lp[h] += I[base + ST_LP] / 32; s->bp[h] += I[base + ST_BP] / 32 + I[base + ST_RES] / 16;
+    st_svf(&s->lp[h], &s->bp[h], x, f, q);
+    st_svf(&s->lp[h], &s->bp[h], x, f, q);
+    V[base + ST_LP] = s->lp[h]; V[base + ST_BP] = s->bp[h];
+    o[h] = s->lp[h] >> 4;
+  }
+  // the dividers: left from D, right from B (16 stages; four brought out each)
+  for (int h = 0; h < 2; h++) {
+    int32_t v = h ? s->lp[0] : s->lp[1];
+    if (!s->hy[h] && v > 1500) { s->hy[h] = 1; s->cnt[h]++; } else if (s->hy[h] && v < -1500) s->hy[h] = 0;
+    uint32_t n = s->cnt[h]; int base = 28 + 4 * h;
+    V[base] = (n & 1) ? 20000 : -20000; V[base + 1] = (n & 8) ? 20000 : -20000;
+    V[base + 2] = (n & 128) ? 20000 : -20000; V[base + 3] = (n & 2048) ? 20000 : -20000;
+  }
+  // the parasites: a crackling ember
+  for (int h = 0; h < 2; h++) {
+    uint32_t z = st_rnd(s);
+    if ((z >> 23) == 0) s->par[h] += (int32_t)((z >> 7) & 32767) - 16384;       // (now and then a spark)
+    s->par[h] -= s->par[h] / 48;
+    V[36 + h] = s->par[h];
+  }
+  V[40] = in * 12;                                                              // IN
+  V[41] = pc_emod * 200;                                                        // EARTH
+  st_gate = s->ck[0] || s->ck[1] || (s->cnt[1] & 2048);                          // (the lamp: the Sh'mance stepping, or the slow divider)
+  int32_t l = o[0], rr = o[1];
+  if (l > 2047) l = 2047; if (l < -2047) l = -2047;
+  if (rr > 2047) rr = 2047; if (rr < -2047) rr = -2047;
+  *rout = rr;
+  return l;
+}
+
 void IRAM_ATTR coco_pc() {
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
@@ -2841,6 +2997,7 @@ void IRAM_ATTR coco_pc() {
     else if (cur == 6) hb_reset = true;
     else if (cur == 7) fr_reset = true;
     else if (cur == 8) nb_reset = true;
+    else if (cur == 9) st_reset = true;
   }
   if (want != cur) {
     if (mg > 0) mg -= 16;
@@ -2855,12 +3012,14 @@ void IRAM_ATTR coco_pc() {
       else if (cur == 6) hb_reset = true;
       else if (cur == 7) fr_reset = true;
       else if (cur == 8) nb_reset = true;
+      else if (cur == 9) st_reset = true;
     }
   } else if (mg < 4096) mg += 16;
   bool gmode = cur == 0, bmode = cur == 1, dmode = cur == 2, nmode = cur == 3, smode = cur == 4 || cur == 5;
   bool hmode = cur == 6;                                     // HABIT: the memory on the phone
   bool fmode = cur == 7;                                     // FOURSES
   bool nbmode = cur == 8;                                    // NOBSRINE
+  bool stmode = cur == 9;                                    // STUBER
   sx_wave = cur == 5;                                        // WAVE: the SIDRAX plates on wavetables
   bool frz = gmode && mo_freeze;  // FREEZE only exists in GRAIN mode
 
@@ -2877,7 +3036,7 @@ void IRAM_ATTR coco_pc() {
   }
   nz_burst = nmode && SKIPPERAT;
   sx_burst = smode && SKIPPERAT;
-  grit_off = smode || bmode || hmode || fmode || nbmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
+  grit_off = smode || bmode || hmode || fmode || nbmode || stmode;                        // SIDRAX / WAVE / BYTEBEAT / HABIT: CHAR's grit stays out
   grit_gen = preset_gen;
 
   // --- RECORD HEAD (GRAIN / COCO only: the other two use the tape themselves) ---
@@ -2914,6 +3073,8 @@ void IRAM_ATTR coco_pc() {
     l = fr_tick(gyo - 2048, &r, FLIPPERAT, SKIPPERAT);       // FOURSES
   } else if (nbmode) {
     l = nb_tick(&r);                                         // NOBSRINE
+  } else if (stmode) {
+    l = st_tick(gyo - 2048, &r);                             // STUBER
   } else {
     l = nz_tick(gyo - 2048, &r, audio_frozen_state, FLIPPERAT);
   }
@@ -2943,7 +3104,7 @@ void IRAM_ATTR coco_pc() {
       dl_click--;
       y = true;
     }
-  } else y = hmode ? false : (nbmode ? nb_gate : (fmode ? fr_gate : (smode ? sx_gate : nz_gate)));
+  } else y = hmode ? false : (stmode ? st_gate : nbmode ? nb_gate : (fmode ? fr_gate : (smode ? sx_gate : nz_gate)));
   if (y) {
     YELLOW_PULSE(4095);
   } else {
@@ -2975,8 +3136,8 @@ void IRAM_ATTR coco_pc() {
     } else {
       LAMP_OFF;
     }
-  } else if (nmode || bmode || fmode || nbmode) {
-    if (nbmode ? nb_gate : (fmode ? fr_gate : (bmode ? bb_gate : nz_gate))) {
+  } else if (nmode || bmode || fmode || nbmode || stmode) {
+    if (stmode ? st_gate : nbmode ? nb_gate : (fmode ? fr_gate : (bmode ? bb_gate : nz_gate))) {
       LAMP_ON;
     } else {
       LAMP_OFF;
