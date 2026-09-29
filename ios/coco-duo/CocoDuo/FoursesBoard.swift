@@ -637,6 +637,9 @@ struct FoursesBoard: View {
                 Text("H\(h + 1)")
                     .font(.hud(7, .semibold))
                     .foregroundStyle(PastelTheme.textSecondary)
+                if let u = d.units.first(where: { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 7 }) {
+                    FrLed(unit: u, h: h)                                           // (its LED, as on the Fourses)
+                }
                 // its range switch: AUDIO · LOW · CV (a tap: the next)
                 Text(["CV", "LOW", "AUDIO"][rig.frRanges[h]])
                     .font(.hud(7, .semibold))
@@ -823,4 +826,18 @@ struct FrCameraView: UIViewRepresentable {
         return v
     }
     func updateUIView(_ v: V, context: Context) { if v.preview.session !== session { v.preview.session = session } }
+}
+
+/// one of the Fourses' four LEDs: lit as long as its horse's output is high (a fast horse: a steady glow)
+struct FrLed: View {
+    @ObservedObject var unit: CafeUnit
+    let h: Int
+    var body: some View {
+        let v = Double(unit.frLeds.indices.contains(h) ? unit.frLeds[h] : 0) / 15
+        Circle()
+            .fill(Color(hex: 0xE0301E).opacity(0.12 + 0.88 * v))
+            .overlay(Circle().strokeBorder(PastelTheme.hudBlack.opacity(0.4), lineWidth: 0.5))
+            .shadow(color: Color(hex: 0xE0301E).opacity(0.8 * v), radius: 3 * v)
+            .frame(width: 8, height: 8)
+    }
 }

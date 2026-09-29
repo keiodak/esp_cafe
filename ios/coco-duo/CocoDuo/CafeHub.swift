@@ -65,6 +65,8 @@ final class CafeUnit: ObservableObject {
     @Published var le = TAPE
     @Published var speed = 1000               // x1000
     @Published var earth = 0
+    /// FOURSES: its four horses' LEDs, each 0…15 (how long it was lit in the last ~30 ms)
+    @Published var frLeds = [0, 0, 0, 0]
     @Published var flip = false
     @Published var skip = false
     @Published var button = false
@@ -281,6 +283,9 @@ final class CafeUnit: ObservableObject {
             polls += 1
         case "U":
             otaLine(l)
+        case "f":                                          // FOURSES: the four LEDs, a nibble each
+            let a = l.split(separator: " ")
+            if a.count >= 2, let v = Int(a[1]) { let n = (0..<4).map { (v >> (4 * $0)) & 15 }; if n != frLeds { frLeds = n } }
         case "t":
             let a = l.split(separator: " ")
             if a.count >= 2, let v = Int(a[1]) { onLink?(v) }
