@@ -7,33 +7,41 @@ import SwiftUI
 import UIKit
 
 enum StBoard {
-    /// the jacks, by node (the Cafe's numbers): B · D the audio filters (L · R), A · C the gesture filters, the dividers,
-    /// the parasites, the Sh'mance clocks, IN, EARTH
-    static let names: [String] = {
-        let f = ["LP", "BP", "M+", "M−", "RES", "Q+", "Q−"]
-        var n: [String] = []
-        for c in ["B", "D", "A", "C"] { n += f.map { c + " " + $0 } }
-        n += ["÷2", "÷16", "÷256", "÷4K", "÷2", "÷16", "÷256", "÷4K", "PAR L", "PAR R", "CLK A", "CLK B", "IN", "EARTH",
-              "ENV L", "ENV R", "S&H1 IN", "S&H1 CLK", "S&H1 OUT", "S&H2 IN", "S&H2 CLK", "S&H2 OUT"]
-        return n
-    }()
-    static let count = 50
-    /// each group its colour: B red · D blue · A orange · C green · the dividers grey (L light, R dark) · parasites violet ·
-    /// clocks mustard · IN / EARTH brown · ENV cyan · S&H teal
-    static func ink(_ i: Int) -> Color {
-        switch i {
-        case 0..<7: return Color(hex: 0xC0392B)
-        case 7..<14: return Color(hex: 0x2E6DA4)
-        case 14..<21: return PastelTheme.hudOrange
-        case 21..<28: return Color(hex: 0x2E7D4F)
-        case 28..<32: return Color(hex: 0x9A9A9A)
-        case 32..<36: return Color(hex: 0x5E5E5E)
-        case 36, 37: return Color(hex: 0x7B4FA0)
-        case 38, 39: return Color(hex: 0xC29A12)
-        case 40, 41: return Color(hex: 0x7A4E2D)
-        case 42, 43: return Color(hex: 0x2AA7B8)
-        default: return Color(hex: 0x1F6F6F)
+    /// the jacks, by node: the Stuber's own numbers (1…63, as its Surfing Guide has them), [0] RESET, 64 / 65 the
+    /// Sh'mance clocks [A] / [B], 66 IN, 67 EARTH (the Cafe's). ↑ verso · ↓ inverso · Q the resonance
+    static let roles: [Int: String] = {
+        var r: [Int: String] = [
+            1: "A RES", 3: "A BP", 7: "A LP", 5: "A ↑", 27: "A ↓", 41: "A Q↑", 25: "A Q↓",
+            20: "C RES", 12: "C BP", 34: "C LP", 49: "C ↑", 30: "C ↓", 32: "C Q↑", 14: "C Q↓",
+            21: "B RES", 4: "B BP", 40: "B LP", 11: "B ↑", 24: "B ↓", 42: "B ↓", 31: "B Q↑", 39: "B Q↓",
+            44: "D RES", 45: "D BP", 35: "D LP", 22: "D ↑", 19: "D ↓", 38: "D Q↑", 28: "D Q↓",
+            29: "PAR L", 18: "PAR R", 0: "RESET", 64: "[A]", 65: "[B]", 66: "IN", 67: "EARTH"]
+        let dl = [26, 36, 16, 6, 8, 10, 2, 48, 52, 56, 60, 58, 62, 46, 50, 54]     // (÷2 … ÷64K)
+        let dr = [23, 9, 43, 17, 33, 15, 13, 53, 57, 61, 63, 55, 59, 47, 51, 37]
+        for k in 0..<16 {
+            let n = 1 << (k + 1), t = n >= 1024 ? "÷\(n / 1024)K" : "÷\(n)"
+            r[dl[k]] = t; r[dr[k]] = t
         }
+        return r
+    }()
+    static let names: [String] = (0..<68).map { n in n < 64 ? "\(n) \(roles[n] ?? "")" : (roles[n] ?? "") }
+    static let count = 68
+    static let dividersL: Set<Int> = [26, 36, 16, 6, 8, 10, 2, 48, 52, 56, 60, 58, 62, 46, 50, 54]
+    static let dividersR: Set<Int> = [23, 9, 43, 17, 33, 15, 13, 53, 57, 61, 63, 55, 59, 47, 51, 37]
+    /// each group its colour: B red · D blue · A orange · C green · the dividers grey (L light, R dark) · parasites violet ·
+    /// [A] [B] mustard · RESET black · IN / EARTH brown
+    static func ink(_ i: Int) -> Color {
+        let r = roles[i] ?? ""
+        if dividersL.contains(i) { return Color(hex: 0x9A9A9A) }
+        if dividersR.contains(i) { return Color(hex: 0x5E5E5E) }
+        if r.hasPrefix("B ") { return Color(hex: 0xC0392B) }
+        if r.hasPrefix("D ") { return Color(hex: 0x2E6DA4) }
+        if r.hasPrefix("A ") { return PastelTheme.hudOrange }
+        if r.hasPrefix("C ") { return Color(hex: 0x2E7D4F) }
+        if r.hasPrefix("PAR") { return Color(hex: 0x7B4FA0) }
+        if i == 64 || i == 65 { return Color(hex: 0xC29A12) }
+        if i == 0 { return PastelTheme.hudBlack }
+        return Color(hex: 0x7A4E2D)
     }
     static let shapeNames = ["○", "△", "□", "／"]
     static let ink0 = Color(hex: 0x6FA8DC)
