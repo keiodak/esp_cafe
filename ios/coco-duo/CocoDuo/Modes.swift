@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE+OTHER",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -43,7 +43,7 @@ enum Preset {
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
-        "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
+        "the phone and the Cafes · ARP · PHONE_COCO · BOX · OP-1F (the Cafes play it over Bluetooth MIDI)",
         "Apple π · the original Cocoquantus coco · EARTH = record switch",
         "Apple π · prime-number delay / reverb · EARTH = low-pass · SKIP = room",
         "Apple π · very short delay · EARTH = head spread · ASH + YELLOW = stereo",
@@ -98,7 +98,7 @@ enum Preset {
         "crucFX's TARPTERGE (A) / ARPSERGE (B) · a finger joins what it covers, lightly or flat · DRAW: lines are wires",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
-    static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
+    static let defaultPlaylist = [2, 9, 10, 0, 1, 3, 4, 5, 7, 8]           // (HARMONY: taken off the list)
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
@@ -335,7 +335,7 @@ final class Rig: ObservableObject {
     }
     /// the playlist: up to 11 pool ids, in order (PRESET DESIGN edits it; it goes to the Cafes as "L …")
     @Published var playlist: [Int] = {
-        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount } ?? []
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount && $0 != Preset.harmony } ?? []
         let v = p.isEmpty ? Preset.defaultPlaylist : Array(p.prefix(Preset.maxPlaylist))
         Preset.order = v
         return v
@@ -349,7 +349,7 @@ final class Rig: ObservableObject {
     }
     /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
     @Published var design: [Int] = {
-        let v = (Rig.d.array(forKey: "rig.design") as? [Int]) ?? []
+        let v = ((Rig.d.array(forKey: "rig.design") as? [Int]) ?? []).map { $0 == Preset.harmony ? -1 : $0 }   // (HARMONY: gone)
         if v.count == Preset.maxPlaylist { return v }
         let p = (Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist
         return Array((p + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))

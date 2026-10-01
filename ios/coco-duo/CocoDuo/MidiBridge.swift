@@ -13,6 +13,8 @@ final class MidiBridge: ObservableObject {
     @Published var on = false
     /// how many MIDI destinations there are (the OP-1, once paired, is one)
     @Published var destinations = 0
+    /// their names (the OP-1 field, once paired, among them)
+    @Published var names: [String] = []
     /// the scale EARTH walks through (0 major · 1 minor · 2 pentatonic · 3 dorian)
     @Published var scale = 2
     static let scaleNames = ["MAJOR", "MINOR", "PENTA", "DORIAN"]
@@ -49,7 +51,15 @@ final class MidiBridge: ObservableObject {
         }
     }
 
-    func countDestinations() { destinations = MIDIGetNumberOfDestinations() }
+    func countDestinations() {
+        let n = MIDIGetNumberOfDestinations()
+        destinations = n
+        names = (0..<n).map { i in
+            var s: Unmanaged<CFString>?
+            MIDIObjectGetStringProperty(MIDIGetDestination(i), kMIDIPropertyDisplayName, &s)
+            return (s?.takeRetainedValue() as String?) ?? "MIDI \(i + 1)"
+        }
+    }
 
     /// all notes off (when switched off)
     func panic() {
@@ -89,25 +99,63 @@ struct BluetoothMidiPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UINavigationController, context: Context) {}
 }
 
-/// the CAFES panel's card: on / off, the scale, pairing
-struct MidiCard: View {
+/// APP+CAFE+OTHER · OP-1F: on / off, the scale, pairing
+struct Op1Controls: View {
     @ObservedObject var midi: MidiBridge
     @State private var pairing = false
     var body: some View {
-        PanelCard(title: "OP-1 MIDI", note: midi.destinations > 0 ? "\(midi.destinations) out" : "not paired") {
-            HStack(spacing: 6) {
-                ChipButton(title: midi.on ? "ON" : "OFF", filled: midi.on) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: midi.on ? "SENDING" : "MUTED", filled: midi.on) {
                     midi.on.toggle(); if !midi.on { midi.panic() }
-                }.frame(width: 44)
+                }
                 ChipButton(title: MidiBridge.scaleNames[midi.scale], filled: false) {
                     midi.scale = (midi.scale + 1) % MidiBridge.scaleNames.count
-                }.frame(width: 60)
-                ChipButton(title: "PAIR", filled: false) { pairing = true }.frame(width: 44)
+                }
+                ChipButton(title: "PAIR", filled: false) { pairing = true }
             }
-            Text("SKIP = note · FLIP = chord · EARTH = pitch")
+            Text(midi.destinations > 0 ? "to: " + midi.names.joined(separator: " · ") : "nothing paired yet — PAIR, then on the OP-1F: COM → MIDI → BT")
+                .font(.hud(8))
+                .foregroundStyle(PastelTheme.textSecondary)
+                .lineLimit(2)
+            Text("SKIP = note · FLIP = chord · EARTH = pitch (both Cafes)")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
         }
         .sheet(isPresented: $pairing, onDismiss: { midi.countDestinations() }) { BluetoothMidiPicker() }
+    }
+}
+
+/// the CAFES panel: the other devices paired with the phone (Bluetooth MIDI: an OP-1F …)
+struct DevicesCard: View {
+    @ObservedObject var midi: MidiBridge
+    @State private var pairing = false
+    var body: some View {
+        PanelCard(title: "OTHER DEVICES", note: midi.destinations > 0 ? "\(midi.destinations) paired" : "none") {
+            if midi.names.isEmpty {
+                Text("No other device. PAIR finds Bluetooth MIDI ones (OP-1F: COM → MIDI → BT).")
+                    .font(.hud(8))
+                    .foregroundStyle(PastelTheme.textSecondary)
+            }
+            ForEach(Array(midi.names.enumerated()), id: \.offset) { _, n in
+                HStack(spacing: 5) {
+                    Circle().fill(PastelTheme.hudOrange).frame(width: 6, height: 6)
+                    Text(n)
+                        .font(.hud(PanelMetrics.labelFont, .semibold))
+                        .foregroundStyle(PastelTheme.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("MIDI")
+                        .font(.hud(8))
+                        .foregroundStyle(PastelTheme.textSecondary)
+                }
+            }
+            HStack(spacing: PanelMetrics.chipSpacing) {
+                ChipButton(title: "PAIR", filled: false) { pairing = true }.frame(width: 50)
+                ChipButton(title: "REFRESH", filled: false) { midi.countDestinations() }.frame(width: 64)
+            }
+        }
+        .sheet(isPresented: $pairing, onDismiss: { midi.countDestinations() }) { BluetoothMidiPicker() }
+        .onAppear { midi.countDestinations() }
     }
 }

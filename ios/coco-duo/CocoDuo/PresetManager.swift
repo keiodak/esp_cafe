@@ -236,7 +236,7 @@ private struct DesignCard: View {
     /// everything but the BLE row, in Apple π's own order (ours where Apple π has the same preset);
     /// HARMONY, RUNGLER and SELF_READ (not in Apple π) at the very end
     static let appleOrder = [0, 11, 1, 12, 4, 13, 14, 3, 15, 16, 17, 18, 5, 19, 20, 21, 22, 24, 25, 26, 27, 23,
-                             28, 29, 30, 31, 32, 33, 34, 35, 6, 7, 8]
+                             28, 29, 30, 31, 32, 33, 34, 35, 7, 8]           // (HARMONY: not offered any more)
 
     private func grid(_ ids: [Int]) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
@@ -410,11 +410,12 @@ private struct ArpCard: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
-        PanelCard(title: "APP+CAFE", note: "phone audio -> Cafe input") {
+        PanelCard(title: "APP+CAFE+OTHER", note: rig.arpMode == 3 ? "Cafe -> OP-1F (Bluetooth MIDI)" : "phone audio -> Cafe input") {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
                 ChipButton(title: "BOX", filled: rig.arpMode == 2) { d.setArpMode(2) }
+                ChipButton(title: "OP-1F", filled: rig.arpMode == 3) { d.setArpMode(3) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -441,6 +442,9 @@ private struct ArpCard: View {
                 SunControls(d: d, rig: rig, sun: d.sun)
                     .opacity(rig.arpMode == 2 ? 1 : 0)
                     .allowsHitTesting(rig.arpMode == 2)
+                Op1Controls(midi: d.midi)
+                    .opacity(rig.arpMode == 3 ? 1 : 0)
+                    .allowsHitTesting(rig.arpMode == 3)
             }
         }
     }

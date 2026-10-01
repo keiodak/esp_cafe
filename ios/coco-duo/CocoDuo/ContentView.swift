@@ -53,6 +53,7 @@ final class Director: ObservableObject {
         guard !started else { return }
         started = true
         midi.watch(units)
+        midi.on = rig.arpMode == 3
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -235,6 +236,7 @@ final class Director: ObservableObject {
             if rig.arpMode == 0 { rig.pcMode = 0; setArpMode(1) }                      //   -> SUNDAY -> ARP
             else if rig.arpMode == 1 && rig.pcMode == 0 { setPcMode(1) }
             else if rig.arpMode == 1 { setArpMode(2) }
+            else if rig.arpMode == 2 { setArpMode(3) }                                 //   -> OP-1F -> ARP
             else { setArpMode(0) }
         }
     }
@@ -355,7 +357,7 @@ final class Director: ObservableObject {
     private var sunCVSent = [-1, -1]
     private var sunCoSent = [[-1, -1, -1], [-1, -1, -1]]
     /// what the Cafe is on APP+CAFE: 0 ARP · 1 PHONE_COCO · 2 ZEITGEIST · 3 COCO (BOX's two)
-    var cafeAdMode: Int { rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : rig.arpMode }
+    var cafeAdMode: Int { rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : (rig.arpMode == 3 ? 0 : rig.arpMode) }
     /// BOX's Cafes: ZEITGEIST (0) or COCO (1)
     func setSunCafe(_ m: Int) {
         rig.sunCafe = m == 1 ? 1 : 0
@@ -468,7 +470,9 @@ final class Director: ObservableObject {
     // MARK: ARP_DELAY: ARP or PHONE_COCO — PHONE_COCO = COCO (the phone's samplers) or SPEECH, the Cafe on COCO in both
 
     func setArpMode(_ m: Int) {
-        rig.arpMode = min(max(m, 0), 2)
+        rig.arpMode = min(max(m, 0), 3)                        // (3 OP-1F: the Cafes play it; the Cafe keeps its tap delay)
+        midi.on = rig.arpMode == 3
+        if !midi.on { midi.panic() }
         if rig.arpMode != 0 { if arp.playing { arp.stop(); rig.arpPlaying = false } }
         if rig.arpMode != 1 {
             pcoco.stop()
@@ -1409,7 +1413,7 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
+                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.arpMode == 3 ? "pianokeys.inverse" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
@@ -1720,7 +1724,7 @@ struct CafesView: View {
                 CameraCard(camera: camera)
             } right: {
                 TempoCard(d: d, rig: d.rig)
-                MidiCard(midi: d.midi)
+                DevicesCard(midi: d.midi)
                 UpdateCard(d: d, rig: d.rig, a: hub.units[0], b: hub.units[1])
             }
         }
