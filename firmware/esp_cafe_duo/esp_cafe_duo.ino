@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.53"
+#define FW_VERSION "4.54"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -215,7 +215,7 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // "G <id>" loads any pool id directly.
 // ------------------------------------------
 void (*pool[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, arpdelay, rungler, selfread, multi, arpdelay,   // 6: APP+CAFE+OTHER (was HARMONY): the Cafe keeps its tap delay, the phone sends its FLIP / SKIP / EARTH on to other instruments (an OP-1F)
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi, arpdelay,
     ie::coco_og, ie::echo_mod, ie::flanger, ie::karplus, ie::reverb_spring, ie::reverb_granular, ie::reverb_feedback,
     ie::harmonizer, ie::external_sync, ie::window, ie::splicer, ie::scrambler, ie::dissolve, ie::sampler,
     ie::sampler_4x, ie::granular, ie::phasing, ie::bytebeats_mod, ie::megabytebeats, ie::arcade, ie::FX,
@@ -1036,13 +1036,13 @@ void ota_service() {                      // loop() while updating: ring -> flas
 //   4 = resonator
 //   5 = formant   (ieat31415)
 //   6 = saturator (ieat31415: BUTTON = next kind)
-//   7 = app+cafe+other (was harmony: the tap delay here; the phone plays an OP-1F etc. from FLIP / SKIP / EARTH)
+//   7 = harmony   (replay in intervals, after norns' rpls: two voices, interval + timing each)
 //   8 = rungler   (coco chopped by an 8-bit shift register: FLIP = clock, SKIP = data)
 //   9 = selfread  (the sound on the tape steers the play head: loaded files make their own paths)
 //  10 = multi     (eight effects: FLIP = next, SKIP = random, crossfaded; EARTH modulates each)
 //  11 = arpdelay  (MULTI's stereo tap delay for the phone's arpeggiator; SKIP = tap tempo, shared with the phone)
 void (*playlist_main[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, arpdelay, rungler, selfread, multi, arpdelay
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, harmony, rungler, selfread, multi, arpdelay
 };
 
 // ------------------------------------------
