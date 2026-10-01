@@ -146,7 +146,7 @@ final class SineChords {
                 if v[k].ph > 2 * Double.pi { v[k].ph -= 2 * Double.pi }
                 if !v[k].gate && v[k].amp < 0.0005 { v[k].live = false }
             }
-            let o = Float(tanh(s * norm * gain * 2.2) * 0.9)                // louder, and a soft limit (no clipping)
+            let o = Float(tanh(s * norm * gain * 1.6) * 0.8)                // louder than at first, a soft limit (2.2 / 0.9 broke up)
             l[i] = o; r[i] = o
         }
     }

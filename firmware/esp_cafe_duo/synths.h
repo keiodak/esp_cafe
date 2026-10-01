@@ -13,6 +13,7 @@
 // ash is clean audio output
 
 extern volatile uint8_t pc_earth, pc_flip, pc_skip;     // (below: the jacks, for the phone)
+volatile int32_t co_wet = 256;       // COCO_MOD's output gain, Q8 (APP+CAFE's and APP+CAFE+OTHER's COCO: louder)
 volatile bool co_noearth = false;    // ARP_DELAY's PHONE_COCO: EARTH leaves the recording alone (it is the phone's pitch);
                                       //   the Cafe's BUTTON (a short press) and the phone's REC switch it
 volatile bool co_rec_toggle = false;  // the phone's REC key ("F 98"): the recording on / off, as a press of EARTH
@@ -147,6 +148,10 @@ void IRAM_ATTR coco_mod() {
   }
 
 
+  if (co_wet != 256) {                                // (the apps' COCO: the wet up, kept inside the DAC)
+    int32_t w = 2048 + (((int32_t)pout - 2048) * co_wet >> 8);
+    pout = w > 4095 ? 4095 : (w < 0 ? 0 : w);
+  }
   ASHWRITER(pout);  //Sends wet audio through ASH. Try swapping out with other Ashes
 
   //MODIFIED FIRMWARE
@@ -4574,8 +4579,8 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
 volatile bool cl_on = false;  // BOX's COCO: LINK ("F 88 3")
 volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
 void IRAM_ATTR arpdelay() {
-  if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; coco_mod(); co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
-  if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; coco_mod(); co_link = false; return; }   // BOX's COCO: a plain COCO (+ LINK)
+  if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; co_wet = 384; coco_mod(); co_wet = 256; co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
+  if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; co_wet = 384; coco_mod(); co_wet = 256; co_link = false; return; }   // BOX's COCO: a plain COCO (+ LINK)
   static uint32_t gen_seen = 0xFFFFFFFF;
   static bool was_in_menu = true;
   static uint32_t bc = 0;

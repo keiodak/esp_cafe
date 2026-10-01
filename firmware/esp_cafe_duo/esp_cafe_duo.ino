@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.66   (2026-10-01: BOUNCE's sine: fixed pitch, SPEED = resolution only)
+// #####   ESP CAFE DUO   v4.67   (2026-10-01: the apps' COCO (APP+CAFE / APP+CAFE+OTHER): wet ×1.5)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.66"
+#define FW_VERSION "4.67"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -271,7 +271,7 @@ static void ot_syn_tick() {
 }
 void other_coco() {
   if (ot_syn) { ot_syn_tick(); return; }
-  co_noearth = true; coco_mod(); co_noearth = false;
+  co_noearth = true; co_wet = 384; coco_mod(); co_wet = 256; co_noearth = false;   // (the wet ×1.5)
 }
 void (*pool[])() = {
     coco_mod, echo_og, coco_pc, resonator, formant, saturator, other_coco, rungler, selfread, multi, arpdelay,   // 6: APP+CAFE+OTHER (was HARMONY): the Cafe plays COCO with slopes (coco_mod, EARTH off REC); the phone plays an OP-1F with its SKIP / FLIP / EARTH
