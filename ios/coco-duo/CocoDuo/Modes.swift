@@ -277,10 +277,17 @@ enum DlPad: Int, CaseIterable {
 // MARK: APP+CAFE+OTHER — the instrument's pads, in pages (BASIC first; more pages can follow)
 /// A row per Cafe (top A, bottom B). What each Cafe's SKIP / FLIP / EARTH play on the other instrument (an OP-1F).
 enum OtPad {
-    /// the layers: COCO+ = the Cafes play COCO and the OP-1 · COCO+SINE = the phone plays sine chords too
-    static let pages = ["COCO+", "COCO+SINE"]
-    /// the MODE key's icon for each layer (its word comes from the key names)
-    static let icons = ["music.note.list", "music.quarternote.3"]
+    /// the variations (the MODE key steps through them; the key beside it goes back):
+    ///   0 COCO+     SKIP = a note on the OP-1 · FLIP = a chord on the OP-1
+    ///   1 COCO+SINE SKIP = a note on the OP-1 · FLIP = a sine chord on the phone (A's CHORD, every DIV-th FLIP)
+    ///   2 STEP      SKIP = the next tone of the chord on the OP-1 (an arpeggio by hand) · FLIP = a new chord from EARTH
+    ///   3 DRONE     SKIP = a note on the OP-1 · FLIP = a sine chord held on the phone, on / off (A's CHORD)
+    ///   4 THIRDS    SKIP = a note on the OP-1 + a sine a third above it on the phone · FLIP = a chord on the OP-1
+    static let pages = ["COCO+", "COCO+SINE", "STEP", "DRONE", "THIRDS"]
+    /// the MODE key's icon for each (its word comes from the key names)
+    static let icons = ["music.note.list", "music.quarternote.3", "stairs", "wave.3.right", "music.note"]
+    /// the variations where the phone sounds (the SINE pad is live there)
+    static let sinePages: Set<Int> = [1, 3, 4]
     /// the eight pads: the one SCALE · ROOT (both Cafes), A's three; the phone's SINE, B's three
     static let titles = ["SCALE · ROOT", "A OCTAVE · RANGE", "A CHORD · SPREAD", "A VELOCITY · LENGTH",
                          "SINE DIV · LEVEL", "B OCTAVE · RANGE", "B CHORD · SPREAD", "B VELOCITY · LENGTH"]
@@ -304,8 +311,8 @@ enum OtPad {
     static func spread(_ y: Double) -> Int { min(2, Int(y * 2 + 0.5)) }
     static func velocity(_ x: Double) -> Int { 30 + Int(x * 97 + 0.5) }
     static func lengthMs(_ y: Double) -> Int { y < 0.03 ? 0 : 30 + Int(y * y * 1970) }  // 0 = HOLD (as long as the gate is up)
-    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
-        if i == 4 { return "÷\(sineDiv(x)) · LEVEL \(Int(y * 100))%" }
+    static func caption(_ i: Int, _ x: Double, _ y: Double, page: Int = 1) -> String {
+        if i == 4 { return page == 1 ? "÷\(sineDiv(x)) · LEVEL \(Int(y * 100))%" : "LEVEL \(Int(y * 100))%" }
         switch i % 4 {
         case 0: return "\(scaleNames[scale(x)]) · \(rootNames[root(y)])"
         case 1: return "C\(octave(x) + 1) · \(range(y)) OCT"
@@ -540,7 +547,7 @@ final class Rig: ObservableObject {
     }()
     func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot3") }
     /// the layer: 0 COCO+ · 1 COCO+SINE (kept)
-    @Published var otPage: Int = min(1, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
+    @Published var otPage: Int = min(4, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
 
     // ARP_DELAY
     let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }

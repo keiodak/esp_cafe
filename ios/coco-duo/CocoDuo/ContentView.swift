@@ -66,7 +66,8 @@ final class Director: ObservableObject {
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
             let other = self.units.contains { $0.isConnected && ($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.other }
             if self.midi.active != other { self.midi.active = other; if !other { self.midi.panic() } }   // APP+CAFE+OTHER: the instrument is played
-            let sineOn = other && self.rig.otPage == 1                                  // COCO+SINE: the phone plays too
+            let sineOn = other && OtPad.sinePages.contains(self.rig.otPage)             // the variations where the phone plays too
+            self.midi.mode = self.rig.otPage
             self.midi.sineOn = sineOn
             self.sines.play(sineOn)
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
@@ -366,6 +367,7 @@ final class Director: ObservableObject {
     }
     /// COCO+ · COCO+SINE
     func setOtPage(_ p: Int) {
+        if p != rig.otPage { midi.panic() }                       // (nothing left sounding from the last variation)
         rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
         refresh()
     }
@@ -1167,7 +1169,9 @@ private struct MainScreen: View {
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
         case .other:                                              // (COCO+: no SINE · COCO+SINE: B's CHORD unused — the sines take A's)
-            return (rig.otAxes[i], (i == 4 && rig.otPage == 0) || (i == 6 && rig.otPage == 1) ? "—" : OtPad.titles[i])
+            let p = rig.otPage
+            let t = i == 4 ? (p == 1 ? "SINE DIV · LEVEL" : "SINE LEVEL") : OtPad.titles[i]
+            return (rig.otAxes[i], (i == 4 && !OtPad.sinePages.contains(p)) || (i == 6 && (p == 1 || p == 3)) ? "—" : t)
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1194,7 +1198,8 @@ private struct MainScreen: View {
         case .fourses:
             return { x, y in FrPad.caption(i, x, y) }
         case .other:
-            return { x, y in OtPad.caption(i, x, y) }
+            let p = rig.otPage
+            return { x, y in OtPad.caption(i, x, y, page: p) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1653,7 +1658,8 @@ private struct HudBar: View {
         case .other:
             switch n {
             case 0: blank
-            case 1: blank
+            case 1: textKey("◀ " + OtPad.pages[(rig.otPage + OtPad.pages.count - 1) % OtPad.pages.count]) {   // the variation before
+                        d.setOtPage((rig.otPage + OtPad.pages.count - 1) % OtPad.pages.count) }
             case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
             default: blank
             }
@@ -1675,7 +1681,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "+SINE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "+SINE", "stairs": "STEP", "wave.3.right": "DRONE", "music.note": "THIRDS", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

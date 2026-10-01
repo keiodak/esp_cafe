@@ -23,6 +23,11 @@ final class MidiBridge: ObservableObject {
     /// COCO+SINE's DIV: a sine chord on every n-th FLIP (each Cafe counts its own)
     var sineDiv = 1
     private var divCount: [[Int]: Int] = [:]
+    /// which variation (OtPad.pages): 0 COCO+ · 1 COCO+SINE · 2 STEP · 3 DRONE · 4 THIRDS
+    var mode = 0
+    private var droneOn = [false, false]
+    private var stepChord: [[UInt8]] = [[], []]
+    private var stepAt = [0, 0]
     /// the last thing played (shown in the CAFES card: is anything going out?)
     @Published var last = ""
     /// each Cafe's scale, root, octave, range, chord, velocity, length (from APP+CAFE+OTHER's pads: OtPad)
@@ -72,6 +77,8 @@ final class MidiBridge: ObservableObject {
 
     /// all notes off (when switched off)
     func panic() {
+        for s in 0..<2 { for k in [0, 1, 9] { sine?.noteOff([s, k]) } }
+        droneOn = [false, false]; stepChord = [[], []]; stepAt = [0, 0]
         for (k, _) in held { sine?.noteOff(k) }
         for (_, notes) in held { for n in notes { send([0x80 | channel, n, 0]) } }
         held = [:]
@@ -80,27 +87,52 @@ final class MidiBridge: ObservableObject {
     // MARK: -
 
     private func gate(_ key: [Int], _ up: Bool, earth: Int, chord: Bool) {
-        let st = settings[min(max(key[0], 0), 1)]
-        let toSine = chord && sineOn && sine != nil                       // COCO+SINE: FLIP = the phone's sine chord (not the OP-1)
-        if toSine {
-            if !up { sine?.noteOff(key); return }                           // (the fall: the chord lets go)
+        let slot = min(max(key[0], 0), 1)
+        let st = settings[slot]
+        let tag = (slot == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ")
+        switch (mode, chord) {
+        case (1, true):                                                     // COCO+SINE · FLIP: the phone's sine chord
+            if !up { sine?.noteOff(key); return }
             guard on, active else { return }
             divCount[key, default: 0] += 1                                  // DIV: every n-th FLIP plays
             guard (divCount[key]! - 1) % max(1, sineDiv) == 0 else { return }
-            let a = settings[0]                                             // (the chord: Cafe A's CHORD · SPREAD · OCTAVE · RANGE)
-            let ns = notes(a, earth: earth, chord: true)
+            let ns = notes(settings[0], earth: earth, chord: true)          // (Cafe A's CHORD · SPREAD · OCTAVE · RANGE)
             sine?.noteOn(key, notes: ns, velocity: 110)
-            last = (key[0] == 0 ? "A " : "B ") + "FLIP → SINE " + names(ns)
+            last = tag + "→ SINE " + names(ns)
             return
+        case (3, true):                                                     // DRONE · FLIP: a held sine chord, on / off
+            guard up, on, active else { return }
+            let dk = [slot, 9]
+            if droneOn[slot] { droneOn[slot] = false; sine?.noteOff(dk); last = tag + "→ DRONE off"; return }
+            let ns = notes(settings[0], earth: earth, chord: true)
+            sine?.noteOn(dk, notes: ns, velocity: 100); droneOn[slot] = true
+            last = tag + "→ DRONE " + names(ns)
+            return
+        case (2, true):                                                     // STEP · FLIP: a new chord (from EARTH), from its first tone
+            guard up, on, active else { return }
+            stepChord[slot] = notes(st, earth: earth, chord: true); stepAt[slot] = 0
+            last = tag + "→ chord " + names(stepChord[slot])
+            return
+        default: break
         }
         if st.lengthMs == 0 || up { off(key) }                            // (HOLD: the fall lets go; a new rise cuts the last)
         guard on, active, up else { return }
-        let ns = notes(st, earth: earth, chord: chord)                     // SKIP: one note · FLIP (COCO+): a chord
+        var ns: [UInt8]
+        if mode == 2 {                                                      // STEP · SKIP: the next tone of the chord
+            if stepChord[slot].isEmpty { stepChord[slot] = notes(st, earth: earth, chord: true) }
+            ns = [stepChord[slot][stepAt[slot] % stepChord[slot].count]]; stepAt[slot] += 1
+        } else {
+            ns = notes(st, earth: earth, chord: chord)                     // SKIP: one note · FLIP: a chord
+        }
         let vel = UInt8(clamping: chord ? max(1, st.velocity - 18) : st.velocity)
         for n in ns { send([0x90 | channel, n, vel]) }
-        last = (key[0] == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ") + names(ns)
-            + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
+        last = tag + names(ns) + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
         held[key] = ns
+        if mode == 4 && !chord {                                            // THIRDS: a sine a third (two scale steps) above
+            let t = notes(st, earth: earth, chord: false, up: 2)
+            sine?.noteOn(key, notes: t, velocity: Int(vel))
+            last += " + SINE " + names(t)
+        }
         if st.lengthMs > 0 {                                                // LENGTH: let go after it, whatever the gate does
             tokens += 1; let t = tokens; token[key] = t
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(st.lengthMs)) { [weak self] in
@@ -109,12 +141,13 @@ final class MidiBridge: ObservableObject {
             }
         }
     }
+
     /// the notes for these settings: EARTH picks where in the scale; a chord is built in the scale (CHORD · SPREAD)
-    private func notes(_ st: OtSettings, earth: Int, chord: Bool) -> [UInt8] {
+    private func notes(_ st: OtSettings, earth: Int, chord: Bool, up: Int = 0) -> [UInt8] {
         let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
         let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
         let steps = sc.count * st.range + 1
-        let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps))))   // EARTH (0…255): where in the scale
+        let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps)))) + up   // EARTH (0…255): where in the scale
         var ds: [Int] = [0]
         if chord {
             switch st.chord {
@@ -139,6 +172,7 @@ final class MidiBridge: ObservableObject {
 
     private func off(_ key: [Int]) {
         token[key] = nil
+        if mode == 4 { sine?.noteOff(key) }                               // (THIRDS: the sine goes with its note)
         if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }
     }
 
