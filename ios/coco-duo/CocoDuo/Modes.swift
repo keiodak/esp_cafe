@@ -285,7 +285,7 @@ enum OtPad {
     ///   4 THIRDS    SKIP = a note on the OP-1 + a sine a third above it on the phone · FLIP = a chord on the OP-1
     /// (all five are COCO+: the Cafe plays COCO; only what SKIP / FLIP play changes — 1…5 in the order above)
     static let pages = ["COCO+1", "COCO+2", "COCO+3", "COCO+4", "COCO+5", "BOUNCE"]
-    /// BOUNCE (after the Tenori-on): the Cafe is a sine synth, three panels of falling balls (Bounce.swift)
+    /// BOUNCE: the Cafe is a sine synth, three panels of falling balls (Bounce.swift)
     static let bounce = 5
     /// the MODE key's icon for each (its word comes from the key names)
     static let icons = ["1.circle", "2.circle", "3.circle", "4.circle", "5.circle", "arrow.down.circle"]

@@ -1,5 +1,5 @@
 // Bounce.swift — coco duo (k.odk)
-// APP+CAFE+OTHER's BOUNCE, after the Tenori-on's bounce: three panels side by side — the phone (sines), the OP-1
+// APP+CAFE+OTHER's BOUNCE: three panels side by side — the phone (sines), the OP-1
 // (Bluetooth MIDI) and the Cafes (their own sine synth; A and B take turns: left, right, left …). Each panel is
 // 12 columns (a note each, from the scale, between the two pointers of the top slider) over 8 rows: a tap drops a
 // ball from that height; it falls a row a tick, sounds its column's note on the floor and bounces back to where it
@@ -24,8 +24,8 @@ final class BounceSeq: ObservableObject {
     @Published var hi: [Double] = (BounceSeq.d.array(forKey: "bn.hi") as? [Double]) ?? [0.75, 0.7, 0.65] { didSet { Self.d.set(hi, forKey: "bn.hi") } }
     /// the bottom slider: decay (0…1 → 0.05 … 3 s), per panel
     @Published var decay: [Double] = (BounceSeq.d.array(forKey: "bn.decay") as? [Double]) ?? [0.4, 0.3, 0.4] { didSet { Self.d.set(decay, forKey: "bn.decay") } }
-    /// GRID (after monome's step sequencers): columns are steps, rows are notes (low at the bottom), a playhead sweeps
-    /// left to right; off = TENORI (the falling balls). Each panel keeps both.
+    /// STEP (a step sequencer): columns are steps, rows are notes (low at the bottom), a playhead sweeps
+    /// left to right; off = DROP (the falling balls). Each panel keeps both.
     @Published var grid: Bool = BounceSeq.d.bool(forKey: "bn.grid") { didSet { Self.d.set(grid, forKey: "bn.grid") } }
     /// GRID's lit cells: per panel, per column, a bit per row (bit 0 = the bottom row)
     @Published var cells: [[Int]] = {
@@ -77,7 +77,7 @@ final class BounceSeq: ObservableObject {
     /// a tap on (panel, column, row from the top): drop a ball from there, or take it away
     func tap(panel p: Int, col c: Int, row r: Int) {
         let h = Self.rows - r
-        // (as the Tenori-on: the lowest row stops the column's ball; elsewhere: drop one from there, again = take it away)
+        // (the lowest row stops the column's ball; elsewhere: drop one from there, again = take it away)
         height[p][c] = (r == Self.rows - 1 || height[p][c] == h) ? 0 : h
         pos[p][c] = max(0, height[p][c] - 1); down[p][c] = true
     }
@@ -160,7 +160,7 @@ struct BounceBoard: View {
     }
 }
 
-/// one panel: the range (two pointers) on top, the dots (Tenori-on's LEDs) in the middle, DECAY below.
+/// one panel: the range (two pointers) on top, the dots in the middle, DECAY below.
 /// (no numbers — the app's rule)
 private struct BouncePanel: View {
     @ObservedObject var seq: BounceSeq
@@ -185,14 +185,14 @@ private struct BouncePanel: View {
                     ForEach(0..<BounceSeq.rows, id: \.self) { r in
                         ForEach(0..<BounceSeq.cols, id: \.self) { c in
                             let y = BounceSeq.rows - 1 - r                      // (rows above the floor)
-                            if seq.grid {                                        // GRID: lit cells; the playhead's column
+                            if seq.grid {                                        // STEP: lit cells; the playhead's column
                                 let lit = seq.cells[p][c] & (1 << y) != 0, head = seq.step[p] == c
                                 Circle()
                                     .fill(lit ? (head ? PastelTheme.hudOrange : PastelTheme.hudBlack)
                                               : PastelTheme.hudBlack.opacity(head ? 0.4 : PastelTheme.tickOffOpacity))
                                     .frame(width: lit ? dot * 1.5 : dot, height: lit ? dot * 1.5 : dot)
                                     .position(x: (CGFloat(c) + 0.5) * cw, y: (CGFloat(r) + 0.5) * rh)
-                            } else {                                             // TENORI: the balls
+                            } else {                                             // DROP: the balls
                                 let h = seq.height[p][c]
                                 let ball = h > 0 && seq.pos[p][c] == y
                                 let from = h > 0 && y == h - 1 && !ball

@@ -1506,7 +1506,7 @@ private struct HudBar: View {
             HStack(spacing: 8) {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
-                else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: TENORI / GRID
+                else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: DROP / STEP
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
