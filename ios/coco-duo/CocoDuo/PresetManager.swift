@@ -85,11 +85,6 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
-                if rig.preset.contains(Preset.other) {
-                    PanelCard(title: "APP+CAFE+OTHER", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
-                        Op1Controls(midi: d.midi)
-                    }
-                }
     }
     @State private var presetsH: CGFloat = 0
     @State private var wvPick = false            // WAVE: FILE (a picker of its own: this is a sheet)
@@ -194,7 +189,7 @@ private struct DesignCard: View {
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
-            grid([2, 9, 10, 6])
+            grid([2, 9, 10])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)
@@ -241,7 +236,7 @@ private struct DesignCard: View {
     /// everything but the BLE row, in Apple π's own order (ours where Apple π has the same preset);
     /// HARMONY, RUNGLER and SELF_READ (not in Apple π) at the very end
     static let appleOrder = [0, 11, 1, 12, 4, 13, 14, 3, 15, 16, 17, 18, 5, 19, 20, 21, 22, 24, 25, 26, 27, 23,
-                             28, 29, 30, 31, 32, 33, 34, 35, 7, 8]           // (HARMONY: not offered any more)
+                             28, 29, 30, 31, 32, 33, 34, 35, 6, 7, 8]
 
     private func grid(_ ids: [Int]) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), alignment: .leading, spacing: 3) {
@@ -446,7 +441,6 @@ private struct ArpCard: View {
                 SunControls(d: d, rig: rig, sun: d.sun)
                     .opacity(rig.arpMode == 2 ? 1 : 0)
                     .allowsHitTesting(rig.arpMode == 2)
-
             }
         }
     }

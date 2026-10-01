@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "APP+CAFE+OTHER", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -39,7 +39,7 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "the Cafes play another instrument (OP-1F …) over Bluetooth MIDI · SKIP note · FLIP chord · EARTH pitch",
+        "replay in intervals (like rpls) · 2 voices: interval + timing",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
@@ -74,7 +74,7 @@ enum Preset {
     static let poolCount = 36
     static let maxPlaylist = 11
     /// the presets played from the phone over Bluetooth (their rows are tinted)
-    static let phonePlayed: Set<Int> = [2, 6, 9, 10]
+    static let phonePlayed: Set<Int> = [2, 9, 10]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
@@ -82,10 +82,7 @@ enum Preset {
     /// our own presets (0–10): the ones with CHAR values and phone pads
     static let count = 11
     static let ble = 2
-    /// HARMONY is gone (its place, 6, is APP+CAFE+OTHER): nothing is it any more
-    static let harmony = -99
-    /// APP+CAFE+OTHER: the Cafes play another instrument (an OP-1F) through the phone; the Cafe keeps a tap delay
-    static let other = 6
+    static let harmony = 6
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
@@ -545,7 +542,6 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
-        if ctxPreset == Preset.other { return .knob }                   // (APP+CAFE+OTHER: no pads; the Cafe plays the instrument)
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
