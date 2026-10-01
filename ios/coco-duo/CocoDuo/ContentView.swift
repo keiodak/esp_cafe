@@ -53,6 +53,7 @@ final class Director: ObservableObject {
         guard !started else { return }
         started = true
         midi.watch(units)
+        applyOther()
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -133,6 +134,7 @@ final class Director: ObservableObject {
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
         case .speech: return rig.spAxes
+        case .other: return rig.otAxes
         case .pcoco: return rig.pcAxes
         case .sun: return rig.sunAxes
         case .knob: return []
@@ -337,9 +339,28 @@ final class Director: ObservableObject {
         case .arp:
             if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
+        case .other:
+            let row = i / 4, k = i % 4
+            if rig.otLink && k == 0 {                                 // LINK SCALE: A's and B's SCALE · ROOT move together
+                let j = (1 - row) * 4
+                rig.otAxes[j].x = rig.otAxes[i].x; rig.otAxes[j].y = rig.otAxes[i].y
+            }
+            rig.saveOt()
+            applyOther()
         case .knob:
             break
         }
+    }
+
+    // MARK: APP+CAFE+OTHER: the pads -> what each Cafe plays on the other instrument
+
+    func applyOther() {
+        midi.settings = (0..<2).map { OtPad.settings(rig.otAxes, slot: $0, link: rig.otLink) }
+    }
+    func setOtLink(_ on: Bool) {
+        rig.otLink = on
+        if on { rig.otAxes[4].x = rig.otAxes[0].x; rig.otAxes[4].y = rig.otAxes[0].y; rig.saveOt() }   // (B takes A's scale)
+        applyOther()
     }
 
     // MARK: SUNDAY (APP+CAFE): the outer pads play the phone, the inner ones move the Cafes (L = A, R = B)
@@ -1138,6 +1159,7 @@ private struct MainScreen: View {
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
+        case .other: return (rig.otAxes[i], OtPad.titles[i % 4])
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1163,6 +1185,9 @@ private struct MainScreen: View {
             return { x, y in HabitPad.caption(i, x, y) }
         case .fourses:
             return { x, y in FrPad.caption(i, x, y) }
+        case .other:
+            let linked = rig.otLink && i == 4
+            return { x, y in (linked ? "= A · " : "") + OtPad.caption(i % 4, x, y) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1617,6 +1642,13 @@ private struct HudBar: View {
             case 2: key("dice") { d.fxRandom(0) }
             default: key("dice") { d.fxRandom(1) }
             }
+        case .other:
+            switch n {
+            case 0: textKey(OtPad.pages[min(rig.otPage, OtPad.pages.count - 1)], on: true) { rig.otPage = (rig.otPage + 1) % OtPad.pages.count }
+            case 1: key("link", on: rig.otLink) { d.setOtLink(!rig.otLink) }
+            case 2: key("stop.fill") { d.midi.panic() }
+            default: blank
+            }
         case .knob:
             blank
         }
@@ -1752,6 +1784,13 @@ private struct CafeLine: View {
                     .font(.system(size: PanelMetrics.valueFont, design: .monospaced))
                     .foregroundStyle(PastelTheme.textSecondary)
                     .lineLimit(1)
+                if unit.isConnected {                                          // the firmware's version, beside "connected"
+                    Text("v\(unit.fw.isEmpty ? "?" : unit.fw)")
+                        .font(.hud(PanelMetrics.labelFont, .semibold))
+                        .foregroundStyle(PastelTheme.textPrimary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
                 Spacer(minLength: 0)
                 ChipButton(title: "DISC", filled: false) { hub.disconnect(unit.slot) }.frame(width: 36)
                 ChipButton(title: "FORGET", filled: false) { hub.forget(unit.slot) }.frame(width: 48)

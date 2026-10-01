@@ -87,7 +87,7 @@ struct PresetManagerView: View {
                 }
                 if rig.preset.contains(Preset.other) {
                     PanelCard(title: "APP+CAFE+OTHER", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
-                        Op1Controls(midi: d.midi)
+                        Op1Controls(d: d, midi: d.midi, rig: rig)
                     }
                 }
     }

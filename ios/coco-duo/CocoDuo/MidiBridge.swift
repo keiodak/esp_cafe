@@ -17,13 +17,12 @@ final class MidiBridge: ObservableObject {
     @Published var destinations = 0
     /// their names (the OP-1 field, once paired, among them)
     @Published var names: [String] = []
-    /// the scale EARTH walks through (0 major · 1 minor · 2 pentatonic · 3 dorian)
-    @Published var scale = 2
-    static let scaleNames = ["MAJOR", "MINOR", "PENTA", "DORIAN"]
-    private static let scales: [[Int]] = [[0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 7, 9], [0, 2, 3, 5, 7, 9, 10]]
-    /// the lowest note (C3) and how many steps of the scale EARTH spans (about two octaves)
-    private let root = 48
+    /// each Cafe's scale, root, octave, range, chord, velocity, length (from APP+CAFE+OTHER's pads: OtPad)
+    var settings: [OtSettings] = [OtSettings(), OtSettings()]
     private let channel: UInt8 = 0
+    /// a SKIP / FLIP that plays with a set LENGTH: its own number, so a later one is not cut by an earlier timer
+    private var token: [[Int]: Int] = [:]
+    private var tokens = 0
 
     private var client = MIDIClientRef()
     private var port = MIDIPortRef()
@@ -72,15 +71,45 @@ final class MidiBridge: ObservableObject {
     // MARK: -
 
     private func gate(_ key: [Int], _ up: Bool, earth: Int, chord: Bool) {
-        if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }   // (the fall: let go)
+        let st = settings[min(max(key[0], 0), 1)]
+        if st.lengthMs == 0 || up { off(key) }                            // (HOLD: the fall lets go; a new rise cuts the last)
         guard on, active, up else { return }
-        let sc = Self.scales[min(scale, Self.scales.count - 1)]
-        let steps = sc.count * 2 + 1
+        let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
+        let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
+        let steps = sc.count * st.range + 1
         let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps))))   // EARTH (0…255): where in the scale
-        func note(_ d: Int) -> UInt8 { UInt8(clamping: root + 12 * (d / sc.count) + sc[d % sc.count]) }
-        let notes: [UInt8] = chord ? [note(deg), note(deg + 2), note(deg + 4)] : [note(deg)]   // (FLIP: its triad in the scale)
-        for n in notes { send([0x90 | channel, n, chord ? 90 : 108]) }
+        func note(_ d: Int) -> Int { base + 12 * (d / sc.count) + sc[d % sc.count] }
+        var ds: [Int]
+        if !chord { ds = [0] }
+        else {
+            switch st.chord {                                               // (FLIP: a chord built in the scale)
+            case 1: ds = [0, 2, 4, 6]
+            case 2: ds = [0, 3, 4]
+            case 3: ds = [0, 4, sc.count]
+            case 4: ds = [0, 2, 4, 6, 8]
+            case 5: ds = [0, sc.count]
+            default: ds = [0, 2, 4]
+            }
+        }
+        var ns = ds.map { note(deg + $0) }
+        if chord && st.spread > 0 && ns.count > 2 {                         // OPEN: the 2nd up an octave · WIDE: every other one
+            for i in stride(from: 1, to: ns.count, by: st.spread == 1 ? ns.count : 2) { ns[i] += 12 }
+        }
+        let notes = ns.map { UInt8(clamping: min(127, max(0, $0))) }
+        let vel = UInt8(clamping: chord ? max(1, st.velocity - 18) : st.velocity)
+        for n in notes { send([0x90 | channel, n, vel]) }
         held[key] = notes
+        if st.lengthMs > 0 {                                                // LENGTH: let go after it, whatever the gate does
+            tokens += 1; let t = tokens; token[key] = t
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(st.lengthMs)) { [weak self] in
+                guard let self, self.token[key] == t else { return }
+                self.off(key)
+            }
+        }
+    }
+    private func off(_ key: [Int]) {
+        token[key] = nil
+        if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }
     }
 
     private func send(_ bytes: [UInt8]) {
@@ -101,26 +130,31 @@ struct BluetoothMidiPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UINavigationController, context: Context) {}
 }
 
-/// APP+CAFE+OTHER · OP-1F: on / off, the scale, pairing
+/// APP+CAFE+OTHER · OP-1F: on / off, the pads' page, LINK, pairing (the scales and the rest are on the XY pads)
 struct Op1Controls: View {
+    let d: Director
     @ObservedObject var midi: MidiBridge
+    @ObservedObject var rig: Rig
     @State private var pairing = false
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: PanelMetrics.chipSpacing) {                    // the pads' pages (BASIC first)
+                ForEach(OtPad.pages.indices, id: \.self) { p in
+                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { rig.otPage = p }
+                }
+            }
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: midi.on ? "SENDING" : "MUTED", filled: midi.on) {
                     midi.on.toggle(); if !midi.on { midi.panic() }
                 }
-                ChipButton(title: MidiBridge.scaleNames[midi.scale], filled: false) {
-                    midi.scale = (midi.scale + 1) % MidiBridge.scaleNames.count
-                }
+                ChipButton(title: "LINK SCALE", filled: rig.otLink) { d.setOtLink(!rig.otLink) }
                 ChipButton(title: "PAIR", filled: false) { pairing = true }
             }
             Text(midi.destinations > 0 ? "to: " + midi.names.joined(separator: " · ") : "nothing paired yet — PAIR, then on the OP-1F: COM → MIDI → BT")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
                 .lineLimit(2)
-            Text("SKIP = note · FLIP = chord · EARTH = pitch (both Cafes)")
+            Text("SKIP = note · FLIP = chord · EARTH = pitch · pads: A top, B bottom · LINK SCALE = B on A's scale")
                 .font(.hud(8))
                 .foregroundStyle(PastelTheme.textSecondary)
         }

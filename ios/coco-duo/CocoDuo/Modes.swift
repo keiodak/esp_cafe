@@ -114,7 +114,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, other, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
@@ -274,6 +274,45 @@ enum DlPad: Int, CaseIterable {
 }
 
 /// HARMONY (rpls-like replay): per Cafe, VOICE 1 / VOICE 2 = interval (X) and timing in the cycle (Y)
+// MARK: APP+CAFE+OTHER — the instrument's pads, in pages (BASIC first; more pages can follow)
+/// A row per Cafe (top A, bottom B). What each Cafe's SKIP / FLIP / EARTH play on the other instrument (an OP-1F).
+enum OtPad {
+    static let pages = ["BASIC"]
+    static let titles = ["SCALE · ROOT", "OCTAVE · RANGE", "CHORD · SPREAD", "VELOCITY · LENGTH"]
+    static let starts: [(Double, Double)] = [(2.0 / 7.0, 0.0), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
+    static let scaleNames = ["MAJOR", "MINOR", "PENTA", "MIN PENTA", "DORIAN", "MIXOLYD", "LYDIAN", "HARM MIN"]
+    static let scales: [[Int]] = [[0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 7, 9], [0, 3, 5, 7, 10],
+                                  [0, 2, 3, 5, 7, 9, 10], [0, 2, 4, 5, 7, 9, 10], [0, 2, 4, 6, 7, 9, 11], [0, 2, 3, 5, 7, 8, 11]]
+    static let rootNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    static let chordNames = ["TRIAD", "7TH", "SUS4", "POWER", "9TH", "OCTAVE"]
+    static let spreadNames = ["CLOSE", "OPEN", "WIDE"]
+    static func scale(_ x: Double) -> Int { min(scaleNames.count - 1, Int(x * Double(scaleNames.count - 1) + 0.5)) }
+    static func root(_ y: Double) -> Int { min(11, Int(y * 11 + 0.5)) }
+    static func octave(_ x: Double) -> Int { min(4, Int(x * 4 + 0.5)) }                 // 0…4 = C1…C5
+    static func range(_ y: Double) -> Int { min(4, Int(y * 3 + 0.5) + 1) }             // 1…4 octaves of EARTH
+    static func chord(_ x: Double) -> Int { min(chordNames.count - 1, Int(x * Double(chordNames.count - 1) + 0.5)) }
+    static func spread(_ y: Double) -> Int { min(2, Int(y * 2 + 0.5)) }
+    static func velocity(_ x: Double) -> Int { 30 + Int(x * 97 + 0.5) }
+    static func lengthMs(_ y: Double) -> Int { y < 0.03 ? 0 : 30 + Int(y * y * 1970) }  // 0 = HOLD (as long as the gate is up)
+    static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
+        switch k {
+        case 0: return "\(scaleNames[scale(x)]) · \(rootNames[root(y)])"
+        case 1: return "C\(octave(x) + 1) · \(range(y)) OCT"
+        case 2: return "\(chordNames[chord(x)]) · \(spreadNames[spread(y)])"
+        default: let l = lengthMs(y); return "VEL \(velocity(x)) · " + (l == 0 ? "HOLD" : "\(l) MS")
+        }
+    }
+    /// one Cafe's settings from the eight pads (LINK: B takes A's scale and root)
+    static func settings(_ a: [PadAxis], slot: Int, link: Bool) -> OtSettings {
+        let r = slot * 4, sr = link ? 0 : r
+        return OtSettings(scale: scale(a[sr].x), root: root(a[sr].y), octave: octave(a[r + 1].x), range: range(a[r + 1].y),
+                          chord: chord(a[r + 2].x), spread: spread(a[r + 2].y), velocity: velocity(a[r + 3].x), lengthMs: lengthMs(a[r + 3].y))
+    }
+}
+struct OtSettings {
+    var scale = 2, root = 0, octave = 2, range = 2, chord = 0, spread = 0, velocity = 108, lengthMs = 0
+}
+
 enum HdPad: Int, CaseIterable {
     case voice1, voice2, cycle, tape
     // after rpls: the tape turns once a second (no CYCLE); ECHO = record-to-record feedback, OVERDUB = the voices
@@ -483,6 +522,15 @@ final class Rig: ObservableObject {
     @Published var fxEarth = 0.62          // F 95: EARTH depth
     @Published var fxLock = 0.3            // F 96: the shortest time between changes, 0.05 + v² × 4.95 s
 
+    // APP+CAFE+OTHER: the instrument's pads (kept), its page, LINK (B on A's scale)
+    let otAxes: [PadAxis] = {
+        let v = (Rig.d.array(forKey: "rig.ot") as? [Double]) ?? []
+        return (0..<8).map { i in v.count == 16 ? PadAxis((v[2 * i], v[2 * i + 1])) : PadAxis(OtPad.starts[i % 4]) }
+    }()
+    func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot") }
+    @Published var otPage = 0
+    @Published var otLink: Bool = Rig.d.bool(forKey: "rig.otLink") { didSet { Self.d.set(otLink, forKey: "rig.otLink") } }
+
     // ARP_DELAY
     let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }
     /// SPEECH: its own four on top, COCO's SPEED · DUB, LOOP, EARTH FM and FILTER below (the same pads as BLE's COCO)
@@ -545,14 +593,14 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
-        if ctxPreset == Preset.other { return .knob }                   // (APP+CAFE+OTHER: no pads; the Cafe plays the instrument)
+        if ctxPreset == Preset.other { return .other }                  // (APP+CAFE+OTHER: the instrument's pads, A over B)
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses][min(max(ctxMode, 0), 7)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
-    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi }
+    var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi || padSet == .other }
     /// the TAP pad (tempo): the 4th pad of each row where there is a tempo (ARP: only the bottom row's)
     func isTapPad(_ i: Int) -> Bool {
         switch padSet {
