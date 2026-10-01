@@ -11,6 +11,9 @@ final class SineChords {
     var level = 0.6
     /// seconds a voice takes to die away once let go (the SINE pad's Y)
     var release = 0.6
+    /// the voice's sound (BOUNCE's iOS key): 0 SINE · 1 TRI · 2 BELL (FM, ×1.4, the index dying with the note) · 3 ORGAN · 4 SQUARE
+    static let waveNames = ["SINE", "TRI", "BELL", "ORGAN", "SQUARE"]
+    var wave = 0
     private(set) var playing = false
 
     private let engine = AVAudioEngine()
@@ -23,7 +26,7 @@ final class SineChords {
     private var pending: [Ev] = []
 
     // the voices (audio thread only)
-    private struct Voice { var key: [Int] = []; var hz = 0.0; var ph = 0.0; var amp = 0.0; var target = 0.0; var gate = false; var vel = 0.0; var live = false; var hold = 0; var rel = 0.0 }
+    private struct Voice { var key: [Int] = []; var hz = 0.0; var ph = 0.0; var amp = 0.0; var target = 0.0; var gate = false; var vel = 0.0; var live = false; var hold = 0; var rel = 0.0; var mph = 0.0 }
     private var v = [Voice](repeating: Voice(), count: 16)
     private var gain = 0.0
 
@@ -120,6 +123,7 @@ final class SineChords {
         let n = Double(max(1, live))
         let norm = 0.32 / sqrt(n)                                              // (a chord as loud as a note, nearly)
         let tw = 2 * Double.pi / sr
+        let wv = wave
         for i in 0..<frames {
             gain += (want - gain) * 0.0008
             var s = 0.0
@@ -127,7 +131,17 @@ final class SineChords {
                 let tgt = v[k].gate ? v[k].vel : 0
                 v[k].amp += (tgt - v[k].amp) * (v[k].gate ? att : (v[k].rel > 0 ? v[k].rel : rel))
                 if v[k].hold > 0 { v[k].hold -= 1; if v[k].hold == 0 { v[k].gate = false } }
-                s += sin(v[k].ph) * v[k].amp
+                let ph = v[k].ph
+                var w: Double
+                switch wv {
+                case 1: w = 1 - 4 * abs(ph / (2 * Double.pi) - 0.5)                                  // TRI
+                case 2: w = sin(ph + 2.4 * (v[k].amp / max(0.01, v[k].vel)) * sin(v[k].mph))        // BELL
+                        v[k].mph += v[k].hz * 1.4 * tw; if v[k].mph > 2 * Double.pi { v[k].mph -= 2 * Double.pi }
+                case 3: w = (sin(ph) + 0.5 * sin(2 * ph) + 0.25 * sin(3 * ph)) * 0.62               // ORGAN
+                case 4: w = (sin(ph) + sin(3 * ph) / 3 + sin(5 * ph) / 5 + sin(7 * ph) / 7) * 0.85 // SQUARE (soft)
+                default: w = sin(ph)
+                }
+                s += w * v[k].amp
                 v[k].ph += v[k].hz * tw
                 if v[k].ph > 2 * Double.pi { v[k].ph -= 2 * Double.pi }
                 if !v[k].gate && v[k].amp < 0.0005 { v[k].live = false }

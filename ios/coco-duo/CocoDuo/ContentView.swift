@@ -79,6 +79,7 @@ final class Director: ObservableObject {
             self.sines.play(sineOn)
             self.bounce.running = bouncing
             self.bounce.bpm = self.rig.bpm
+            self.sines.wave = self.bounce.iosWave
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
@@ -1496,6 +1497,7 @@ private struct HudBar: View {
             HStack(spacing: 8) {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
+                else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: TENORI / GRID
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
@@ -1685,9 +1687,9 @@ private struct HudBar: View {
         case .other:
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) } else { blank }   // BOUNCE: TEMPO or FLIP SYNC
-            case 1: blank
+            case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) } else { blank }       // BOUNCE: the phone's sound
             case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
-            default: blank
+            default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } } else { blank }   // BOUNCE: SYNC
             }
         case .knob:
             blank
