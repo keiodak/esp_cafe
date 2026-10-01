@@ -38,6 +38,11 @@ final class BounceSeq: ObservableObject {
     /// ALIGN: the phone's and the OP-1's notes held back ~35 ms, so they land with the Cafes' (Bluetooth makes those late)
     @Published var align: Bool = (BounceSeq.d.object(forKey: "bn.align") as? Bool) ?? true { didSet { Self.d.set(align, forKey: "bn.align") } }
     static let alignMs = 35
+    /// the OP-1's own Bluetooth MIDI lag (it gives nothing back to measure: a guess)
+    static let op1Ms = 15.0
+    /// LINK: the Cafes' lag as measured (ms, the slowest Cafe; 0 = not yet) and what the phone / OP-1 then wait
+    @Published var cafeLag: Double = 0
+    @Published var waitMs: [Double] = [0, 0]
     /// the phone's sound (SineChords.waveNames)
     @Published var iosWave: Int = BounceSeq.d.integer(forKey: "bn.wave") { didSet { Self.d.set(iosWave, forKey: "bn.wave") } }
     /// GRID's playhead per panel
@@ -294,7 +299,9 @@ struct BounceAlignChip: View {
     var body: some View {
         HStack(spacing: PanelMetrics.chipSpacing) {
             ChipButton(title: "LINK", filled: seq.align) { seq.align.toggle() }
-            Text("iOS / OP-1 wait for the Cafes (Bluetooth lag)")
+            Text(seq.cafeLag > 0
+                 ? String(format: "CAFE +%.0f ms (measured) · iOS waits %.0f · OP-1 waits %.0f", seq.cafeLag, seq.waitMs[0], seq.waitMs[1])
+                 : "measuring the Cafes' lag… (until then: a 35 ms guess)")
                 .font(.hud(8)).foregroundStyle(PastelTheme.textSecondary).lineLimit(1)
         }
     }

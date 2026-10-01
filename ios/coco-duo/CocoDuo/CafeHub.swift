@@ -68,6 +68,17 @@ final class CafeUnit: ObservableObject {
     /// FOURSES: its four horses' LEDs, each 0…15 (how long it was lit in the last ~30 ms)
     @Published var frLeds = [0, 0, 0, 0]
     @Published var flip = false
+    /// the Bluetooth lag, measured: half the round trip of a "P" (ping) to its HELLO, the median of the last nine (ms; 0 = not yet)
+    @Published var lagMs: Double = 0
+    private var pingAt: Date?
+    private var rtts: [Double] = []
+    /// measure the lag once more (no more than one ping in flight)
+    func ping() {
+        guard rx != nil else { return }
+        if let t = pingAt, Date().timeIntervalSince(t) < 1 { return }
+        pingAt = Date()
+        send("P")
+    }
     @Published var skip = false
     @Published var button = false
     /// the BLE preset's mode (0 GRAIN, 1 RUNGLER, 2 DELAY, 3 NOISE) and the Cafe's tempo, as it reports them
@@ -225,6 +236,12 @@ final class CafeUnit: ObservableObject {
         if l.hasPrefix("HELLO") {                                       // "HELLO coco-duo <version> <name> ota"
             let w = l.split(separator: " ")
             if w.count >= 3 { fw = String(w[2]) }
+            if let t = pingAt {                                         // LINK: a ping came back — its round trip
+                pingAt = nil
+                rtts.append(Date().timeIntervalSince(t) * 1000)
+                if rtts.count > 9 { rtts.removeFirst() }
+                lagMs = rtts.sorted()[rtts.count / 2] / 2
+            }
             return
         }
         guard let c = l.first else { return }

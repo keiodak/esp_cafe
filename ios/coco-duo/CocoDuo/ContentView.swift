@@ -18,6 +18,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import CoreMotion
+import AVFoundation
 
 final class PadAxis: ObservableObject {
     @Published var x: Double
@@ -46,6 +47,7 @@ final class Director: ObservableObject {
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
     /// BOUNCE: the Cafes take turns (A, B, A …)
+    private var pingTick = 0
     private var bounceTurn = 0
     var units: [CafeUnit] { hub.units }
     private var started = false
@@ -84,6 +86,12 @@ final class Director: ObservableObject {
             self.bounce.running = bouncing
             self.bounce.bpm = self.rig.bpm
             self.sines.wave = self.bounce.iosWave
+            if bouncing && self.bounce.align {                         // LINK: the Cafes' lag measured every ~2 s
+                self.pingTick += 1
+                if self.pingTick % 66 == 0 { for u in self.units where u.isConnected && self.rig.preset[u.slot] == Preset.other { u.ping() } }
+                let lags = self.units.filter { $0.isConnected && $0.lagMs > 0 && self.rig.preset[$0.slot] == Preset.other }.map { $0.lagMs }
+                self.bounce.cafeLag = lags.max() ?? 0
+            }
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
@@ -400,8 +408,13 @@ final class Director: ObservableObject {
     }
     /// BOUNCE: a ball on the floor — panel 0 the phone's sine, 1 the OP-1, 2 a Cafe (A and B in turn: left, right)
     func bounceNote(_ p: Int, _ c: Int, _ n: UInt8, _ dec: Double) {
-        if p < 2 && bounce.align {                                // ALIGN: wait as long as the Cafes' notes take to arrive
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(BounceSeq.alignMs)) { [weak self] in
+        if p < 2 && bounce.align {                                // LINK: wait as long as the Cafes' notes take to arrive (measured)
+            let cafe = bounce.cafeLag > 0 ? bounce.cafeLag : Double(BounceSeq.alignMs)   // (not measured yet: the guess)
+            let s = AVAudioSession.sharedInstance()
+            let ios = (s.outputLatency + s.ioBufferDuration) * 1000    // (the phone's own sound is that late already)
+            let wait = p == 0 ? cafe - ios : cafe - BounceSeq.op1Ms
+            bounce.waitMs[p] = max(0, wait)
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(max(0, wait)))) { [weak self] in
                 guard let self else { return }
                 if p == 0 { self.sines.pluck(n, velocity: 100, decay: dec) } else { self.midi.playNote(n, velocity: 100, ms: Int(dec * 1000)) }
             }
