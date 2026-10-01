@@ -130,35 +130,23 @@ struct BluetoothMidiPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UINavigationController, context: Context) {}
 }
 
-/// APP+CAFE+OTHER · OP-1F: on / off, the pads' page, LINK, pairing (the scales and the rest are on the XY pads)
+/// APP+CAFE+OTHER: its layers (BASIC first, as APP+CAFE's ARP / PHONE_COCO / BOX) and LINK SCALE.
+/// (Pairing is in the CAFES card; the scales and the rest are on the XY pads.)
 struct Op1Controls: View {
     let d: Director
     @ObservedObject var midi: MidiBridge
     @ObservedObject var rig: Rig
-    @State private var pairing = false
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: PanelMetrics.chipSpacing) {                    // the pads' pages (BASIC first)
+            HStack(spacing: PanelMetrics.chipSpacing) {
                 ForEach(OtPad.pages.indices, id: \.self) { p in
-                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { rig.otPage = p }
+                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { rig.otPage = p; d.refresh() }
                 }
             }
             HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: midi.on ? "SENDING" : "MUTED", filled: midi.on) {
-                    midi.on.toggle(); if !midi.on { midi.panic() }
-                }
                 ChipButton(title: "LINK SCALE", filled: rig.otLink) { d.setOtLink(!rig.otLink) }
-                ChipButton(title: "PAIR", filled: false) { pairing = true }
             }
-            Text(midi.destinations > 0 ? "to: " + midi.names.joined(separator: " · ") : "nothing paired yet — PAIR, then on the OP-1F: COM → MIDI → BT")
-                .font(.hud(8))
-                .foregroundStyle(PastelTheme.textSecondary)
-                .lineLimit(2)
-            Text("SKIP = note · FLIP = chord · EARTH = pitch · pads: A top, B bottom · LINK SCALE = B on A's scale")
-                .font(.hud(8))
-                .foregroundStyle(PastelTheme.textSecondary)
         }
-        .sheet(isPresented: $pairing, onDismiss: { midi.countDestinations() }) { BluetoothMidiPicker() }
     }
 }
 
