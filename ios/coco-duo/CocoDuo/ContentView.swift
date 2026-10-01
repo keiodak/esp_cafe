@@ -394,6 +394,8 @@ final class Director: ObservableObject {
         if p != rig.otPage { midi.panic() }                       // (nothing left sounding from the last variation)
         rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // (BOUNCE: the Cafe a synth)
+        bounce.running = rig.ctxPreset == Preset.other && rig.otPage == OtPad.bounce   // (BOUNCE: at once, not on the next 30 Hz tick)
+        if bounce.running { sines.play(true) }
         refresh()
     }
 

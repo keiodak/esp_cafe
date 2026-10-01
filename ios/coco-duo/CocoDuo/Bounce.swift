@@ -3,7 +3,7 @@
 // (Bluetooth MIDI) and the Cafes (their own sine synth; A and B take turns: left, right, left …). Each panel is
 // 12 columns (a note each, from the scale, between the two pointers of the top slider) over 8 rows: a tap drops a
 // ball from that height; it falls a row a tick, sounds its column's note on the floor and bounces back to where it
-// started (a tap on the same cell takes it away). The bottom slider is the decay. The tick: the TEMPO (16ths), or
+// started (the lower, the faster it repeats). A tap on the lowest row (or on the same dot again) stops it. The bottom slider is the decay. The tick: the TEMPO (16ths), or
 // the Cafes' FLIP (FLIP SYNC: every FLIP that goes up is one tick).
 
 import Combine
@@ -59,7 +59,8 @@ final class BounceSeq: ObservableObject {
     /// a tap on (panel, column, row from the top): drop a ball from there, or take it away
     func tap(panel p: Int, col c: Int, row r: Int) {
         let h = Self.rows - r
-        height[p][c] = height[p][c] == h ? 0 : h
+        // (as the Tenori-on: the lowest row stops the column's ball; elsewhere: drop one from there, again = take it away)
+        height[p][c] = (r == Self.rows - 1 || height[p][c] == h) ? 0 : h
         pos[p][c] = max(0, height[p][c] - 1); down[p][c] = true
     }
     func clear(panel p: Int) {
@@ -104,100 +105,60 @@ struct BounceBoard: View {
     @ObservedObject var seq: BounceSeq
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ForEach(0..<3, id: \.self) { p in BouncePanel(seq: seq, p: p) }
         }
     }
 }
 
+/// one panel: the range (two pointers) on top, the dots (Tenori-on's LEDs) in the middle, DECAY below.
+/// (no numbers — the app's rule)
 private struct BouncePanel: View {
     @ObservedObject var seq: BounceSeq
     let p: Int
 
     var body: some View {
-        VStack(spacing: 5) {
-            HStack {
-                Text(BounceSeq.panelNames[p] + (p == 2 ? "  L·R" : ""))
-                    .font(.hud(9, .semibold)).foregroundStyle(PastelTheme.textPrimary)
-                Spacer(minLength: 0)
-                Text(rangeText).font(.hud(8)).foregroundStyle(PastelTheme.textSecondary)
-            }
-            BounceRange(lo: $seq.lo[p], hi: $seq.hi[p])
-                .frame(height: 18)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(BounceSeq.panelNames[p] + (p == 2 ? " · L R" : ""))
+                .font(.hud(PanelMetrics.labelFont, .semibold))
+                .foregroundStyle(PastelTheme.textPrimary)
+            RangeSlider(low: $seq.lo[p], high: $seq.hi[p])
             GeometryReader { g in
                 let cw = g.size.width / CGFloat(BounceSeq.cols), rh = g.size.height / CGFloat(BounceSeq.rows)
+                let dot = max(4, min(cw, rh) * 0.42)
                 ZStack(alignment: .topLeading) {
-                    Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1)
-                    ForEach(0..<BounceSeq.cols, id: \.self) { c in
-                        let h = seq.height[p][c]
-                        if h > 0 {
-                            // where it drops from (an outline) and the ball (filled); the floor lights when it sounds
-                            Rectangle().strokeBorder(PastelTheme.hudBlack.opacity(0.5), lineWidth: 1)
-                                .frame(width: cw - 3, height: rh - 3)
-                                .offset(x: CGFloat(c) * cw + 1.5, y: CGFloat(BounceSeq.rows - h) * rh + 1.5)
-                            Circle().fill(seq.hit[p][c] ? PastelTheme.hudOrange : PastelTheme.hudBlack)
-                                .frame(width: min(cw, rh) - 5, height: min(cw, rh) - 5)
-                                .offset(x: CGFloat(c) * cw + (cw - min(cw, rh) + 5) / 2,
-                                        y: CGFloat(BounceSeq.rows - 1 - seq.pos[p][c]) * rh + (rh - min(cw, rh) + 5) / 2)
+                    ForEach(0..<BounceSeq.rows, id: \.self) { r in
+                        ForEach(0..<BounceSeq.cols, id: \.self) { c in
+                            let h = seq.height[p][c]
+                            let y = BounceSeq.rows - 1 - r                      // (rows above the floor)
+                            let ball = h > 0 && seq.pos[p][c] == y
+                            let from = h > 0 && y == h - 1 && !ball
+                            Circle()
+                                .fill(ball ? (y == 0 && seq.hit[p][c] ? PastelTheme.hudOrange : PastelTheme.hudBlack)
+                                           : PastelTheme.hudBlack.opacity(from ? 0.45 : PastelTheme.tickOffOpacity))
+                                .frame(width: ball ? dot * 1.5 : dot, height: ball ? dot * 1.5 : dot)
+                                .position(x: (CGFloat(c) + 0.5) * cw, y: (CGFloat(r) + 0.5) * rh)
                         }
                     }
                 }
+                .frame(width: g.size.width, height: g.size.height)
                 .contentShape(Rectangle())
-                .gesture(SpatialTapGesture().onEnded { e in
+                .gesture(DragGesture(minimumDistance: 0).onEnded { e in
                     let c = min(BounceSeq.cols - 1, max(0, Int(e.location.x / cw)))
                     let r = min(BounceSeq.rows - 1, max(0, Int(e.location.y / rh)))
                     seq.tap(panel: p, col: c, row: r)
                 })
             }
-            HStack(spacing: 6) {
-                Text("DECAY").font(.hud(8)).foregroundStyle(PastelTheme.textSecondary)
-                Slider(value: $seq.decay[p], in: 0...1).tint(PastelTheme.hudBlack)
-                Text(String(format: "%.2fS", BounceSeq.decaySec(seq.decay[p]))).font(.hud(8)).foregroundStyle(PastelTheme.textSecondary)
-                    .frame(width: 32, alignment: .trailing)
+            HStack(spacing: PanelMetrics.rowGap) {
+                Text("DECAY")
+                    .font(.hud(PanelMetrics.labelFont, .medium))
+                    .foregroundStyle(PastelTheme.textPrimary)
+                CompactSlider(value: $seq.decay[p], fillColor: PastelTheme.sliderFill,
+                              knobColor: PastelTheme.hudOrange, thinLine: true)
             }
-            .frame(height: 18)
         }
-        .padding(6)
+        .padding(8)
         .background(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
-    }
-
-    private var rangeText: String {
-        let names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        func n(_ v: UInt8) -> String { names[Int(v) % 12] + "\(Int(v) / 12 - 1)" }
-        return n(seq.note(panel: p, col: 0)) + "–" + n(seq.note(panel: p, col: BounceSeq.cols - 1))
-    }
-}
-
-/// a slider with two pointers (the pitch range)
-private struct BounceRange: View {
-    @Binding var lo: Double
-    @Binding var hi: Double
-    @State private var grabbing = 0          // 0 none · 1 lo · 2 hi
-
-    var body: some View {
-        GeometryReader { g in
-            let w = max(1, g.size.width - 12)
-            ZStack(alignment: .leading) {
-                Rectangle().fill(PastelTheme.hudLine).frame(height: 2).offset(x: 6)
-                Rectangle().fill(PastelTheme.hudBlack)
-                    .frame(width: CGFloat(abs(hi - lo)) * w, height: 3)
-                    .offset(x: 6 + CGFloat(min(lo, hi)) * w)
-                thumb.offset(x: CGFloat(lo) * w)
-                thumb.offset(x: CGFloat(hi) * w)
-            }
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { e in
-                    let v = min(1, max(0, Double((e.location.x - 6) / w)))
-                    if grabbing == 0 { grabbing = abs(v - lo) <= abs(v - hi) ? 1 : 2 }
-                    if grabbing == 1 { lo = v } else { hi = v }
-                }
-                .onEnded { _ in grabbing = 0 })
-        }
-    }
-    private var thumb: some View {
-        Rectangle().fill(PastelTheme.hudBlack).frame(width: 12, height: 14)
     }
 }
 
