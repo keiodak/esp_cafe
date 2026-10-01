@@ -363,7 +363,6 @@ final class Director: ObservableObject {
             if i < 4 || i == 6 { applyArp() }                          // (6 = voice 2's RATE · SWING in STEREO)
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .other:
-            let row = i / 4, k = i % 4
             rig.saveOt()
             applyOther()
         case .knob:
