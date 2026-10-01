@@ -1713,7 +1713,7 @@ private struct HudBar: View {
             case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) }                           // BOUNCE: the phone's sound
                     else { BounceKey(title: "\(rig.otPage + 1)", on: true) { d.setOtPage((rig.otPage + 1) % OtPad.bounce) } }   // COCO+: 1…5
             case 2: OtScaleKey(axis: rig.otAxes[0]) { d.nextOtScale() }            // the scale (the SCALE · ROOT pad's X)
-            default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } }   // BOUNCE: SYNC
+            default: if rig.otPage == OtPad.bounce { key("hand.tap") { d.tapTempo(); d.bounce.sync() } }   // BOUNCE: TAP (the tempo, and the downbeat)
                      else { BounceKey(title: "FREEZE", on: rig.otFreeze) { d.otFreezeToggle() } }             // COCO+: the Cafes' COCO frozen
             }
         case .knob:

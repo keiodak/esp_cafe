@@ -39,13 +39,11 @@ final class BounceSeq: ObservableObject {
     @Published var iosWave: Int = BounceSeq.d.integer(forKey: "bn.wave") { didSet { Self.d.set(iosWave, forKey: "bn.wave") } }
     /// GRID's playhead per panel
     @Published private(set) var step = [-1, -1, -1]
-    private var divAt = [0, 0, 0]
     /// FLIP SYNC: the Cafes' FLIP is the tick (off: the TEMPO)
     @Published var flipSync: Bool = BounceSeq.d.bool(forKey: "bn.flip") { didSet { Self.d.set(flipSync, forKey: "bn.flip"); retime() } }
     /// where each ball is now (rows above the floor) and which way it goes; which columns just sounded (for the light)
     @Published private(set) var pos: [[Int]] = Array(repeating: Array(repeating: 0, count: BounceSeq.cols), count: 3)
     @Published private(set) var hit: [[Bool]] = Array(repeating: Array(repeating: false, count: BounceSeq.cols), count: 3)
-    private var down: [[Bool]] = Array(repeating: Array(repeating: true, count: BounceSeq.cols), count: 3)
 
     /// the scale the columns take their notes from (set by the Director from the SCALE · ROOT pad)
     var scale: [Int] = [0, 2, 4, 7, 9]
@@ -81,7 +79,6 @@ final class BounceSeq: ObservableObject {
         let h = Self.rows - r
         // (the lowest row stops the column's ball; elsewhere: drop one from there, again = take it away)
         height[p][c] = (r == Self.rows - 1 || height[p][c] == h) ? 0 : h
-        pos[p][c] = max(0, height[p][c] - 1); down[p][c] = true
     }
     /// CLR: the panel empty (what is shown: the balls, or the grid)
     func clear(panel p: Int) {
@@ -91,14 +88,12 @@ final class BounceSeq: ObservableObject {
     func nextDiv(panel p: Int) {
         let i = Self.divs.firstIndex(of: div[p]) ?? 0
         div[p] = Self.divs[(i + 1) % Self.divs.count]
-        divAt[p] = 0
     }
     /// GRID: a cell on / off (row from the top)
     func toggle(panel p: Int, col c: Int, row r: Int) { cells[p][c] ^= 1 << (Self.rows - 1 - r) }
-    /// SYNC: all from the start — the balls back where they drop from, the playheads to the first step
+    /// the downbeat (TAP): all from the start — the balls back where they drop from, the playheads to the first step
     func sync() {
-        for p in 0..<3 { for c in 0..<Self.cols { pos[p][c] = max(0, height[p][c] - 1); down[p][c] = true } }
-        step = [-1, -1, -1]; divAt = [0, 0, 0]
+        count = -1                                                      // (the next tick is the first: all on the floor)
     }
     /// GRID: a row's note (8 notes between the two pointers, low at the bottom), snapped to the scale
     func rowNote(panel p: Int, row y: Int) -> UInt8 {
@@ -107,16 +102,19 @@ final class BounceSeq: ObservableObject {
     }
 
     /// one tick: every ball a row on; those on the floor sound
+    /// the one count every panel and ball is worked out from: they never drift apart (always in sync)
+    private var count = -1
     func tick() {
         guard running else { return }
         onTick?()
+        count += 1
         var hits = Array(repeating: Array(repeating: false, count: Self.cols), count: 3)
         for p in 0..<3 {
-            divAt[p] += 1                                               // DIVIDE: this panel moves on every n-th tick
-            if divAt[p] < max(1, div[p]) { hits[p] = hit[p]; continue }
-            divAt[p] = 0
-            if grid {                                                   // GRID: the playhead a step on; its lit cells sound
-                let c = (step[p] + 1) % Self.cols
+            let dv = max(1, div[p])                                     // DIVIDE: this panel moves on every n-th tick
+            if count % dv != 0 { hits[p] = hit[p]; continue }
+            let n = count / dv                                          // (this panel's own steps, from the same count)
+            if grid {                                                   // STEP: the playhead; its lit cells sound
+                let c = n % Self.cols
                 step[p] = c
                 for y in 0..<Self.rows where cells[p][c] & (1 << y) != 0 {
                     hits[p][c] = true
@@ -124,12 +122,13 @@ final class BounceSeq: ObservableObject {
                 }
                 continue
             }
-            for c in 0..<Self.cols where height[p][c] > 0 {
+            for c in 0..<Self.cols where height[p][c] > 0 {            // DROP: each ball where the count puts it
                 let top = height[p][c] - 1
-                var y = min(pos[p][c], top)
-                if top == 0 { y = 0 }                                   // (on the floor: a note every tick)
-                else if down[p][c] { y -= 1; if y <= 0 { y = 0; down[p][c] = false } }
-                else { y += 1; if y >= top { y = top; down[p][c] = true } }
+                var y = 0
+                if top > 0 {
+                    let ph = (n + top) % (2 * top)                       // (count 0: every ball on the floor together)
+                    y = ph <= top ? top - ph : ph - top
+                }
                 pos[p][c] = y
                 if y == 0 {
                     hits[p][c] = true
