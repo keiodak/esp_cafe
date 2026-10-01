@@ -313,7 +313,7 @@ final class Rig: ObservableObject {
     private static let d = UserDefaults.standard
 
     /// the preset each Cafe is on (app side, 0-based) and the BLE preset's mode per Cafe
-    @Published var preset: [Int] = (Rig.d.array(forKey: "rig.preset") as? [Int]) ?? [Preset.ble, Preset.ble] {
+    @Published var preset: [Int] = ((Rig.d.array(forKey: "rig.preset") as? [Int]) ?? [Preset.ble, Preset.ble]).map { $0 == Preset.harmony ? Preset.ble : $0 } {
         didSet { Self.d.set(preset, forKey: "rig.preset") }
     }
     @Published var mode: [Int] = (Rig.d.array(forKey: "rig.mode") as? [Int]) ?? [0, 0] {
@@ -343,15 +343,18 @@ final class Rig: ObservableObject {
         didSet { Preset.order = playlist; Self.d.set(playlist, forKey: "rig.playlist") }
     }
     /// PRESET DESIGN memories 1–5: saved sets of the 11 slots ([] = nothing saved)
-    @Published var designBank: [[Int]] = (Rig.d.array(forKey: "rig.designBank") as? [[Int]]).flatMap { $0.count == 5 ? $0 : nil }
-        ?? Array(repeating: [], count: 5) {
+    @Published var designBank: [[Int]] = ((Rig.d.array(forKey: "rig.designBank") as? [[Int]]).flatMap { $0.count == 5 ? $0 : nil }
+        ?? Array(repeating: [], count: 5)).map { b in                    // (HARMONY: out of the saved sets too)
+            let k = b.filter { $0 != Preset.harmony }; return b.isEmpty ? b : k + Array(repeating: -1, count: b.count - k.count) } {
         didSet { Self.d.set(designBank, forKey: "rig.designBank") }
     }
     /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
     @Published var design: [Int] = {
-        let v = ((Rig.d.array(forKey: "rig.design") as? [Int]) ?? []).map { $0 == Preset.harmony ? -1 : $0 }   // (HARMONY: gone)
+        // (HARMONY: gone — taken out and the rest moved up, an empty slot at the end)
+        func noHarmony(_ a: [Int]) -> [Int] { let k = a.filter { $0 != Preset.harmony }; return k + Array(repeating: -1, count: a.count - k.count) }
+        let v = noHarmony((Rig.d.array(forKey: "rig.design") as? [Int]) ?? [])
         if v.count == Preset.maxPlaylist { return v }
-        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist
+        let p = ((Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist).filter { $0 != Preset.harmony }
         return Array((p + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
     }() {
         didSet { Self.d.set(design, forKey: "rig.design") }
