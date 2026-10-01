@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.63   (2026-10-01: APP+CAFE+OTHER's COCO = coco_mod (slopes), EARTH off REC)
+// #####   ESP CAFE DUO   v4.64   (2026-10-01: APP+CAFE+OTHER BOUNCE: the Cafe as a sine synth, F 85 / F 86)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.63"
+#define FW_VERSION "4.64"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -224,7 +224,44 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // ------------------------------------------
 // APP+CAFE+OTHER (pool 6): COCO with the click-free slopes (COCO_MOD: the REC gain ramps, SKIP's jump crossfades —
 // the same 131072-sample loop as coco_og), and EARTH does not toggle the recording (it is the OP-1's pitch there)
-void IRAM_ATTR other_coco() { co_noearth = true; coco_mod(); co_noearth = false; }
+// BOUNCE ("F 86 1"): the Cafe is a small sine synth instead — four voices, each a sine (wv_sin) that starts at phase 0
+// (no click) and dies away by its own decay; "F 85 <midi note> <decay ms>" plays one (the phone's bouncing balls).
+volatile uint8_t ot_syn = 0;
+volatile uint32_t sy_inc[4] = {0, 0, 0, 0}, sy_ph[4] = {0, 0, 0, 0};
+volatile int32_t sy_amp[4] = {0, 0, 0, 0}, sy_k[4] = {65536, 65536, 65536, 65536};   // amp Q15 · decay per sample Q16
+static void ot_syn_tick() {
+  DACWRITER(pout)
+  gyo = ADCREADER
+    pc_samples++;
+  earth_ac();
+  int32_t s = 0, loud = 0;
+  for (int v = 0; v < 4; v++) {
+    int32_t a = sy_amp[v];
+    if (a > 4) {
+      uint32_t p = sy_ph[v];
+      s += (wv_sin[p >> 24] * a) >> 15;
+      sy_ph[v] = p + sy_inc[v];
+      sy_amp[v] = (a * sy_k[v]) >> 16;
+      if (a > loud) loud = a;
+    }
+  }
+  int32_t o = (s >> 1) + 2048;                        // (four at full: ±4094 -> halved)
+  if (o > 4095) o = 4095; if (o < 0) o = 0;
+  pout = o;
+  ASHWRITER(o);
+  YELLOW_PULSE(loud > 8000 ? 4095 : 0);               // (a gate while a note is loud)
+  if (loud > 8000) { LAMP_ON; } else { LAMP_OFF; }
+  REG(I2S_CONF_REG)
+  [0] &= ~(BIT(5));
+  REG(I2S_INT_CLR_REG)
+  [0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)
+  [0] |= (BIT(5));
+}
+void other_coco() {
+  if (ot_syn) { ot_syn_tick(); return; }
+  co_noearth = true; coco_mod(); co_noearth = false;
+}
 void (*pool[])() = {
     coco_mod, echo_og, coco_pc, resonator, formant, saturator, other_coco, rungler, selfread, multi, arpdelay,   // 6: APP+CAFE+OTHER (was HARMONY): the Cafe plays COCO with slopes (coco_mod, EARTH off REC); the phone plays an OP-1F with its SKIP / FLIP / EARTH
     ie::coco_og, ie::echo_mod, ie::flanger, ie::karplus, ie::reverb_spring, ie::reverb_granular, ie::reverb_feedback,
@@ -755,6 +792,21 @@ void earth_guard() {
 volatile int pc_goto = -1;                  // "G <n>": the phone asks for preset n (handled in loop)
 
 void ota_cmd(char *s);
+// BOUNCE: one sine note on the next of the four voices (on the clock as measured: in tune whatever SPEED does)
+void sy_note(int note, int ms) {
+  static uint8_t nx = 0;
+  if (wv_sin[64] == 0) for (int i = 0; i <= 256; i++) wv_sin[i] = (int16_t)(2047.0f * sinf(6.2831853f * i / 256.0f));
+  if (note < 0) note = 0; if (note > 127) note = 127;
+  if (ms < 10) ms = 10; if (ms > 8000) ms = 8000;
+  float sr = sx_hz > 1000 ? sx_hz : clock_hz();
+  float hz = 440.0f * powf(2.0f, (note - 69) / 12.0f);
+  int v = nx; nx = (nx + 1) & 3;
+  sy_amp[v] = 0;
+  sy_ph[v] = 0;
+  sy_inc[v] = (uint32_t)(hz / sr * 4294967295.0f);
+  sy_k[v] = (int32_t)(65536.0f * expf(-6.9f / (ms * 0.001f * sr)));   // (to -60 dB in ms)
+  sy_amp[v] = 26000;
+}
 void pc_line(char *s) {
   if (s[0] == 'U') { hb_armed = false; ota_cmd(s); return; }   // (an update: HABIT stops sending at once)
   if (ota_active) return;                   // updating: nothing else
@@ -808,6 +860,8 @@ void pc_line(char *s) {
                 else if (e == 93) fx_trig = true;
                 else if (e == 94 && k >= 2) fx_hold_app = id != 0;
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
+                else if (e == 86 && k >= 2) ot_syn = id != 0;                // APP+CAFE+OTHER: BOUNCE (the sine synth) or COCO
+                else if (e == 85 && k >= 3) sy_note((int)id, (int)val);      // BOUNCE: a note (midi note, decay ms)
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
                 else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
                 else if (e == 88 && k >= 3) {                                // BOX's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK
