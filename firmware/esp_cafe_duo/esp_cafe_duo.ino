@@ -1,3 +1,8 @@
+// ##### FIRMWARE VERSION ###########################
+// #####   ESP CAFE DUO   v4.55   (2026-10-01)
+// #####   (= FW_VERSION below; bump both together)
+// ###################################################
+
 // ==========================================
 // MENU
 // ==========================================
@@ -57,7 +62,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.54"
+#define FW_VERSION "4.55"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -237,9 +242,17 @@ static void fl_check() {
   Serial.printf("[fw] v%s, flashed %lu times (this build: %s)\n", FW_VERSION, (unsigned long)fl_count, id);
 }
 static void pl_save() {
-  Preferences pr; if (!pr.begin("cafe", false)) return;
+  // v4.55: writing flash shuts the flash cache off; the audio interrupt (IRAM, still running) then reads tables that
+  // live in flash and the Cafe crashes — and the phone sends the same list again on reconnect = frozen at every boot.
+  // So the audio stops for the write (as the phone's "G" does) and starts again after.
+  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+  detachInterrupt(2);
   uint8_t b[11]; for (int i = 0; i < 11; i++) b[i] = i < active_preset_count ? (uint8_t)pl_id[i] : 0xFF;
-  pr.putBytes("pl", b, 11); pr.end();
+  { Preferences pr; if (pr.begin("cafe", false)) { pr.putBytes("pl", b, 11); pr.end(); } }
+  PRESETTER(pool[preset]);
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= (BIT(5));
+  Serial.println("[pl] playlist saved to flash (audio paused for it)");
 }
 static void pl_load() {
   Preferences pr; uint8_t b[11]; int n = 0;
