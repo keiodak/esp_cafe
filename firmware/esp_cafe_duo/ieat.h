@@ -214,7 +214,6 @@ void morph_to_16bit(int new_owner, int target_len) {
 // earth is record on/off switch
 // ash is clean audio output
 
-volatile bool coco_noearth = false;   // (k.odk) set around a call: EARTH leaves REC alone
 void  coco_og() {
 
 morph_to_8bit(); //needed for buffer translation
@@ -250,9 +249,7 @@ if (smoothed_earth == -1) {
 }
 
 // HYSTERESIS (Using earth_cv)
- // (k.odk: coco_noearth = EARTH does not toggle the recording — APP+CAFE+OTHER, where EARTH is the OP-1's pitch)
- if (coco_noearth) { }
- else if (earth_last_state == 0) {
+ if (earth_last_state == 0) {
      if (smoothed_earth  > TRIGGER_ON_THRESHOLD) {
          lamp = !lamp; 
          audio_frozen_state = lamp;

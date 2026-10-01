@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.62   (2026-10-01: APP+CAFE+OTHER's COCO: EARTH no longer toggles REC)
+// #####   ESP CAFE DUO   v4.63   (2026-10-01: APP+CAFE+OTHER's COCO = coco_mod (slopes), EARTH off REC)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.62"
+#define FW_VERSION "4.63"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -222,10 +222,11 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // namespace ie). The phone picks up to 11 of them as the playlist ("L ..."), kept in flash (NVS).
 // "G <id>" loads any pool id directly.
 // ------------------------------------------
-// APP+CAFE+OTHER (pool 6): Apple π's plain COCO, but EARTH does not toggle the recording (it is the OP-1's pitch there)
-void other_coco() { ie::coco_noearth = true; ie::coco_og(); ie::coco_noearth = false; }
+// APP+CAFE+OTHER (pool 6): COCO with the click-free slopes (COCO_MOD: the REC gain ramps, SKIP's jump crossfades —
+// the same 131072-sample loop as coco_og), and EARTH does not toggle the recording (it is the OP-1's pitch there)
+void IRAM_ATTR other_coco() { co_noearth = true; coco_mod(); co_noearth = false; }
 void (*pool[])() = {
-    coco_mod, echo_og, coco_pc, resonator, formant, saturator, other_coco, rungler, selfread, multi, arpdelay,   // 6: APP+CAFE+OTHER (was HARMONY): the Cafe plays a plain COCO (Apple π's coco_og, EARTH off REC); the phone plays an OP-1F with its SKIP / FLIP / EARTH
+    coco_mod, echo_og, coco_pc, resonator, formant, saturator, other_coco, rungler, selfread, multi, arpdelay,   // 6: APP+CAFE+OTHER (was HARMONY): the Cafe plays COCO with slopes (coco_mod, EARTH off REC); the phone plays an OP-1F with its SKIP / FLIP / EARTH
     ie::coco_og, ie::echo_mod, ie::flanger, ie::karplus, ie::reverb_spring, ie::reverb_granular, ie::reverb_feedback,
     ie::harmonizer, ie::external_sync, ie::window, ie::splicer, ie::scrambler, ie::dissolve, ie::sampler,
     ie::sampler_4x, ie::granular, ie::phasing, ie::bytebeats_mod, ie::megabytebeats, ie::arcade, ie::FX,
