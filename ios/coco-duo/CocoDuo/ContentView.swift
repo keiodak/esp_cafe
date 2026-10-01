@@ -260,8 +260,8 @@ final class Director: ObservableObject {
             else if rig.arpMode == 1 { setArpMode(2) }
             else { setArpMode(0) }
         }
-        else if rig.ctxPreset == Preset.other {                                      // APP+CAFE+OTHER: its layers (BASIC first)
-            setOtPage((rig.otPage + 1) % OtPad.pages.count)
+        else if rig.ctxPreset == Preset.other {                                      // APP+CAFE+OTHER: COCO+ <-> BOUNCE
+            setOtPage(rig.otPage == OtPad.bounce ? rig.otVar : OtPad.bounce)
         }
     }
 
@@ -402,6 +402,7 @@ final class Director: ObservableObject {
     func setOtPage(_ p: Int) {
         if p != rig.otPage { midi.panic() }                       // (nothing left sounding from the last variation)
         rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
+        if rig.otPage < OtPad.bounce { rig.otVar = rig.otPage }  // (COCO+'s variation, kept)
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // (BOUNCE: the Cafe a synth)
         bounce.running = rig.ctxPreset == Preset.other && rig.otPage == OtPad.bounce   // (BOUNCE: at once, not on the next 30 Hz tick)
         if bounce.running { sines.play(true) }
@@ -1488,7 +1489,7 @@ private struct HudBar: View {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
                         key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
-                            : rig.ctxPreset == Preset.other ? OtPad.icons[min(rig.otPage, OtPad.icons.count - 1)]          // APP+CAFE+OTHER: BASIC …
+                            : rig.ctxPreset == Preset.other ? (rig.otPage == OtPad.bounce ? "arrow.down.circle" : "music.note.list")   // APP+CAFE+OTHER: COCO+ · BOUNCE
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.other) { d.cycleMode() }
                     }
@@ -1695,7 +1696,8 @@ private struct HudBar: View {
         case .other:
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) } else { blank }   // BOUNCE: TEMPO or FLIP SYNC
-            case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) } else { blank }       // BOUNCE: the phone's sound
+            case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) }                           // BOUNCE: the phone's sound
+                    else { BounceKey(title: "\(rig.otPage + 1)", on: true) { d.setOtPage((rig.otPage + 1) % OtPad.bounce) } }   // COCO+: 1…5
             case 2: OtScaleKey(axis: rig.otAxes[0]) { d.nextOtScale() }            // the scale (the SCALE · ROOT pad's X)
             default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } } else { blank }   // BOUNCE: SYNC
             }
@@ -1717,7 +1719,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "arrow.down.circle": "BOUNCE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "arrow.down.circle": "BOUNCE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

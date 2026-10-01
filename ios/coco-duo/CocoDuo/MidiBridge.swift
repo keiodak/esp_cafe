@@ -218,8 +218,14 @@ struct Op1Controls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: PanelMetrics.chipSpacing) {
-                ForEach(OtPad.pages.indices, id: \.self) { p in
-                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { d.setOtPage(p) }
+                ChipButton(title: "COCO+", filled: rig.otPage != OtPad.bounce) { d.setOtPage(rig.otVar) }
+                ChipButton(title: "BOUNCE", filled: rig.otPage == OtPad.bounce) { d.setOtPage(OtPad.bounce) }
+            }
+            if rig.otPage != OtPad.bounce {                                 // COCO+'s five: what SKIP / FLIP play
+                HStack(spacing: PanelMetrics.chipSpacing) {
+                    ForEach(0..<OtPad.bounce, id: \.self) { v in
+                        ChipButton(title: "\(v + 1)", filled: rig.otPage == v) { d.setOtPage(v) }
+                    }
                 }
             }
         }
