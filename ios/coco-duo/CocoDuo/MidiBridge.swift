@@ -17,6 +17,8 @@ final class MidiBridge: ObservableObject {
     @Published var destinations = 0
     /// their names (the OP-1 field, once paired, among them)
     @Published var names: [String] = []
+    /// the last thing played (shown in the CAFES card: is anything going out?)
+    @Published var last = ""
     /// each Cafe's scale, root, octave, range, chord, velocity, length (from APP+CAFE+OTHER's pads: OtPad)
     var settings: [OtSettings] = [OtSettings(), OtSettings()]
     private let channel: UInt8 = 0
@@ -98,6 +100,9 @@ final class MidiBridge: ObservableObject {
         let notes = ns.map { UInt8(clamping: min(127, max(0, $0))) }
         let vel = UInt8(clamping: chord ? max(1, st.velocity - 18) : st.velocity)
         for n in notes { send([0x90 | channel, n, vel]) }
+        let nn = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        last = (key[0] == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ") + notes.map { nn[Int($0) % 12] + "\(Int($0) / 12 - 1)" }.joined(separator: " ")
+            + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
         held[key] = notes
         if st.lengthMs > 0 {                                                // LENGTH: let go after it, whatever the gate does
             tokens += 1; let t = tokens; token[key] = t
@@ -157,7 +162,7 @@ struct DevicesSection: View {
     var body: some View {
         HStack(spacing: 5) {
             HudTag(text: "+", fill: midi.destinations > 0 ? PastelTheme.hudOrange : PastelTheme.hudLine, size: 8)
-            Text(midi.names.isEmpty ? "no other device" : midi.names.joined(separator: " · "))
+            Text((midi.names.isEmpty ? "no other device" : midi.names.joined(separator: " · ")) + (midi.last.isEmpty ? "" : "  ♪ " + midi.last))
                 .font(.hud(PanelMetrics.labelFont, .semibold))
                 .foregroundStyle(midi.names.isEmpty ? PastelTheme.textSecondary : PastelTheme.textPrimary)
                 .lineLimit(1)
