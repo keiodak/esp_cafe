@@ -1658,8 +1658,7 @@ private struct HudBar: View {
         case .other:
             switch n {
             case 0: blank
-            case 1: textKey("◀ " + OtPad.pages[(rig.otPage + OtPad.pages.count - 1) % OtPad.pages.count]) {   // the variation before
-                        d.setOtPage((rig.otPage + OtPad.pages.count - 1) % OtPad.pages.count) }
+            case 1: blank
             case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
             default: blank
             }
@@ -1681,7 +1680,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "+SINE", "stairs": "STEP", "wave.3.right": "DRONE", "music.note": "THIRDS", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "SINE", "stairs": "STEP", "wave.3.right": "DRONE", "music.note": "THIRDS", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

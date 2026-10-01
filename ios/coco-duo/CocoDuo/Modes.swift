@@ -277,13 +277,13 @@ enum DlPad: Int, CaseIterable {
 // MARK: APP+CAFE+OTHER — the instrument's pads, in pages (BASIC first; more pages can follow)
 /// A row per Cafe (top A, bottom B). What each Cafe's SKIP / FLIP / EARTH play on the other instrument (an OP-1F).
 enum OtPad {
-    /// the variations (the MODE key steps through them; the key beside it goes back):
+    /// the variations (the MODE key steps through them):
     ///   0 COCO+     SKIP = a note on the OP-1 · FLIP = a chord on the OP-1
     ///   1 COCO+SINE SKIP = a note on the OP-1 · FLIP = a sine chord on the phone (A's CHORD, every DIV-th FLIP)
     ///   2 STEP      SKIP = the next tone of the chord on the OP-1 (an arpeggio by hand) · FLIP = a new chord from EARTH
     ///   3 DRONE     SKIP = a note on the OP-1 · FLIP = a sine chord held on the phone, on / off (A's CHORD)
     ///   4 THIRDS    SKIP = a note on the OP-1 + a sine a third above it on the phone · FLIP = a chord on the OP-1
-    static let pages = ["COCO+", "COCO+SINE", "STEP", "DRONE", "THIRDS"]
+    static let pages = ["COCO+", "SINE", "STEP", "DRONE", "THIRDS"]
     /// the MODE key's icon for each (its word comes from the key names)
     static let icons = ["music.note.list", "music.quarternote.3", "stairs", "wave.3.right", "music.note"]
     /// the variations where the phone sounds (the SINE pad is live there)
