@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.56   (2026-10-01: v4.48 + tape fits when the heap is short)
+// #####   ESP CAFE DUO   v4.57   (2026-10-01: v4.56 + FOURSES from v4.49/4.50)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -62,7 +62,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.56"
+#define FW_VERSION "4.57"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service

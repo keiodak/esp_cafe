@@ -2559,6 +2559,15 @@ static void tp_rebuild() {
   tp_gen++;
   tp_cur = (uint8_t)b;
 }
+// the tails' currents against the pot (33 steps), at 8.4 V — from SPICE sweeps of the full netlist (the iOS Fourses'):
+// the shape of each rate over the pot, as the circuit really bends it (not a pure exponential)
+static const float tp_tup[33] = { 2.6013e-05f, 3.0988e-05f, 3.6820e-05f, 4.3621e-05f, 5.1505e-05f, 6.0583e-05f, 7.0956e-05f, 8.2707e-05f, 9.5889e-05f, 1.1052e-04f, 1.2656e-04f, 1.4392e-04f, 1.6246e-04f, 1.8194e-04f, 2.0212e-04f, 2.2266e-04f, 2.4324e-04f, 2.6350e-04f, 2.8313e-04f, 3.0183e-04f, 3.1936e-04f, 3.3557e-04f, 3.5033e-04f, 3.6362e-04f, 3.7545e-04f, 3.8584e-04f, 3.9491e-04f, 4.0275e-04f, 4.0949e-04f, 4.1523e-04f, 4.2013e-04f, 4.2427e-04f, 4.2775e-04f };
+static const float tp_tdn[33] = { 2.9523e-04f, 2.6517e-04f, 2.3656e-04f, 2.0928e-04f, 1.8365e-04f, 1.5996e-04f, 1.3836e-04f, 1.1893e-04f, 1.0165e-04f, 8.6445e-05f, 7.3195e-05f, 6.1741e-05f, 5.1907e-05f, 4.3516e-05f, 3.6394e-05f, 3.0375e-05f, 2.5308e-05f, 2.1055e-05f, 1.7496e-05f, 1.4524e-05f, 1.2046e-05f, 9.9826e-06f, 8.2683e-06f, 6.8445e-06f, 5.6637e-06f, 4.6847e-06f, 3.8737e-06f, 3.2027e-06f, 2.6468e-06f, 2.1873e-06f, 1.8085e-06f, 1.4932e-06f, 1.2342e-06f };
+static float tp_tail(const float *t, float x) {               // (log-interpolated: the tails are near-exponential)
+  if (x < 0) x = 0; if (x > 1) x = 1;
+  float fi = x * 32.0f; int i = (int)fi; if (i > 31) i = 31; float fr = fi - i;
+  return expf(logf(t[i]) * (1 - fr) + logf(t[i + 1]) * fr);
+}
 static void fr_update() {                                    // (the loop: floats are fine here)
   static bool once = false;
   if (!once) { once = true; for (int r = 0; r < 11; r++) for (int h = 0; h < 4; h++) tp_ix[r][h] = (int8_t)tp_node(r, h); }
@@ -2569,10 +2578,12 @@ static void fr_update() {                                    // (the loop: float
     float c = fr_p[4 + h] >= 750 ? 1.0f : (fr_p[4 + h] >= 250 ? 30.0f : 1000.0f);
     float base = 150000.0f * 32000.0f / hz / c;                          // µV a sample, pot in the middle, pairs balanced
     tp_kc[h] = (int32_t)(5000.0f * 32000.0f / hz / c);
-    float p = fr_p[h] / 1000.0f - 0.5f;
-    float e = expf(6.7f * p);                                             // 470K / 10K onto a base: ×800 over the pot
-    tp_up[h] = (int32_t)fminf(base * e, 3000000.0f);
-    tp_dn[h] = (int32_t)fminf(base * (arp ? e : 1.0f / e), 3000000.0f);   // (ARPSERGE: one rate)
+    float x = fr_p[h] / 1000.0f;
+    // the rates over the pot as SPICE has them (each against its own middle, so the middle stays where it was)
+    float ku = tp_tail(tp_tup, x) / tp_tup[16], kd = tp_tail(tp_tdn, x) / tp_tdn[16];
+    float ka = tp_tail(tp_tdn, 1.0f - x) / tp_tdn[16];                   // (ARPSERGE: one rate, the pot as it is)
+    tp_up[h] = (int32_t)fminf(base * (arp ? ka : ku), 3000000.0f);
+    tp_dn[h] = (int32_t)fminf(base * (arp ? ka : kd), 3000000.0f);
   }
 }
 static void tp_link(int a, int b, int v) {                   // (the loop) a touch / a wire between two nodes
@@ -2721,8 +2732,15 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
       fu = tp_sig[ix];
     }
     int32_t dp = 0;
-    if (ad) dp += (int32_t)(((int64_t)tp_up[h] * fu) >> 11);
-    if (bc) dp -= (int32_t)(((int64_t)tp_dn[h] * (4096 - fu)) >> 11);
+    // the mirrors as they are: an Early slope (more current the further the capacitor is from the rail it feeds
+    // from) and their headroom running out near each rail (iOS Fourses) — Q12
+    const int32_t vs = (8400 * kq) >> 12;
+    int32_t eu = 4096 + (((4200 - pv) * 189) >> 10), ed = 4096 + (((pv - 4200) * 54) >> 10);
+    int32_t hu = vs - 150 - pv, hd = pv - 100;
+    if (hu < 512) eu = hu <= 0 ? 0 : (eu * hu) >> 9;                 // (32-bit only: no 64-bit division in the ISR —
+    if (hd < 512) ed = hd <= 0 ? 0 : (ed * hd) >> 9;                 //  its library call lives in flash; over the last 0.5 V)
+    if (ad) dp += (int32_t)(((((int64_t)tp_up[h] * fu) >> 11) * eu) >> 12);
+    if (bc) dp -= (int32_t)(((((int64_t)tp_dn[h] * (4096 - fu)) >> 11) * ed) >> 12);
     if (cur[h]) dp += (int32_t)(((int64_t)cur[h] * tp_kc[h]) >> 10);
     if (rf != 4096) dp = (int32_t)(((int64_t)dp * rf) >> 12);
     int32_t np = tp_pos[h] + dp;
