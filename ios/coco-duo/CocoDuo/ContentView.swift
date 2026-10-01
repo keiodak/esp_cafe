@@ -244,6 +244,10 @@ final class Director: ObservableObject {
             else if rig.arpMode == 1 { setArpMode(2) }
             else { setArpMode(0) }
         }
+        else if rig.ctxPreset == Preset.other {                                      // APP+CAFE+OTHER: its layers (BASIC first)
+            rig.otPage = (rig.otPage + 1) % OtPad.pages.count
+            refresh()
+        }
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -1440,8 +1444,9 @@ private struct HudBar: View {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
                         key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
+                            : rig.ctxPreset == Preset.other ? OtPad.icons[min(rig.otPage, OtPad.icons.count - 1)]          // APP+CAFE+OTHER: BASIC …
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
-                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
+                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.other) { d.cycleMode() }
                     }
                 }
                 contextKey(top ? 0 : 1)
@@ -1644,9 +1649,9 @@ private struct HudBar: View {
             }
         case .other:
             switch n {
-            case 0: textKey(OtPad.pages[min(rig.otPage, OtPad.pages.count - 1)], on: true) { rig.otPage = (rig.otPage + 1) % OtPad.pages.count }
-            case 1: key("link", on: rig.otLink) { d.setOtLink(!rig.otLink) }
-            case 2: key("stop.fill") { d.midi.panic() }
+            case 0: key("link", on: rig.otLink) { d.setOtLink(!rig.otLink) }        // LINK SCALE: B on A's scale
+            case 1: blank
+            case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
             default: blank
             }
         case .knob:
@@ -1667,7 +1672,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "BASIC", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

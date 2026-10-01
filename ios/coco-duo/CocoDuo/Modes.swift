@@ -278,6 +278,8 @@ enum DlPad: Int, CaseIterable {
 /// A row per Cafe (top A, bottom B). What each Cafe's SKIP / FLIP / EARTH play on the other instrument (an OP-1F).
 enum OtPad {
     static let pages = ["BASIC"]
+    /// the MODE key's icon for each layer (its word comes from the key names: BASIC …)
+    static let icons = ["music.note.list"]
     static let titles = ["SCALE · ROOT", "OCTAVE · RANGE", "CHORD · SPREAD", "VELOCITY · LENGTH"]
     static let starts: [(Double, Double)] = [(2.0 / 7.0, 0.0), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
     static let scaleNames = ["MAJOR", "MINOR", "PENTA", "MIN PENTA", "DORIAN", "MIXOLYD", "LYDIAN", "HARM MIN"]
