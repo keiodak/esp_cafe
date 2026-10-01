@@ -2737,8 +2737,8 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
     const int32_t vs = (8400 * kq) >> 12;
     int32_t eu = 4096 + (((4200 - pv) * 189) >> 10), ed = 4096 + (((pv - 4200) * 54) >> 10);
     int32_t hu = vs - 150 - pv, hd = pv - 100;
-    if (hu < 400) eu = hu <= 0 ? 0 : (int32_t)(((int64_t)eu * hu) / 400);
-    if (hd < 400) ed = hd <= 0 ? 0 : (int32_t)(((int64_t)ed * hd) / 400);
+    if (hu < 512) eu = hu <= 0 ? 0 : (eu * hu) >> 9;                 // (32-bit only: no 64-bit division in the ISR —
+    if (hd < 512) ed = hd <= 0 ? 0 : (ed * hd) >> 9;                 //  its library call lives in flash; over the last 0.5 V)
     if (ad) dp += (int32_t)(((((int64_t)tp_up[h] * fu) >> 11) * eu) >> 12);
     if (bc) dp -= (int32_t)(((((int64_t)tp_dn[h] * (4096 - fu)) >> 11) * ed) >> 12);
     if (cur[h]) dp += (int32_t)(((int64_t)cur[h] * tp_kc[h]) >> 10);
