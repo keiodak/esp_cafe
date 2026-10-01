@@ -266,11 +266,11 @@ struct BounceWaveKey: View {
         }
     }
 }
-/// bottom right's right: TENORI (falling balls) or GRID (monome-like step sequencer)
+/// bottom right's right: DROP (falling balls) or STEP (a step sequencer)
 struct BounceModeKey: View {
     @ObservedObject var seq: BounceSeq
     var body: some View {
-        BounceKey(title: seq.grid ? "GRID" : "TENORI", on: seq.grid) { seq.grid.toggle(); seq.sync() }
+        BounceKey(title: seq.grid ? "STEP" : "DROP", on: seq.grid) { seq.grid.toggle(); seq.sync() }
     }
 }
 
