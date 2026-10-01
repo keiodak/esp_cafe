@@ -122,7 +122,7 @@ private struct BouncePanel: View {
                 Spacer(minLength: 0)
                 Text(rangeText).font(.hud(8)).foregroundStyle(PastelTheme.textSecondary)
             }
-            RangeSlider(lo: $seq.lo[p], hi: $seq.hi[p])
+            BounceRange(lo: $seq.lo[p], hi: $seq.hi[p])
                 .frame(height: 18)
             GeometryReader { g in
                 let cw = g.size.width / CGFloat(BounceSeq.cols), rh = g.size.height / CGFloat(BounceSeq.rows)
@@ -169,7 +169,7 @@ private struct BouncePanel: View {
 }
 
 /// a slider with two pointers (the pitch range)
-private struct RangeSlider: View {
+private struct BounceRange: View {
     @Binding var lo: Double
     @Binding var hi: Double
     @State private var grabbing = 0          // 0 none · 1 lo · 2 hi
