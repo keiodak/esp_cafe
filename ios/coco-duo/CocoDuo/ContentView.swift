@@ -1680,7 +1680,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "SINE", "stairs": "STEP", "wave.3.right": "DRONE", "music.note": "THIRDS", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

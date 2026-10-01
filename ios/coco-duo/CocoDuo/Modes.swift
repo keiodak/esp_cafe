@@ -283,9 +283,10 @@ enum OtPad {
     ///   2 STEP      SKIP = the next tone of the chord on the OP-1 (an arpeggio by hand) · FLIP = a new chord from EARTH
     ///   3 DRONE     SKIP = a note on the OP-1 · FLIP = a sine chord held on the phone, on / off (A's CHORD)
     ///   4 THIRDS    SKIP = a note on the OP-1 + a sine a third above it on the phone · FLIP = a chord on the OP-1
-    static let pages = ["COCO+", "SINE", "STEP", "DRONE", "THIRDS"]
+    /// (all five are COCO+: the Cafe plays COCO; only what SKIP / FLIP play changes — 1…5 in the order above)
+    static let pages = ["COCO+1", "COCO+2", "COCO+3", "COCO+4", "COCO+5"]
     /// the MODE key's icon for each (its word comes from the key names)
-    static let icons = ["music.note.list", "music.quarternote.3", "stairs", "wave.3.right", "music.note"]
+    static let icons = ["1.circle", "2.circle", "3.circle", "4.circle", "5.circle"]
     /// the variations where the phone sounds (the SINE pad is live there)
     static let sinePages: Set<Int> = [1, 3, 4]
     /// the eight pads: the one SCALE · ROOT (both Cafes), A's three; the phone's SINE, B's three
