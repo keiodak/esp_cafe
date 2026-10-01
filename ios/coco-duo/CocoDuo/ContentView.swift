@@ -378,6 +378,14 @@ final class Director: ObservableObject {
         bounce.scale = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
         bounce.root = st.root
     }
+    /// the top right key: the next scale (moves the SCALE · ROOT pad's X)
+    func nextOtScale() {
+        let n = OtPad.scaleNames.count
+        let i = (OtPad.scale(rig.otAxes[0].x) + 1) % n
+        rig.otAxes[0].x = Double(i) / Double(n - 1)
+        rig.saveOt()
+        applyOther()
+    }
     /// BOUNCE: a ball on the floor — panel 0 the phone's sine, 1 the OP-1, 2 a Cafe (A and B in turn: left, right)
     func bounceNote(_ p: Int, _ c: Int, _ n: UInt8, _ dec: Double) {
         switch p {
@@ -1688,7 +1696,7 @@ private struct HudBar: View {
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) } else { blank }   // BOUNCE: TEMPO or FLIP SYNC
             case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) } else { blank }       // BOUNCE: the phone's sound
-            case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
+            case 2: OtScaleKey(axis: rig.otAxes[0]) { d.nextOtScale() }            // the scale (the SCALE · ROOT pad's X)
             default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } } else { blank }   // BOUNCE: SYNC
             }
         case .knob:

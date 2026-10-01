@@ -273,3 +273,12 @@ struct BounceModeKey: View {
         BounceKey(title: seq.grid ? "GRID" : "TENORI", on: seq.grid) { seq.grid.toggle(); seq.sync() }
     }
 }
+
+/// the top right key (APP+CAFE+OTHER): the scale's name; a tap = the next scale
+struct OtScaleKey: View {
+    @ObservedObject var axis: PadAxis
+    let action: () -> Void
+    var body: some View {
+        BounceKey(title: OtPad.scaleNames[OtPad.scale(axis.x)], action: action)
+    }
+}
