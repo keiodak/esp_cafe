@@ -400,6 +400,13 @@ final class Director: ObservableObject {
     }
     /// BOUNCE: a ball on the floor — panel 0 the phone's sine, 1 the OP-1, 2 a Cafe (A and B in turn: left, right)
     func bounceNote(_ p: Int, _ c: Int, _ n: UInt8, _ dec: Double) {
+        if p < 2 && bounce.align {                                // ALIGN: wait as long as the Cafes' notes take to arrive
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(BounceSeq.alignMs)) { [weak self] in
+                guard let self else { return }
+                if p == 0 { self.sines.pluck(n, velocity: 100, decay: dec) } else { self.midi.playNote(n, velocity: 100, ms: Int(dec * 1000)) }
+            }
+            return
+        }
         switch p {
         case 0: sines.pluck(n, velocity: 100, decay: dec)
         case 1: midi.playNote(n, velocity: 100, ms: Int(dec * 1000))

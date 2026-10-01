@@ -221,6 +221,9 @@ struct Op1Controls: View {
                 ChipButton(title: "COCO+", filled: rig.otPage != OtPad.bounce) { d.setOtPage(rig.otVar) }
                 ChipButton(title: "BOUNCE", filled: rig.otPage == OtPad.bounce) { d.setOtPage(OtPad.bounce) }
             }
+            if rig.otPage == OtPad.bounce {                                 // BOUNCE: ALIGN (the phone / OP-1 wait for the Cafes)
+                BounceAlignChip(seq: d.bounce)
+            }
             if rig.otPage != OtPad.bounce {                                 // COCO+'s five: what SKIP / FLIP play
                 HStack(spacing: PanelMetrics.chipSpacing) {
                     ForEach(0..<OtPad.bounce, id: \.self) { v in
