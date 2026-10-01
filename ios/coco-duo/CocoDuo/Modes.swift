@@ -277,11 +277,17 @@ enum DlPad: Int, CaseIterable {
 // MARK: APP+CAFE+OTHER — the instrument's pads, in pages (BASIC first; more pages can follow)
 /// A row per Cafe (top A, bottom B). What each Cafe's SKIP / FLIP / EARTH play on the other instrument (an OP-1F).
 enum OtPad {
-    static let pages = ["BASIC"]
-    /// the MODE key's icon for each layer (its word comes from the key names: BASIC …)
-    static let icons = ["music.note.list"]
-    static let titles = ["SCALE · ROOT", "OCTAVE · RANGE", "CHORD · SPREAD", "VELOCITY · LENGTH"]
-    static let starts: [(Double, Double)] = [(2.0 / 7.0, 0.0), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
+    /// the layers: COCO+ = the Cafes play COCO and the OP-1 · COCO+SINE = the phone plays sine chords too
+    static let pages = ["COCO+", "COCO+SINE"]
+    /// the MODE key's icon for each layer (its word comes from the key names)
+    static let icons = ["music.note.list", "music.quarternote.3"]
+    /// the eight pads: the one SCALE · ROOT (both Cafes), A's three; the phone's SINE, B's three
+    static let titles = ["SCALE · ROOT", "A OCTAVE · RANGE", "A CHORD · SPREAD", "A VELOCITY · LENGTH",
+                         "SINE LEVEL · RELEASE", "B OCTAVE · RANGE", "B CHORD · SPREAD", "B VELOCITY · LENGTH"]
+    static let starts: [(Double, Double)] = [(2.0 / 7.0, 0.0), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0),
+                                             (0.6, 0.35), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
+    static func sineLevel(_ x: Double) -> Double { x }
+    static func sineRelease(_ y: Double) -> Double { 0.05 + y * y * 3.95 }              // 0.05 … 4 s
     static let scaleNames = ["MAJOR", "MINOR", "PENTA", "MIN PENTA", "DORIAN", "MIXOLYD", "LYDIAN", "HARM MIN"]
     static let scales: [[Int]] = [[0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 7, 9], [0, 3, 5, 7, 10],
                                   [0, 2, 3, 5, 7, 9, 10], [0, 2, 4, 5, 7, 9, 10], [0, 2, 4, 6, 7, 9, 11], [0, 2, 3, 5, 7, 8, 11]]
@@ -296,18 +302,19 @@ enum OtPad {
     static func spread(_ y: Double) -> Int { min(2, Int(y * 2 + 0.5)) }
     static func velocity(_ x: Double) -> Int { 30 + Int(x * 97 + 0.5) }
     static func lengthMs(_ y: Double) -> Int { y < 0.03 ? 0 : 30 + Int(y * y * 1970) }  // 0 = HOLD (as long as the gate is up)
-    static func caption(_ k: Int, _ x: Double, _ y: Double) -> String {
-        switch k {
+    static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
+        if i == 4 { return "LEVEL \(Int(x * 100))% · REL " + String(format: "%.2f S", sineRelease(y)) }
+        switch i % 4 {
         case 0: return "\(scaleNames[scale(x)]) · \(rootNames[root(y)])"
         case 1: return "C\(octave(x) + 1) · \(range(y)) OCT"
         case 2: return "\(chordNames[chord(x)]) · \(spreadNames[spread(y)])"
         default: let l = lengthMs(y); return "VEL \(velocity(x)) · " + (l == 0 ? "HOLD" : "\(l) MS")
         }
     }
-    /// one Cafe's settings from the eight pads (LINK: B takes A's scale and root)
-    static func settings(_ a: [PadAxis], slot: Int, link: Bool) -> OtSettings {
-        let r = slot * 4, sr = link ? 0 : r
-        return OtSettings(scale: scale(a[sr].x), root: root(a[sr].y), octave: octave(a[r + 1].x), range: range(a[r + 1].y),
+    /// one Cafe's settings from the eight pads (the scale and root: pad 1, the same for both)
+    static func settings(_ a: [PadAxis], slot: Int) -> OtSettings {
+        let r = slot * 4
+        return OtSettings(scale: scale(a[0].x), root: root(a[0].y), octave: octave(a[r + 1].x), range: range(a[r + 1].y),
                           chord: chord(a[r + 2].x), spread: spread(a[r + 2].y), velocity: velocity(a[r + 3].x), lengthMs: lengthMs(a[r + 3].y))
     }
 }
@@ -526,12 +533,12 @@ final class Rig: ObservableObject {
 
     // APP+CAFE+OTHER: the instrument's pads (kept), its page, LINK (B on A's scale)
     let otAxes: [PadAxis] = {
-        let v = (Rig.d.array(forKey: "rig.ot") as? [Double]) ?? []
-        return (0..<8).map { i in v.count == 16 ? PadAxis((v[2 * i], v[2 * i + 1])) : PadAxis(OtPad.starts[i % 4]) }
+        let v = (Rig.d.array(forKey: "rig.ot2") as? [Double]) ?? []
+        return (0..<8).map { i in v.count == 16 ? PadAxis((v[2 * i], v[2 * i + 1])) : PadAxis(OtPad.starts[i]) }
     }()
-    func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot") }
-    @Published var otPage = 0
-    @Published var otLink: Bool = Rig.d.bool(forKey: "rig.otLink") { didSet { Self.d.set(otLink, forKey: "rig.otLink") } }
+    func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot2") }
+    /// the layer: 0 COCO+ · 1 COCO+SINE (kept)
+    @Published var otPage: Int = min(1, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
 
     // ARP_DELAY
     let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }

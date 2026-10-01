@@ -17,6 +17,9 @@ final class MidiBridge: ObservableObject {
     @Published var destinations = 0
     /// their names (the OP-1 field, once paired, among them)
     @Published var names: [String] = []
+    /// COCO+SINE: the phone's sine chords (the Director sets sineOn from the layer)
+    var sine: SineChords?
+    var sineOn = false
     /// the last thing played (shown in the CAFES card: is anything going out?)
     @Published var last = ""
     /// each Cafe's scale, root, octave, range, chord, velocity, length (from APP+CAFE+OTHER's pads: OtPad)
@@ -66,6 +69,7 @@ final class MidiBridge: ObservableObject {
 
     /// all notes off (when switched off)
     func panic() {
+        for (k, _) in held { sine?.noteOff(k) }
         for (_, notes) in held { for n in notes { send([0x80 | channel, n, 0]) } }
         held = [:]
     }
@@ -104,6 +108,24 @@ final class MidiBridge: ObservableObject {
         last = (key[0] == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ") + notes.map { nn[Int($0) % 12] + "\(Int($0) / 12 - 1)" }.joined(separator: " ")
             + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
         held[key] = notes
+        if sineOn, let sine {                                               // COCO+SINE: a chord of sines, A's CHORD · SPREAD
+            let a = settings[0]
+            let abase = 24 + 12 * a.octave + st.root
+            let asteps = sc.count * a.range + 1
+            let adeg = min(asteps - 1, max(0, Int(Double(earth) / 256.0 * Double(asteps))))
+            var sd: [Int]
+            switch a.chord {
+            case 1: sd = [0, 2, 4, 6]
+            case 2: sd = [0, 3, 4]
+            case 3: sd = [0, 4, sc.count]
+            case 4: sd = [0, 2, 4, 6, 8]
+            case 5: sd = [0, sc.count]
+            default: sd = [0, 2, 4]
+            }
+            var sn = sd.map { abase + 12 * ((adeg + $0) / sc.count) + sc[(adeg + $0) % sc.count] }
+            if a.spread > 0 && sn.count > 2 { for i in stride(from: 1, to: sn.count, by: a.spread == 1 ? sn.count : 2) { sn[i] += 12 } }
+            sine.noteOn(key, notes: sn.map { UInt8(clamping: min(127, max(0, $0))) }, velocity: chord ? max(1, a.velocity - 18) : a.velocity)
+        }
         if st.lengthMs > 0 {                                                // LENGTH: let go after it, whatever the gate does
             tokens += 1; let t = tokens; token[key] = t
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(st.lengthMs)) { [weak self] in
@@ -114,6 +136,7 @@ final class MidiBridge: ObservableObject {
     }
     private func off(_ key: [Int]) {
         token[key] = nil
+        sine?.noteOff(key)
         if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }
     }
 
@@ -135,7 +158,7 @@ struct BluetoothMidiPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UINavigationController, context: Context) {}
 }
 
-/// APP+CAFE+OTHER: its layers (BASIC first, as APP+CAFE's ARP / PHONE_COCO / BOX) and LINK SCALE.
+/// APP+CAFE+OTHER: its layers (COCO+ · COCO+SINE, as APP+CAFE's ARP / PHONE_COCO / BOX).
 /// (Pairing is in the CAFES card; the scales and the rest are on the XY pads.)
 struct Op1Controls: View {
     let d: Director
@@ -145,11 +168,8 @@ struct Op1Controls: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ForEach(OtPad.pages.indices, id: \.self) { p in
-                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { rig.otPage = p; d.refresh() }
+                    ChipButton(title: OtPad.pages[p], filled: rig.otPage == p) { d.setOtPage(p) }
                 }
-            }
-            HStack(spacing: PanelMetrics.chipSpacing) {
-                ChipButton(title: "LINK SCALE", filled: rig.otLink) { d.setOtLink(!rig.otLink) }
             }
         }
     }

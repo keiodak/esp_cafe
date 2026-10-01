@@ -41,6 +41,8 @@ final class Director: ObservableObject {
     let sun = PhoneSun()
     /// the Cafes' SKIP / FLIP / EARTH played on an OP-1 field over Bluetooth MIDI
     let midi = MidiBridge()
+    /// APP+CAFE+OTHER's COCO+SINE: the phone's sine chords
+    let sines = SineChords()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -53,6 +55,7 @@ final class Director: ObservableObject {
         guard !started else { return }
         started = true
         midi.watch(units)
+        midi.sine = sines
         applyOther()
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
@@ -63,6 +66,9 @@ final class Director: ObservableObject {
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
             let other = self.units.contains { $0.isConnected && ($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.other }
             if self.midi.active != other { self.midi.active = other; if !other { self.midi.panic() } }   // APP+CAFE+OTHER: the instrument is played
+            let sineOn = other && self.rig.otPage == 1                                  // COCO+SINE: the phone plays too
+            self.midi.sineOn = sineOn
+            self.sines.play(sineOn)
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
@@ -244,8 +250,7 @@ final class Director: ObservableObject {
             else { setArpMode(0) }
         }
         else if rig.ctxPreset == Preset.other {                                      // APP+CAFE+OTHER: its layers (BASIC first)
-            rig.otPage = (rig.otPage + 1) % OtPad.pages.count
-            refresh()
+            setOtPage((rig.otPage + 1) % OtPad.pages.count)
         }
     }
 
@@ -344,10 +349,6 @@ final class Director: ObservableObject {
             else { for u in ctxUnits() { rig.arpDelayCommands(pad: i).forEach(u.send) } }
         case .other:
             let row = i / 4, k = i % 4
-            if rig.otLink && k == 0 {                                 // LINK SCALE: A's and B's SCALE · ROOT move together
-                let j = (1 - row) * 4
-                rig.otAxes[j].x = rig.otAxes[i].x; rig.otAxes[j].y = rig.otAxes[i].y
-            }
             rig.saveOt()
             applyOther()
         case .knob:
@@ -358,12 +359,14 @@ final class Director: ObservableObject {
     // MARK: APP+CAFE+OTHER: the pads -> what each Cafe plays on the other instrument
 
     func applyOther() {
-        midi.settings = (0..<2).map { OtPad.settings(rig.otAxes, slot: $0, link: rig.otLink) }
+        midi.settings = (0..<2).map { OtPad.settings(rig.otAxes, slot: $0) }
+        sines.level = OtPad.sineLevel(rig.otAxes[4].x)
+        sines.release = OtPad.sineRelease(rig.otAxes[4].y)
     }
-    func setOtLink(_ on: Bool) {
-        rig.otLink = on
-        if on { rig.otAxes[4].x = rig.otAxes[0].x; rig.otAxes[4].y = rig.otAxes[0].y; rig.saveOt() }   // (B takes A's scale)
-        applyOther()
+    /// COCO+ · COCO+SINE
+    func setOtPage(_ p: Int) {
+        rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
+        refresh()
     }
 
     // MARK: SUNDAY (APP+CAFE): the outer pads play the phone, the inner ones move the Cafes (L = A, R = B)
@@ -1162,7 +1165,7 @@ private struct MainScreen: View {
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
-        case .other: return (rig.otAxes[i], OtPad.titles[i % 4])
+        case .other: return (rig.otAxes[i], i == 4 && rig.otPage == 0 ? "—" : OtPad.titles[i])   // (COCO+: no SINE)
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1189,8 +1192,7 @@ private struct MainScreen: View {
         case .fourses:
             return { x, y in FrPad.caption(i, x, y) }
         case .other:
-            let linked = rig.otLink && i == 4
-            return { x, y in (linked ? "= A · " : "") + OtPad.caption(i % 4, x, y) }
+            return { x, y in OtPad.caption(i, x, y) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }
@@ -1648,7 +1650,7 @@ private struct HudBar: View {
             }
         case .other:
             switch n {
-            case 0: key("link", on: rig.otLink) { d.setOtLink(!rig.otLink) }        // LINK SCALE: B on A's scale
+            case 0: blank
             case 1: blank
             case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
             default: blank
@@ -1671,7 +1673,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "BASIC", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "music.quarternote.3": "+SINE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]
