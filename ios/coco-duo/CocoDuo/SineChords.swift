@@ -94,7 +94,7 @@ final class SineChords {
                 }
                 if best < 0 { best = 0 }
                 v[best] = Voice(key: [-1], hz: hz, ph: 0, amp: 0, target: 0, gate: true, vel: vel, live: true,
-                                hold: Int(sr * 0.008), rel: 1 - exp(-1 / (sr * max(0.02, decay) / 6.9)))
+                                hold: Int(sr * 0.015), rel: 1 - exp(-1 / (sr * max(0.02, decay) / 6.9)))
             case .on(let key, let hzs, let vel):
                 for k in v.indices where v[k].live && v[k].key == key { v[k].gate = false }   // (the same key again: the last lets go)
                 for hz in hzs {
@@ -117,11 +117,11 @@ final class SineChords {
         let r = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : l
         let att = 1 - exp(-1 / (sr * 0.006))                                   // ~6 ms attack (no click)
         let rel = 1 - exp(-1 / (sr * max(0.02, release) / 4.6))               // to −40 dB in `release` s
-        let want = playing ? level * level : 0
+        let want = playing ? level : 0                                     // (was level²: too quiet)
         var live = 0
         for k in v.indices where v[k].live { live += 1 }
         let n = Double(max(1, live))
-        let norm = 0.32 / sqrt(n)                                              // (a chord as loud as a note, nearly)
+        let norm = 0.5 / pow(n, 0.35)                                          // (a chord about as loud as a note)
         let tw = 2 * Double.pi / sr
         let wv = wave
         for i in 0..<frames {
@@ -146,7 +146,7 @@ final class SineChords {
                 if v[k].ph > 2 * Double.pi { v[k].ph -= 2 * Double.pi }
                 if !v[k].gate && v[k].amp < 0.0005 { v[k].live = false }
             }
-            let o = Float(s * norm * gain)
+            let o = Float(tanh(s * norm * gain * 2.2) * 0.9)                // louder, and a soft limit (no clipping)
             l[i] = o; r[i] = o
         }
     }
