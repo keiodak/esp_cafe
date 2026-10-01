@@ -57,7 +57,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.50"
+#define FW_VERSION "4.51"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -244,10 +244,10 @@ static void pl_save() {
 static void pl_load() {
   Preferences pr; uint8_t b[11]; int n = 0;
   if (pr.begin("cafe", true)) {
-    if (pr.getBytes("pl", b, 11) == 11) for (int i = 0; i < 11 && b[i] < POOL_N; i++) pl_id[n++] = b[i];
+    if (pr.getBytes("pl", b, 11) == 11) for (int i = 0; i < 11 && b[i] < POOL_N; i++) if (b[i] != 6) pl_id[n++] = b[i];   // (HARMONY: no more)
     pr.end();
   }
-  if (n == 0) { for (int i = 0; i < 11; i++) pl_id[i] = i; n = 11; }
+  if (n == 0) { for (int i = 0; i < 11; i++) if (i != 6) pl_id[n++] = i; }   // (the pool's own eleven, HARMONY (6) left out)
   active_preset_count = n;
   for (int i = 0; i < n; i++) presets[i] = pool[pl_id[i]];
 }
