@@ -537,13 +537,14 @@ void initDEL() {
   Serial.println("    -> initDEL: Allocating delay buffers..."); //For Debugging
   Serial.printf("    -> free %u, largest block %u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   bool dok = true;
-  // v4.56: the heap left after Bluetooth is only just enough for all 127 pieces — on some boots it falls a few
-  // bytes short (largest 1524 < 1536) and the Cafe froze here. Now a piece that does not fit (or that would leave
-  // Bluetooth less than 4 KB) shares the RTC piece instead: a few ms of the tape repeat, nothing stops.
+  // v4.58: the heap left after Bluetooth was only just enough for all 127 pieces — one boot fell 12 bytes short
+  // (largest 1524 < 1536) and the Cafe froze here. The loop task's stack is 2 KB smaller now (SET_LOOP_TASK_STACK_SIZE),
+  // so they fit again with room to spare. Only if a piece still cannot be had does it share the RTC piece
+  // (last resort, never a freeze) — the serial line below says so.
   int dshare = 0;
   for (int i = 0; i < DCHUNKS - 1; i++) {
     dchunk[i] = nullptr; dchunk_own[i] = false;
-    if (heap_caps_get_free_size(MALLOC_CAP_8BIT) >= DCHUNK_BYTES + 4096) dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT);
+    dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT);
     if (dchunk[i]) dchunk_own[i] = true; else { dchunk[i] = dchunk_rtc; dshare++; }
   }
   dchunk[DCHUNKS - 1] = dchunk_rtc; dchunk_own[DCHUNKS - 1] = false;

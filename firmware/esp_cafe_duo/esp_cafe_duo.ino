@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.57   (2026-10-01: v4.56 + FOURSES from v4.49/4.50)
+// #####   ESP CAFE DUO   v4.58   (2026-10-01: v4.57 + the whole tape fits again: loop stack 6 KB)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -55,6 +55,9 @@
 
 
 #include "synths.h"
+// v4.58: loop() runs on a 6 KB stack instead of Arduino's 8 KB — the 2 KB go to the heap, where the tape and
+// Bluetooth were 12 bytes short (its high-water mark is on the [st] line: "stk" = bytes never touched)
+SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 
 // COCO DUO BUILD (esp_cafe_duo): controlled over BLE only, by the coco duo iPhone app (two Cafes, 8 XY pads).
 // USB is only used for the boot messages (Serial Monitor at 115200). No USB commands, no WAV dump.
@@ -62,7 +65,7 @@
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.57"
+#define FW_VERSION "4.58"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -241,10 +244,14 @@ static void fl_check() {
   pr.end();
   Serial.printf("[fw] v%s, flashed %lu times (this build: %s)\n", FW_VERSION, (unsigned long)fl_count, id);
 }
-static void pl_save() {
-  Preferences pr; if (!pr.begin("cafe", false)) return;
+static void pl_save() {                    // (v4.55: the audio stops while flash is written — the cache is off then)
+  REG(I2S_CONF_REG)[0] &= ~(BIT(5));
+  detachInterrupt(2);
   uint8_t b[11]; for (int i = 0; i < 11; i++) b[i] = i < active_preset_count ? (uint8_t)pl_id[i] : 0xFF;
-  pr.putBytes("pl", b, 11); pr.end();
+  { Preferences pr; if (pr.begin("cafe", false)) { pr.putBytes("pl", b, 11); pr.end(); } }
+  PRESETTER(pool[preset]);
+  REG(I2S_INT_CLR_REG)[0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)[0] |= (BIT(5));
 }
 static void pl_load() {
   Preferences pr; uint8_t b[11]; int n = 0;
@@ -950,9 +957,9 @@ void pc_service() {                       // called from loop(): lines that arri
   ble_watch();
   { static uint32_t st_ms = 0; uint32_t ms = millis();                // (the serial monitor: how things stand, every 5 s)
     if (ms - st_ms >= 5000) { st_ms = ms;
-      Serial.printf("[st] v%s reset %d ble %d nobtn %d conn %d heap %u min %u largest %u mode %d\n", FW_VERSION, (int)esp_reset_reason(),
+      Serial.printf("[st] v%s reset %d ble %d nobtn %d conn %d heap %u min %u largest %u mode %d stk %u\n", FW_VERSION, (int)esp_reset_reason(),
         ble_ok, cafe_no_ble ? 1 : 0, ble_conn ? 1 : 0, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
-        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (int)pc_mode); } }
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (int)pc_mode, (unsigned)uxTaskGetStackHighWaterMark(NULL)); } }
   while (ble_rh != ble_wh) {
     char c = ble_rb[ble_rh]; ble_rh = (ble_rh + 1) & 1023;
     if (c == '\n' || c == '\r') { if (bn) { bl[bn] = 0; pc_line(bl); bn = 0; } }
