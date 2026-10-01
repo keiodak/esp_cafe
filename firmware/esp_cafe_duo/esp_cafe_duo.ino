@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.65   (2026-10-01: BOUNCE: ASH = the clock, a 10 ms pulse a tick)
+// #####   ESP CAFE DUO   v4.66   (2026-10-01: BOUNCE's sine: fixed pitch, SPEED = resolution only)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.65"
+#define FW_VERSION "4.66"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -227,24 +227,33 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 // BOUNCE ("F 86 1"): the Cafe is a small sine synth instead — four voices, each a sine (wv_sin) that starts at phase 0
 // (no click) and dies away by its own decay; "F 85 <midi note> <decay ms>" plays one (the phone's bouncing balls).
 volatile uint8_t ot_syn = 0;
-volatile uint32_t sy_inc[4] = {0, 0, 0, 0}, sy_ph[4] = {0, 0, 0, 0};
-volatile int32_t sy_amp[4] = {0, 0, 0, 0}, sy_k[4] = {65536, 65536, 65536, 65536};   // amp Q15 · decay per sample Q16
+// (v4.66: pitch and decay counted in CPU cycles, not samples — the crystal is steady, so the SPEED knob only changes how
+//  finely the sine is drawn (the sample rate), never its pitch or its length)
+volatile uint32_t sy_incc[4] = {0, 0, 0, 0}, sy_ph[4] = {0, 0, 0, 0};   // phase per CPU cycle, Q8
+volatile int32_t sy_amp[4] = {0, 0, 0, 0};                               // Q15
+volatile uint32_t sy_rc[4] = {0, 0, 0, 0};                               // decay: the part lost per CPU cycle, Q32
 volatile int32_t sy_clk = 0;                       // BOUNCE's clock out on ASH: samples left of the pulse ("F 84" = one tick)
 static void ot_syn_tick() {
   DACWRITER(pout)
   gyo = ADCREADER
     pc_samples++;
   earth_ac();
+  static uint32_t lastc = 0;
+  uint32_t cc; asm volatile("rsr %0, ccount" : "=a"(cc));
+  uint32_t dcy = cc - lastc;                          // the time since the last sample, in CPU cycles
+  lastc = cc;
+  if (dcy > 240000 || dcy < 1000) dcy = 7500;         // (a gap — another mode, a stall: one ordinary sample at 32 kHz)
   int32_t s = 0, loud = 0;
   for (int v = 0; v < 4; v++) {
     int32_t a = sy_amp[v];
     if (a > 4) {
       uint32_t p = sy_ph[v];
       s += (wv_sin[p >> 24] * a) >> 15;
-      sy_ph[v] = p + sy_inc[v];
-      sy_amp[v] = (a * sy_k[v]) >> 16;
+      sy_ph[v] = p + (uint32_t)(((uint64_t)sy_incc[v] * dcy) >> 8);
+      int32_t dec = (int32_t)(((uint64_t)a * sy_rc[v] * dcy) >> 32);
+      sy_amp[v] = a - (dec > 0 ? dec : 1);
       if (a > loud) loud = a;
-    }
+    } else sy_amp[v] = 0;
   }
   int32_t o = (s >> 1) + 2048;                        // (four at full: ±4094 -> halved)
   if (o > 4095) o = 4095; if (o < 0) o = 0;
@@ -800,13 +809,12 @@ void sy_note(int note, int ms) {
   if (wv_sin[64] == 0) for (int i = 0; i <= 256; i++) wv_sin[i] = (int16_t)(2047.0f * sinf(6.2831853f * i / 256.0f));
   if (note < 0) note = 0; if (note > 127) note = 127;
   if (ms < 10) ms = 10; if (ms > 8000) ms = 8000;
-  float sr = sx_hz > 1000 ? sx_hz : clock_hz();
-  float hz = 440.0f * powf(2.0f, (note - 69) / 12.0f);
+  double hz = 440.0 * pow(2.0, (note - 69) / 12.0);
   int v = nx; nx = (nx + 1) & 3;
   sy_amp[v] = 0;
   sy_ph[v] = 0;
-  sy_inc[v] = (uint32_t)(hz / sr * 4294967295.0f);
-  sy_k[v] = (int32_t)(65536.0f * expf(-6.9f / (ms * 0.001f * sr)));   // (to -60 dB in ms)
+  sy_incc[v] = (uint32_t)(hz / sx_cpu_hz * 1099511627776.0);              // per CPU cycle, Q8 (whatever the clock)
+  sy_rc[v] = (uint32_t)(6.9 / (ms * 0.001 * sx_cpu_hz) * 4294967296.0);  // (to -60 dB in ms of real time)
   sy_amp[v] = 26000;
 }
 void pc_line(char *s) {
