@@ -43,6 +43,10 @@ final class Director: ObservableObject {
     let midi = MidiBridge()
     /// APP+CAFE+OTHER's COCO+SINE: the phone's sine chords
     let sines = SineChords()
+    /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
+    let bounce = BounceSeq()
+    /// BOUNCE: the Cafes take turns (A, B, A …)
+    private var bounceTurn = 0
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -56,6 +60,8 @@ final class Director: ObservableObject {
         started = true
         midi.watch(units)
         midi.sine = sines
+        midi.onFlip = { [weak self] in guard let self, self.bounce.flipSync else { return }; self.bounce.tick() }   // FLIP SYNC
+        bounce.onNote = { [weak self] p, c, n, dec in self?.bounceNote(p, c, n, dec) }
         applyOther()
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
@@ -70,6 +76,8 @@ final class Director: ObservableObject {
             self.midi.mode = self.rig.otPage
             self.midi.sineOn = sineOn
             self.sines.play(sineOn)
+            self.bounce.running = other && self.rig.otPage == OtPad.bounce
+            self.bounce.bpm = self.rig.bpm
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
@@ -190,8 +198,8 @@ final class Director: ObservableObject {
             }
         case Preset.harmony:
             rig.hdAll(slot: s).forEach(u.send)
-        case Preset.other:                                            // APP+CAFE+OTHER: the Cafe is silent — its SKIP / FLIP play the OP-1
-            break
+        case Preset.other:                                            // APP+CAFE+OTHER: COCO, or the sine synth in BOUNCE
+            u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)")
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
@@ -364,11 +372,27 @@ final class Director: ObservableObject {
         midi.sineDiv = OtPad.sineDiv(rig.otAxes[4].x)
         sines.level = OtPad.sineLevel(rig.otAxes[4].y)
         sines.release = 0.8
+        let st = midi.settings[0]                                 // BOUNCE: the columns' notes in the one scale
+        bounce.scale = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
+        bounce.root = st.root
+    }
+    /// BOUNCE: a ball on the floor — panel 0 the phone's sine, 1 the OP-1, 2 a Cafe (A and B in turn: left, right)
+    func bounceNote(_ p: Int, _ c: Int, _ n: UInt8, _ dec: Double) {
+        switch p {
+        case 0: sines.pluck(n, velocity: 100, decay: dec)
+        case 1: midi.playNote(n, velocity: 100, ms: Int(dec * 1000))
+        default:
+            let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.other }
+            guard !on.isEmpty else { return }
+            let u = on[bounceTurn % on.count]; bounceTurn += 1
+            u.send("F 85 \(n) \(Int(dec * 1000))")
+        }
     }
     /// COCO+ · COCO+SINE
     func setOtPage(_ p: Int) {
         if p != rig.otPage { midi.panic() }                       // (nothing left sounding from the last variation)
         rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // (BOUNCE: the Cafe a synth)
         refresh()
     }
 
@@ -1126,6 +1150,9 @@ private struct MainScreen: View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
+            BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
             FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1657,7 +1684,7 @@ private struct HudBar: View {
             }
         case .other:
             switch n {
-            case 0: blank
+            case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) } else { blank }   // BOUNCE: TEMPO or FLIP SYNC
             case 1: blank
             case 2: key("stop.fill") { d.midi.panic() }                            // all notes off
             default: blank
@@ -1680,7 +1707,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "arrow.down.circle": "BOUNCE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

@@ -25,6 +25,8 @@ final class MidiBridge: ObservableObject {
     private var divCount: [[Int]: Int] = [:]
     /// which variation (OtPad.pages): 0 COCO+ · 1 COCO+SINE · 2 STEP · 3 DRONE · 4 THIRDS
     var mode = 0
+    /// BOUNCE's FLIP SYNC: every FLIP that goes up (either Cafe) is one tick
+    var onFlip: (() -> Void)?
     private var droneOn = [false, false]
     private var stepChord: [[UInt8]] = [[], []]
     private var stepAt = [0, 0]
@@ -90,6 +92,10 @@ final class MidiBridge: ObservableObject {
         let slot = min(max(key[0], 0), 1)
         let st = settings[slot]
         let tag = (slot == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ")
+        if mode == OtPad.bounce {                                           // BOUNCE: SKIP / FLIP play nothing; FLIP can be the tick
+            if chord && up && active { onFlip?() }
+            return
+        }
         switch (mode, chord) {
         case (1, true):                                                     // COCO+SINE · FLIP: the phone's sine chord
             if !up { sine?.noteOff(key); return }
@@ -174,6 +180,15 @@ final class MidiBridge: ObservableObject {
         token[key] = nil
         if mode == 4 { sine?.noteOff(key) }                               // (THIRDS: the sine goes with its note)
         if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }
+    }
+
+    /// BOUNCE: one note on the OP-1, let go after `ms`
+    func playNote(_ n: UInt8, velocity: UInt8, ms: Int) {
+        guard on, active else { return }
+        send([0x90 | channel, n, velocity])
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(20, ms))) { [weak self] in
+            self?.send([0x80 | (self?.channel ?? 0), n, 0])
+        }
     }
 
     private func send(_ bytes: [UInt8]) {

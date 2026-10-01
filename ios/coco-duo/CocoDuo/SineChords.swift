@@ -18,12 +18,12 @@ final class SineChords {
     private var sr = 48000.0
 
     // main thread -> audio thread: a short list of events behind a lock the audio thread only tries
-    private enum Ev { case on([Int], [Double], Double), off([Int]), allOff }
+    private enum Ev { case on([Int], [Double], Double), off([Int]), allOff, pluck(Double, Double, Double) }
     private var lock = os_unfair_lock()
     private var pending: [Ev] = []
 
     // the voices (audio thread only)
-    private struct Voice { var key: [Int] = []; var hz = 0.0; var ph = 0.0; var amp = 0.0; var target = 0.0; var gate = false; var vel = 0.0; var live = false }
+    private struct Voice { var key: [Int] = []; var hz = 0.0; var ph = 0.0; var amp = 0.0; var target = 0.0; var gate = false; var vel = 0.0; var live = false; var hold = 0; var rel = 0.0 }
     private var v = [Voice](repeating: Voice(), count: 16)
     private var gain = 0.0
 
@@ -32,6 +32,10 @@ final class SineChords {
         push(.on(key, hz, Double(velocity) / 127))
     }
     func noteOff(_ key: [Int]) { push(.off(key)) }
+    /// BOUNCE: one note struck — a short attack, then it dies away in `decay` seconds by itself
+    func pluck(_ note: UInt8, velocity: Int, decay: Double) {
+        push(.pluck(440 * pow(2, (Double(note) - 69) / 12), Double(velocity) / 127, decay))
+    }
     private func push(_ e: Ev) {
         os_unfair_lock_lock(&lock); pending.append(e); os_unfair_lock_unlock(&lock)
     }
@@ -79,6 +83,15 @@ final class SineChords {
                 for k in v.indices { v[k].gate = false }
             case .off(let key):
                 for k in v.indices where v[k].live && v[k].key == key { v[k].gate = false }
+            case .pluck(let hz, let vel, let decay):
+                var best = -1, bestAmp = 9.0
+                for k in v.indices {
+                    if !v[k].live { best = k; break }
+                    if !v[k].gate && v[k].amp < bestAmp { bestAmp = v[k].amp; best = k }
+                }
+                if best < 0 { best = 0 }
+                v[best] = Voice(key: [-1], hz: hz, ph: 0, amp: 0, target: 0, gate: true, vel: vel, live: true,
+                                hold: Int(sr * 0.008), rel: 1 - exp(-1 / (sr * max(0.02, decay) / 6.9)))
             case .on(let key, let hzs, let vel):
                 for k in v.indices where v[k].live && v[k].key == key { v[k].gate = false }   // (the same key again: the last lets go)
                 for hz in hzs {
@@ -112,7 +125,8 @@ final class SineChords {
             var s = 0.0
             for k in v.indices where v[k].live {
                 let tgt = v[k].gate ? v[k].vel : 0
-                v[k].amp += (tgt - v[k].amp) * (v[k].gate ? att : rel)
+                v[k].amp += (tgt - v[k].amp) * (v[k].gate ? att : (v[k].rel > 0 ? v[k].rel : rel))
+                if v[k].hold > 0 { v[k].hold -= 1; if v[k].hold == 0 { v[k].gate = false } }
                 s += sin(v[k].ph) * v[k].amp
                 v[k].ph += v[k].hz * tw
                 if v[k].ph > 2 * Double.pi { v[k].ph -= 2 * Double.pi }

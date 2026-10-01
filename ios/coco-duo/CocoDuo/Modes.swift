@@ -284,11 +284,13 @@ enum OtPad {
     ///   3 DRONE     SKIP = a note on the OP-1 · FLIP = a sine chord held on the phone, on / off (A's CHORD)
     ///   4 THIRDS    SKIP = a note on the OP-1 + a sine a third above it on the phone · FLIP = a chord on the OP-1
     /// (all five are COCO+: the Cafe plays COCO; only what SKIP / FLIP play changes — 1…5 in the order above)
-    static let pages = ["COCO+1", "COCO+2", "COCO+3", "COCO+4", "COCO+5"]
+    static let pages = ["COCO+1", "COCO+2", "COCO+3", "COCO+4", "COCO+5", "BOUNCE"]
+    /// BOUNCE (after the Tenori-on): the Cafe is a sine synth, three panels of falling balls (Bounce.swift)
+    static let bounce = 5
     /// the MODE key's icon for each (its word comes from the key names)
-    static let icons = ["1.circle", "2.circle", "3.circle", "4.circle", "5.circle"]
+    static let icons = ["1.circle", "2.circle", "3.circle", "4.circle", "5.circle", "arrow.down.circle"]
     /// the variations where the phone sounds (the SINE pad is live there)
-    static let sinePages: Set<Int> = [1, 3, 4]
+    static let sinePages: Set<Int> = [1, 3, 4, 5]
     /// the eight pads: the one SCALE · ROOT (both Cafes), A's three; the phone's SINE, B's three
     static let titles = ["SCALE · ROOT", "A OCTAVE · RANGE", "A CHORD · SPREAD", "A VELOCITY · LENGTH",
                          "SINE DIV · LEVEL", "B OCTAVE · RANGE", "B CHORD · SPREAD", "B VELOCITY · LENGTH"]
@@ -548,7 +550,7 @@ final class Rig: ObservableObject {
     }()
     func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot3") }
     /// the layer: 0 COCO+ · 1 COCO+SINE (kept)
-    @Published var otPage: Int = min(4, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
+    @Published var otPage: Int = min(5, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
 
     // ARP_DELAY
     let arpAxes: [PadAxis] = ArpPad.starts.map { PadAxis($0) }
