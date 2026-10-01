@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.64   (2026-10-01: APP+CAFE+OTHER BOUNCE: the Cafe as a sine synth, F 85 / F 86)
+// #####   ESP CAFE DUO   v4.65   (2026-10-01: BOUNCE: ASH = the clock, a 10 ms pulse a tick)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.64"
+#define FW_VERSION "4.65"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -229,6 +229,7 @@ void pc_out(const char *s) { ble_line(s); }       // duo: replies only go out ov
 volatile uint8_t ot_syn = 0;
 volatile uint32_t sy_inc[4] = {0, 0, 0, 0}, sy_ph[4] = {0, 0, 0, 0};
 volatile int32_t sy_amp[4] = {0, 0, 0, 0}, sy_k[4] = {65536, 65536, 65536, 65536};   // amp Q15 · decay per sample Q16
+volatile int32_t sy_clk = 0;                       // BOUNCE's clock out on ASH: samples left of the pulse ("F 84" = one tick)
 static void ot_syn_tick() {
   DACWRITER(pout)
   gyo = ADCREADER
@@ -248,7 +249,8 @@ static void ot_syn_tick() {
   int32_t o = (s >> 1) + 2048;                        // (four at full: ±4094 -> halved)
   if (o > 4095) o = 4095; if (o < 0) o = 0;
   pout = o;
-  ASHWRITER(o);
+  ASHWRITER(sy_clk > 0 ? 4095 : 0);                  // ASH: BOUNCE's clock (a ~10 ms pulse a tick), not the sound
+  if (sy_clk > 0) sy_clk--;
   YELLOW_PULSE(loud > 8000 ? 4095 : 0);               // (a gate while a note is loud)
   if (loud > 8000) { LAMP_ON; } else { LAMP_OFF; }
   REG(I2S_CONF_REG)
@@ -862,6 +864,7 @@ void pc_line(char *s) {
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
                 else if (e == 86 && k >= 2) ot_syn = id != 0;                // APP+CAFE+OTHER: BOUNCE (the sine synth) or COCO
                 else if (e == 85 && k >= 3) sy_note((int)id, (int)val);      // BOUNCE: a note (midi note, decay ms)
+                else if (e == 84) sy_clk = (int32_t)(clock_hz() * 0.01f);       // BOUNCE: a tick -> a 10 ms pulse on ASH
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
                 else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
                 else if (e == 88 && k >= 3) {                                // BOX's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK

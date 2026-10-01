@@ -62,6 +62,10 @@ final class Director: ObservableObject {
         midi.sine = sines
         midi.onFlip = { [weak self] in guard let self, self.bounce.flipSync else { return }; self.bounce.tick() }   // FLIP SYNC
         bounce.onNote = { [weak self] p, c, n, dec in self?.bounceNote(p, c, n, dec) }
+        bounce.onTick = { [weak self] in                                      // BOUNCE: the Cafes' ASH = the clock
+            guard let self else { return }
+            for u in self.units where u.isConnected && self.rig.preset[u.slot] == Preset.other { u.send("F 84") }
+        }
         applyOther()
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in

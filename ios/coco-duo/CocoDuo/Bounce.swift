@@ -53,6 +53,8 @@ final class BounceSeq: ObservableObject {
     var bpm = 120.0 { didSet { if abs(bpm - oldValue) > 0.01 { retime() } } }
     /// a ball on the floor: (panel, column, midi note, decay seconds)
     var onNote: ((Int, Int, UInt8, Double) -> Void)?
+    /// every tick (the Cafes' ASH puts out a pulse for it)
+    var onTick: (() -> Void)?
 
     var running = false { didSet { if running != oldValue { retime() } } }
     private var timer: DispatchSourceTimer?
@@ -107,6 +109,7 @@ final class BounceSeq: ObservableObject {
     /// one tick: every ball a row on; those on the floor sound
     func tick() {
         guard running else { return }
+        onTick?()
         var hits = Array(repeating: Array(repeating: false, count: Self.cols), count: 3)
         for p in 0..<3 {
             divAt[p] += 1                                               // DIVIDE: this panel moves on every n-th tick
