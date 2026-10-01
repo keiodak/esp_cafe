@@ -155,7 +155,8 @@ final class MidiBridge: ObservableObject {
         let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
         let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
         let steps = sc.count * st.range + 1
-        let pos = Double(earth) / 256.0 * Double(steps)                   // EARTH (0…255): where in the scale
+        let e = max(0, Double(earth) - 36) / (256 - 36)                   // (under 36: an open input's stray volts — the gate)
+        let pos = e * Double(steps)                                         // EARTH: where in the scale
         var d0 = min(steps - 1, max(0, Int(pos)))
         if slot >= 0 && slot < 2 {
             let was = lastDeg[slot]

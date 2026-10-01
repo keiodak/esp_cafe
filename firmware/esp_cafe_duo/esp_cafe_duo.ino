@@ -83,7 +83,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 #include <driver/rtc_io.h>
 volatile uint32_t earth_fail = 0, pin_fix = 0;
 // v4.68: the EARTH the phone is sent — EARTH always picks up a little stray voltage, and the raw reading jitters. Slowed
-// (a one-pole, ~30 ms, at 2 kHz in earth_tick) and gated (the bottom ~4 % is 0, the rest stretched back to 0…255).
+// (a one-pole, ~30 ms, at 2 kHz in earth_tick) and gated (under 36 of 255 = 0; above it, the value as read).
 // The sound's own EARTH (EARTHREAD) is untouched.
 volatile int earth_tx = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
@@ -1148,9 +1148,9 @@ static void earth_tick(void *) {
   if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
   static int32_t es = 0;                         // (Q8 of the 12-bit reading)
   es += ((earth_raw12 << 8) - es) >> 6;          // ~32 ms at 2 kHz
-  const int32_t gate = 160;                      // (12-bit: ~4 % — the stray voltage stays under it)
-  int32_t v = (es >> 8) - gate;
-  earth_tx = v <= 0 ? 0 : (int)((v * 255) / (4095 - gate));
+  // the gate: an open EARTH reads ~28 of 255 (the app's own rule: below 36 is nothing) — under it 0, above it as read
+  int32_t v = es >> 8;
+  earth_tx = v < 36 * 16 ? 0 : (int)(v >> 4);
 }
 
 void setup() {
