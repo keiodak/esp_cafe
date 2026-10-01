@@ -39,6 +39,8 @@ final class Director: ObservableObject {
     let pcoco = PhoneCoco()
     /// APP+CAFE's SUNDAY: the phone's small Sunnandæg
     let sun = PhoneSun()
+    /// the Cafes' SKIP / FLIP / EARTH played on an OP-1 field over Bluetooth MIDI
+    let midi = MidiBridge()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -50,6 +52,7 @@ final class Director: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        midi.watch(units)
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -1717,6 +1720,7 @@ struct CafesView: View {
                 CameraCard(camera: camera)
             } right: {
                 TempoCard(d: d, rig: d.rig)
+                MidiCard(midi: d.midi)
                 UpdateCard(d: d, rig: d.rig, a: hub.units[0], b: hub.units[1])
             }
         }
