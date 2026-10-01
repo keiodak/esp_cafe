@@ -183,9 +183,8 @@ final class Director: ObservableObject {
             }
         case Preset.harmony:
             rig.hdAll(slot: s).forEach(u.send)
-        case Preset.other:                                            // APP+CAFE+OTHER: the Cafe's tap delay (as ARP's)
-            u.send("F 97 0")
-            rig.arpDelayAll().forEach(u.send)
+        case Preset.other:                                            // APP+CAFE+OTHER: the Cafe is silent — its SKIP / FLIP play the OP-1
+            break
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:

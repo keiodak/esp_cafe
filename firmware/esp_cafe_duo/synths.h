@@ -4686,6 +4686,44 @@ void IRAM_ATTR arpdelay() {
   REG(I2S_CONF_REG)
   [0] |= (BIT(5));
 }
+// APP+CAFE+OTHER --- pool id 6 (k.odk): the Cafe makes no sound of its own — it is a controller. Its SKIP / FLIP / EARTH
+// ride the status line to the phone, which plays another instrument with them (an OP-1F over Bluetooth MIDI:
+// SKIP = a note, FLIP = a chord, EARTH = where in the scale). The lamp is lit while SKIP or FLIP is up.
+void IRAM_ATTR other_ctl() {
+  static uint32_t gen_seen = 0xFFFFFFFF;
+  static bool was_in_menu = true;
+  if (preset_mode) {
+    was_in_menu = true;
+  } else if (was_in_menu || gen_seen != preset_gen) {
+    gen_seen = preset_gen;
+    was_in_menu = false;
+    audio_frozen_state = false;
+    lamp = false;
+  }
+  pout = 2048;
+  DACWRITER(pout)
+  gyo = ADCREADER
+    pc_samples++;
+  earth_ac();
+  ASHWRITER(2048);
+  YELLOW_PULSE(0);
+  bool f = FLIPPERAT, k = SKIPPERAT;
+  if (f || k) {
+    LAMP_ON;
+  } else {
+    LAMP_OFF;
+  }
+  pc_wpos = 0;
+  pc_ppos = 0;
+  pc_flip = f ? 1 : 0;
+  pc_skip = k ? 1 : 0;
+  REG(I2S_CONF_REG)
+  [0] &= ~(BIT(5));
+  REG(I2S_INT_CLR_REG)
+  [0] = 0xFFFFFFFF;
+  REG(I2S_CONF_REG)
+  [0] |= (BIT(5));
+}
 // PHONE_COCO --- pool id 36 (k.odk): the phone plays (its two samplers, or SPEECH) into this Cafe, which is COCO —
 // a record head on the tape and a play head in a loop ("C <id> <v>" as in BLE COCO). The phone reads this Cafe's
 // FLIP / SKIP / EARTH from its status lines too. SKIP = back to the loop start, FLIP = backwards, EARTH = FM of the

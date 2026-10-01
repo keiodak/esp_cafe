@@ -84,7 +84,7 @@ enum Preset {
     static let ble = 2
     /// HARMONY is gone (its place, 6, is APP+CAFE+OTHER): nothing is it any more
     static let harmony = -99
-    /// APP+CAFE+OTHER: the Cafes play another instrument (an OP-1F) through the phone; the Cafe keeps a tap delay
+    /// APP+CAFE+OTHER: the Cafes play another instrument (an OP-1F) through the phone; the Cafe itself is silent (a controller)
     static let other = 6
     static let multi = 9
     static let arp = 10
