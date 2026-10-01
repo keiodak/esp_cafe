@@ -39,6 +39,8 @@ final class Director: ObservableObject {
     let pcoco = PhoneCoco()
     /// APP+CAFE's SUNDAY: the phone's small Sunnandæg
     let sun = PhoneSun()
+    /// the Cafes' SKIP / FLIP / EARTH played on an OP-1 field over Bluetooth MIDI
+    let midi = MidiBridge()
     var units: [CafeUnit] { hub.units }
     private var started = false
 
@@ -50,6 +52,7 @@ final class Director: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        midi.watch(units)
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -57,6 +60,8 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
+            let other = self.units.contains { $0.isConnected && ($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.other }
+            if self.midi.active != other { self.midi.active = other; if !other { self.midi.panic() } }   // APP+CAFE+OTHER: the instrument is played
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
             if self.frLightOn && !self.camera.enabled { self.frLightOn = false; self.frDriftSent = [[:], [:]]; self.camera.state.shapeLight = []; self.frSyncShapes() }   // (CAMERA off: no LIGHT)
@@ -176,6 +181,9 @@ final class Director: ObservableObject {
             }
         case Preset.harmony:
             rig.hdAll(slot: s).forEach(u.send)
+        case Preset.other:                                            // APP+CAFE+OTHER: the Cafe's tap delay (as ARP's)
+            u.send("F 97 0")
+            rig.arpDelayAll().forEach(u.send)
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
@@ -1701,6 +1709,8 @@ struct CafesView: View {
                             .font(.hud(PanelMetrics.labelFont))
                             .foregroundStyle(PastelTheme.textSecondary)
                     }
+                    DevicesSection(midi: d.midi)                         // the other devices (Bluetooth MIDI: an OP-1F …)
+                    Rectangle().fill(PastelTheme.hudLine.opacity(0.6)).frame(height: 0.5)
                     ForEach(hub.found) { f in
                         HStack(spacing: PanelMetrics.rowGap) {
                             Text(f.name)
