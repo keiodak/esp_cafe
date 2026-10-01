@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "HARMONY", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE+OTHER",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "APP+CAFE+OTHER", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -39,11 +39,11 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "replay in intervals (like rpls) · 2 voices: interval + timing",
+        "the Cafes play another instrument (OP-1F …) over Bluetooth MIDI · SKIP note · FLIP chord · EARTH pitch",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
-        "the phone and the Cafes · ARP · PHONE_COCO · BOX · OP-1F (the Cafes play it over Bluetooth MIDI)",
+        "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
         "Apple π · the original Cocoquantus coco · EARTH = record switch",
         "Apple π · prime-number delay / reverb · EARTH = low-pass · SKIP = room",
         "Apple π · very short delay · EARTH = head spread · ASH + YELLOW = stereo",
@@ -74,7 +74,7 @@ enum Preset {
     static let poolCount = 36
     static let maxPlaylist = 11
     /// the presets played from the phone over Bluetooth (their rows are tinted)
-    static let phonePlayed: Set<Int> = [2, 9, 10]
+    static let phonePlayed: Set<Int> = [2, 6, 9, 10]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
@@ -82,7 +82,10 @@ enum Preset {
     /// our own presets (0–10): the ones with CHAR values and phone pads
     static let count = 11
     static let ble = 2
-    static let harmony = 6
+    /// HARMONY is gone (its place, 6, is APP+CAFE+OTHER): nothing is it any more
+    static let harmony = -99
+    /// APP+CAFE+OTHER: the Cafes play another instrument (an OP-1F) through the phone; the Cafe keeps a tap delay
+    static let other = 6
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
@@ -98,7 +101,7 @@ enum Preset {
         "crucFX's TARPTERGE (A) / ARPSERGE (B) · a finger joins what it covers, lightly or flat · DRAW: lines are wires",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
-    static let defaultPlaylist = [2, 9, 10, 0, 1, 3, 4, 5, 7, 8]           // (HARMONY: taken off the list)
+    static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
@@ -313,7 +316,7 @@ final class Rig: ObservableObject {
     private static let d = UserDefaults.standard
 
     /// the preset each Cafe is on (app side, 0-based) and the BLE preset's mode per Cafe
-    @Published var preset: [Int] = ((Rig.d.array(forKey: "rig.preset") as? [Int]) ?? [Preset.ble, Preset.ble]).map { $0 == Preset.harmony ? Preset.ble : $0 } {
+    @Published var preset: [Int] = (Rig.d.array(forKey: "rig.preset") as? [Int]) ?? [Preset.ble, Preset.ble] {
         didSet { Self.d.set(preset, forKey: "rig.preset") }
     }
     @Published var mode: [Int] = (Rig.d.array(forKey: "rig.mode") as? [Int]) ?? [0, 0] {
@@ -335,7 +338,7 @@ final class Rig: ObservableObject {
     }
     /// the playlist: up to 11 pool ids, in order (PRESET DESIGN edits it; it goes to the Cafes as "L …")
     @Published var playlist: [Int] = {
-        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount && $0 != Preset.harmony } ?? []
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount } ?? []
         let v = p.isEmpty ? Preset.defaultPlaylist : Array(p.prefix(Preset.maxPlaylist))
         Preset.order = v
         return v
@@ -343,18 +346,15 @@ final class Rig: ObservableObject {
         didSet { Preset.order = playlist; Self.d.set(playlist, forKey: "rig.playlist") }
     }
     /// PRESET DESIGN memories 1–5: saved sets of the 11 slots ([] = nothing saved)
-    @Published var designBank: [[Int]] = ((Rig.d.array(forKey: "rig.designBank") as? [[Int]]).flatMap { $0.count == 5 ? $0 : nil }
-        ?? Array(repeating: [], count: 5)).map { b in                    // (HARMONY: out of the saved sets too)
-            let k = b.filter { $0 != Preset.harmony }; return b.isEmpty ? b : k + Array(repeating: -1, count: b.count - k.count) } {
+    @Published var designBank: [[Int]] = (Rig.d.array(forKey: "rig.designBank") as? [[Int]]).flatMap { $0.count == 5 ? $0 : nil }
+        ?? Array(repeating: [], count: 5) {
         didSet { Self.d.set(designBank, forKey: "rig.designBank") }
     }
     /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
     @Published var design: [Int] = {
-        // (HARMONY: gone — taken out and the rest moved up, an empty slot at the end)
-        func noHarmony(_ a: [Int]) -> [Int] { let k = a.filter { $0 != Preset.harmony }; return k + Array(repeating: -1, count: a.count - k.count) }
-        let v = noHarmony((Rig.d.array(forKey: "rig.design") as? [Int]) ?? [])
+        let v = (Rig.d.array(forKey: "rig.design") as? [Int]) ?? []
         if v.count == Preset.maxPlaylist { return v }
-        let p = ((Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist).filter { $0 != Preset.harmony }
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist
         return Array((p + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
     }() {
         didSet { Self.d.set(design, forKey: "rig.design") }
@@ -545,6 +545,7 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
+        if ctxPreset == Preset.other { return .knob }                   // (APP+CAFE+OTHER: no pads; the Cafe plays the instrument)
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }

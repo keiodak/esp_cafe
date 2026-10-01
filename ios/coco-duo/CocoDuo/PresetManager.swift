@@ -85,6 +85,11 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
+                if rig.preset.contains(Preset.other) {
+                    PanelCard(title: "APP+CAFE+OTHER", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
+                        Op1Controls(midi: d.midi)
+                    }
+                }
     }
     @State private var presetsH: CGFloat = 0
     @State private var wvPick = false            // WAVE: FILE (a picker of its own: this is a sheet)
@@ -189,7 +194,7 @@ private struct DesignCard: View {
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
-            grid([2, 9, 10])
+            grid([2, 9, 10, 6])
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)
@@ -410,12 +415,11 @@ private struct ArpCard: View {
     @ObservedObject var rig: Rig
 
     var body: some View {
-        PanelCard(title: "APP+CAFE+OTHER", note: rig.arpMode == 3 ? "Cafe -> OP-1F (Bluetooth MIDI)" : "phone audio -> Cafe input") {
+        PanelCard(title: "APP+CAFE", note: "phone audio -> Cafe input") {
             HStack(spacing: PanelMetrics.chipSpacing) {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
                 ChipButton(title: "BOX", filled: rig.arpMode == 2) { d.setArpMode(2) }
-                ChipButton(title: "OP-1F", filled: rig.arpMode == 3) { d.setArpMode(3) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {
@@ -442,9 +446,7 @@ private struct ArpCard: View {
                 SunControls(d: d, rig: rig, sun: d.sun)
                     .opacity(rig.arpMode == 2 ? 1 : 0)
                     .allowsHitTesting(rig.arpMode == 2)
-                Op1Controls(midi: d.midi)
-                    .opacity(rig.arpMode == 3 ? 1 : 0)
-                    .allowsHitTesting(rig.arpMode == 3)
+
             }
         }
     }
