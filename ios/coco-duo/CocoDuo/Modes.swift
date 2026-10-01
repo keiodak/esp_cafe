@@ -551,6 +551,10 @@ final class Rig: ObservableObject {
     func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot3") }
     /// the layer: 0 COCO+ · 1 COCO+SINE (kept)
     @Published var otPage: Int = min(5, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
+    /// COCO+'s WIDE (top left's right key): each Cafe's RANGE doubled (up to 8 octaves of EARTH), from an octave lower
+    @Published var otWide: Bool = Rig.d.bool(forKey: "rig.otWide") { didSet { Self.d.set(otWide, forKey: "rig.otWide") } }
+    /// COCO+'s FREEZE (bottom right's left key): the Cafes' COCO frozen (as their BUTTON)
+    @Published var otFreeze = false
     /// COCO+'s last variation (1…5 = 0…4): where the MODE key comes back to from BOUNCE
     @Published var otVar: Int = min(4, Rig.d.integer(forKey: "rig.otVar")) { didSet { Self.d.set(otVar, forKey: "rig.otVar") } }
 

@@ -370,13 +370,22 @@ final class Director: ObservableObject {
     // MARK: APP+CAFE+OTHER: the pads -> what each Cafe plays on the other instrument
 
     func applyOther() {
-        midi.settings = (0..<2).map { OtPad.settings(rig.otAxes, slot: $0) }
+        midi.settings = (0..<2).map { s in
+            var st = OtPad.settings(rig.otAxes, slot: s)
+            if rig.otWide { st.range = min(8, st.range * 2); st.octave = max(0, st.octave - 1) }   // WIDE: twice the span, from lower
+            return st
+        }
         midi.sineDiv = OtPad.sineDiv(rig.otAxes[4].x)
         sines.level = OtPad.sineLevel(rig.otAxes[4].y)
         sines.release = 0.8
         let st = midi.settings[0]                                 // BOUNCE: the columns' notes in the one scale
         bounce.scale = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
         bounce.root = st.root
+    }
+    /// COCO+'s FREEZE: both Cafes' COCO frozen / running (the same as their BUTTON: "F 98")
+    func otFreezeToggle() {
+        rig.otFreeze.toggle()
+        for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 98") }
     }
     /// the top right key: the next scale (moves the SCALE · ROOT pad's X)
     func nextOtScale() {
@@ -1695,11 +1704,13 @@ private struct HudBar: View {
             }
         case .other:
             switch n {
-            case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) } else { blank }   // BOUNCE: TEMPO or FLIP SYNC
+            case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) }                     // BOUNCE: TEMPO or FLIP SYNC
+                    else { BounceKey(title: "WIDE", on: rig.otWide) { rig.otWide.toggle(); d.applyOther() } }   // COCO+: the octave range wider
             case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) }                           // BOUNCE: the phone's sound
                     else { BounceKey(title: "\(rig.otPage + 1)", on: true) { d.setOtPage((rig.otPage + 1) % OtPad.bounce) } }   // COCO+: 1…5
             case 2: OtScaleKey(axis: rig.otAxes[0]) { d.nextOtScale() }            // the scale (the SCALE · ROOT pad's X)
-            default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } } else { blank }   // BOUNCE: SYNC
+            default: if rig.otPage == OtPad.bounce { key("arrow.triangle.2.circlepath") { d.bounce.sync() } }   // BOUNCE: SYNC
+                     else { BounceKey(title: "FREEZE", on: rig.otFreeze) { d.otFreezeToggle() } }             // COCO+: the Cafes' COCO frozen
             }
         case .knob:
             blank
