@@ -72,11 +72,12 @@ final class Director: ObservableObject {
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
             let other = self.units.contains { $0.isConnected && ($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.other }
             if self.midi.active != other { self.midi.active = other; if !other { self.midi.panic() } }   // APP+CAFE+OTHER: the instrument is played
-            let sineOn = other && OtPad.sinePages.contains(self.rig.otPage)             // the variations where the phone plays too
+            let bouncing = self.rig.ctxPreset == Preset.other && self.rig.otPage == OtPad.bounce   // BOUNCE: runs with or without a Cafe
+            let sineOn = (other && OtPad.sinePages.contains(self.rig.otPage)) || bouncing   // the variations where the phone plays too
             self.midi.mode = self.rig.otPage
             self.midi.sineOn = sineOn
             self.sines.play(sineOn)
-            self.bounce.running = other && self.rig.otPage == OtPad.bounce
+            self.bounce.running = bouncing
             self.bounce.bpm = self.rig.bpm
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
             self.frGravTick()                                         // FOURSES: ◉ hung, moved by gravity
@@ -1196,9 +1197,7 @@ private struct MainScreen: View {
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
         case .other:                                              // (COCO+: no SINE · COCO+SINE: B's CHORD unused — the sines take A's)
-            let p = rig.otPage
-            let t = i == 4 ? (p == 1 ? "SINE DIV · LEVEL" : "SINE LEVEL") : OtPad.titles[i]
-            return (rig.otAxes[i], (i == 4 && !OtPad.sinePages.contains(p)) || (i == 6 && (p == 1 || p == 3)) ? "—" : t)
+            return (rig.otAxes[i], OtPad.titles[i])                   // (COCO+1…5: one sheet, the same eight pads)
         case .knob: return (rig.nzAxes[i], "")
         }
     }
@@ -1225,8 +1224,7 @@ private struct MainScreen: View {
         case .fourses:
             return { x, y in FrPad.caption(i, x, y) }
         case .other:
-            let p = rig.otPage
-            return { x, y in OtPad.caption(i, x, y, page: p) }
+            return { x, y in OtPad.caption(i, x, y) }
         case .byte:
             if BytePad.isView(i) { return nil }
             return { x, y in BytePad.caption(i, x, y) }

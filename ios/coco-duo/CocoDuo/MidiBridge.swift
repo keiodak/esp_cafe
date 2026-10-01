@@ -184,7 +184,7 @@ final class MidiBridge: ObservableObject {
 
     /// BOUNCE: one note on the OP-1, let go after `ms`
     func playNote(_ n: UInt8, velocity: UInt8, ms: Int) {
-        guard on, active else { return }
+        guard on else { return }                                            // (BOUNCE plays with or without a Cafe)
         send([0x90 | channel, n, velocity])
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(20, ms))) { [weak self] in
             self?.send([0x80 | (self?.channel ?? 0), n, 0])
