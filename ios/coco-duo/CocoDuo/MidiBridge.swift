@@ -102,7 +102,7 @@ final class MidiBridge: ObservableObject {
             guard on, active else { return }
             divCount[key, default: 0] += 1                                  // DIV: every n-th FLIP plays
             guard (divCount[key]! - 1) % max(1, sineDiv) == 0 else { return }
-            let ns = notes(settings[0], earth: earth, chord: true)          // (Cafe A's CHORD · SPREAD · OCTAVE · RANGE)
+            let ns = notes(settings[0], earth: earth, chord: true, slot: slot)          // (Cafe A's CHORD · SPREAD · OCTAVE · RANGE)
             sine?.noteOn(key, notes: ns, velocity: 110)
             last = tag + "→ SINE " + names(ns)
             return
@@ -110,13 +110,13 @@ final class MidiBridge: ObservableObject {
             guard up, on, active else { return }
             let dk = [slot, 9]
             if droneOn[slot] { droneOn[slot] = false; sine?.noteOff(dk); last = tag + "→ DRONE off"; return }
-            let ns = notes(settings[0], earth: earth, chord: true)
+            let ns = notes(settings[0], earth: earth, chord: true, slot: slot)
             sine?.noteOn(dk, notes: ns, velocity: 100); droneOn[slot] = true
             last = tag + "→ DRONE " + names(ns)
             return
         case (2, true):                                                     // STEP · FLIP: a new chord (from EARTH), from its first tone
             guard up, on, active else { return }
-            stepChord[slot] = notes(st, earth: earth, chord: true); stepAt[slot] = 0
+            stepChord[slot] = notes(st, earth: earth, chord: true, slot: slot); stepAt[slot] = 0
             last = tag + "→ chord " + names(stepChord[slot])
             return
         default: break
@@ -125,17 +125,17 @@ final class MidiBridge: ObservableObject {
         guard on, active, up else { return }
         var ns: [UInt8]
         if mode == 2 {                                                      // STEP · SKIP: the next tone of the chord
-            if stepChord[slot].isEmpty { stepChord[slot] = notes(st, earth: earth, chord: true) }
+            if stepChord[slot].isEmpty { stepChord[slot] = notes(st, earth: earth, chord: true, slot: slot) }
             ns = [stepChord[slot][stepAt[slot] % stepChord[slot].count]]; stepAt[slot] += 1
         } else {
-            ns = notes(st, earth: earth, chord: chord)                     // SKIP: one note · FLIP: a chord
+            ns = notes(st, earth: earth, chord: chord, slot: slot)                     // SKIP: one note · FLIP: a chord
         }
         let vel = UInt8(clamping: chord ? max(1, st.velocity - 18) : st.velocity)
         for n in ns { send([0x90 | channel, n, vel]) }
         last = tag + names(ns) + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
         held[key] = ns
         if mode == 4 && !chord {                                            // THIRDS: a sine a third (two scale steps) above
-            let t = notes(st, earth: earth, chord: false, up: 2)
+            let t = notes(st, earth: earth, chord: false, up: 2, slot: slot)
             sine?.noteOn(key, notes: t, velocity: Int(vel))
             last += " + SINE " + names(t)
         }
@@ -149,11 +149,20 @@ final class MidiBridge: ObservableObject {
     }
 
     /// the notes for these settings: EARTH picks where in the scale; a chord is built in the scale (CHORD · SPREAD)
-    private func notes(_ st: OtSettings, earth: Int, chord: Bool, up: Int = 0) -> [UInt8] {
+    /// the last scale step EARTH picked, per Cafe (HYSTERESIS: a step is left only once EARTH is well past its edge)
+    private var lastDeg = [-1, -1]
+    private func notes(_ st: OtSettings, earth: Int, chord: Bool, up: Int = 0, slot: Int = -1) -> [UInt8] {
         let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
         let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
         let steps = sc.count * st.range + 1
-        let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps)))) + up   // EARTH (0…255): where in the scale
+        let pos = Double(earth) / 256.0 * Double(steps)                   // EARTH (0…255): where in the scale
+        var d0 = min(steps - 1, max(0, Int(pos)))
+        if slot >= 0 && slot < 2 {
+            let was = lastDeg[slot]
+            if was >= 0 && was < steps && abs(pos - (Double(was) + 0.5)) < 0.85 { d0 = was }   // (0.35 of a step past the edge)
+            lastDeg[slot] = d0
+        }
+        let deg = d0 + up
         var ds: [Int] = [0]
         if chord {
             switch st.chord {

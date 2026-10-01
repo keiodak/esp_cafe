@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.67   (2026-10-01: the apps' COCO (APP+CAFE / APP+CAFE+OTHER): wet ×1.5)
+// #####   ESP CAFE DUO   v4.68   (2026-10-01: the EARTH sent to the phone: slowed (~30 ms) and gated (stray volts = 0))
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -65,7 +65,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.67"
+#define FW_VERSION "4.68"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -81,7 +81,11 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 #include <esp_ota_ops.h>
 #include <driver/adc.h>
 #include <driver/rtc_io.h>
-volatile uint32_t earth_fail = 0, pin_fix = 0;               // EARTH reads the radio refused ("H")
+volatile uint32_t earth_fail = 0, pin_fix = 0;
+// v4.68: the EARTH the phone is sent — EARTH always picks up a little stray voltage, and the raw reading jitters. Slowed
+// (a one-pole, ~30 ms, at 2 kHz in earth_tick) and gated (the bottom ~4 % is 0, the rest stretched back to 0…255).
+// The sound's own EARTH (EARTHREAD) is untouched.
+volatile int earth_tx = 0;               // EARTH reads the radio refused ("H")
 static NimBLECharacteristic *ble_tx = nullptr;
 static volatile bool ble_conn = false;
 static volatile uint16_t ble_mtu = 23;
@@ -361,7 +365,7 @@ void pc_status() {
   snprintf(tb, sizeof(tb), "T %lu %lu %d %ld %ld %ld %d %d %d %d %lu %d %d %d %d %d %d %d %d %d %s %lu %lu %lu %d",
     (unsigned long)pc_wpos, (unsigned long)pc_ppos, (pc_rec && !audio_frozen_state) ? 1 : 0,
     (long)pc_ls, (long)pc_le, (long)(pc_speed * 1000 / 4096),
-    (int)EARTHREAD, (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
+    (int)(cafe_no_ble ? EARTHREAD : earth_tx), (seen_flip || (FLIPPERAT)) ? 1 : 0, (seen_skip || (SKIPPERAT)) ? 1 : 0, (seen_btn || !(BUTTONEST)) ? 1 : 0, (unsigned long)pc_samples, preset,
     pc_mode, (int)(cafe_bpm * 10.0f + 0.5f), fx_now, ch_now(),
     sc_amin > sc_amax ? 128 : sc_amin, sc_amin > sc_amax ? 128 : sc_amax, sc_ymin > sc_ymax ? 0 : sc_ymin, sc_ymin > sc_ymax ? 0 : sc_ymax,
     FW_VERSION, (unsigned long)fl_count, (unsigned long)hb_qw, (unsigned long)hb_sent, (int)ble_mtu);   // (+ HABIT: packets made / sent, the MTU)                                         // (the version and the flash count ride every status line)
@@ -1142,6 +1146,11 @@ static void earth_tick(void *) {
   int sum = 0, n = 0;                            // one conversion, 2000x a second (fast enough for audio-rate FM in ECHO)
   for (int k = 0; k < 1; k++) { int r = 0; if (adc2_get_raw(ADC2_CHANNEL_0, ADC_WIDTH_BIT_12, &r) == ESP_OK) { sum += r; n++; } }
   if (n) { earth_raw12 = sum / n; earth_now = earth_raw12 >> 4; } else earth_fail++;
+  static int32_t es = 0;                         // (Q8 of the 12-bit reading)
+  es += ((earth_raw12 << 8) - es) >> 6;          // ~32 ms at 2 kHz
+  const int32_t gate = 160;                      // (12-bit: ~4 % — the stray voltage stays under it)
+  int32_t v = (es >> 8) - gate;
+  earth_tx = v <= 0 ? 0 : (int)((v * 255) / (4095 - gate));
 }
 
 void setup() {
