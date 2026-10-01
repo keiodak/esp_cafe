@@ -20,6 +20,9 @@ final class MidiBridge: ObservableObject {
     /// COCO+SINE: the phone's sine chords (the Director sets sineOn from the layer)
     var sine: SineChords?
     var sineOn = false
+    /// COCO+SINE's DIV: a sine chord on every n-th FLIP (each Cafe counts its own)
+    var sineDiv = 1
+    private var divCount: [[Int]: Int] = [:]
     /// the last thing played (shown in the CAFES card: is anything going out?)
     @Published var last = ""
     /// each Cafe's scale, root, octave, range, chord, velocity, length (from APP+CAFE+OTHER's pads: OtPad)
@@ -78,54 +81,26 @@ final class MidiBridge: ObservableObject {
 
     private func gate(_ key: [Int], _ up: Bool, earth: Int, chord: Bool) {
         let st = settings[min(max(key[0], 0), 1)]
+        let toSine = chord && sineOn && sine != nil                       // COCO+SINE: FLIP = the phone's sine chord (not the OP-1)
+        if toSine {
+            if !up { sine?.noteOff(key); return }                           // (the fall: the chord lets go)
+            guard on, active else { return }
+            divCount[key, default: 0] += 1                                  // DIV: every n-th FLIP plays
+            guard (divCount[key]! - 1) % max(1, sineDiv) == 0 else { return }
+            let a = settings[0]                                             // (the chord: Cafe A's CHORD · SPREAD · OCTAVE · RANGE)
+            let ns = notes(a, earth: earth, chord: true)
+            sine?.noteOn(key, notes: ns, velocity: 110)
+            last = (key[0] == 0 ? "A " : "B ") + "FLIP → SINE " + names(ns)
+            return
+        }
         if st.lengthMs == 0 || up { off(key) }                            // (HOLD: the fall lets go; a new rise cuts the last)
         guard on, active, up else { return }
-        let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
-        let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
-        let steps = sc.count * st.range + 1
-        let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps))))   // EARTH (0…255): where in the scale
-        func note(_ d: Int) -> Int { base + 12 * (d / sc.count) + sc[d % sc.count] }
-        var ds: [Int]
-        if !chord { ds = [0] }
-        else {
-            switch st.chord {                                               // (FLIP: a chord built in the scale)
-            case 1: ds = [0, 2, 4, 6]
-            case 2: ds = [0, 3, 4]
-            case 3: ds = [0, 4, sc.count]
-            case 4: ds = [0, 2, 4, 6, 8]
-            case 5: ds = [0, sc.count]
-            default: ds = [0, 2, 4]
-            }
-        }
-        var ns = ds.map { note(deg + $0) }
-        if chord && st.spread > 0 && ns.count > 2 {                         // OPEN: the 2nd up an octave · WIDE: every other one
-            for i in stride(from: 1, to: ns.count, by: st.spread == 1 ? ns.count : 2) { ns[i] += 12 }
-        }
-        let notes = ns.map { UInt8(clamping: min(127, max(0, $0))) }
+        let ns = notes(st, earth: earth, chord: chord)                     // SKIP: one note · FLIP (COCO+): a chord
         let vel = UInt8(clamping: chord ? max(1, st.velocity - 18) : st.velocity)
-        for n in notes { send([0x90 | channel, n, vel]) }
-        let nn = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        last = (key[0] == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ") + notes.map { nn[Int($0) % 12] + "\(Int($0) / 12 - 1)" }.joined(separator: " ")
+        for n in ns { send([0x90 | channel, n, vel]) }
+        last = (key[0] == 0 ? "A " : "B ") + (chord ? "FLIP " : "SKIP ") + names(ns)
             + (MIDIGetNumberOfDestinations() == 0 ? "  (no device!)" : "")
-        held[key] = notes
-        if sineOn, let sine {                                               // COCO+SINE: a chord of sines, A's CHORD · SPREAD
-            let a = settings[0]
-            let abase = 24 + 12 * a.octave + st.root
-            let asteps = sc.count * a.range + 1
-            let adeg = min(asteps - 1, max(0, Int(Double(earth) / 256.0 * Double(asteps))))
-            var sd: [Int]
-            switch a.chord {
-            case 1: sd = [0, 2, 4, 6]
-            case 2: sd = [0, 3, 4]
-            case 3: sd = [0, 4, sc.count]
-            case 4: sd = [0, 2, 4, 6, 8]
-            case 5: sd = [0, sc.count]
-            default: sd = [0, 2, 4]
-            }
-            var sn = sd.map { abase + 12 * ((adeg + $0) / sc.count) + sc[(adeg + $0) % sc.count] }
-            if a.spread > 0 && sn.count > 2 { for i in stride(from: 1, to: sn.count, by: a.spread == 1 ? sn.count : 2) { sn[i] += 12 } }
-            sine.noteOn(key, notes: sn.map { UInt8(clamping: min(127, max(0, $0))) }, velocity: chord ? max(1, a.velocity - 18) : a.velocity)
-        }
+        held[key] = ns
         if st.lengthMs > 0 {                                                // LENGTH: let go after it, whatever the gate does
             tokens += 1; let t = tokens; token[key] = t
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(st.lengthMs)) { [weak self] in
@@ -134,9 +109,36 @@ final class MidiBridge: ObservableObject {
             }
         }
     }
+    /// the notes for these settings: EARTH picks where in the scale; a chord is built in the scale (CHORD · SPREAD)
+    private func notes(_ st: OtSettings, earth: Int, chord: Bool) -> [UInt8] {
+        let sc = OtPad.scales[min(max(st.scale, 0), OtPad.scales.count - 1)]
+        let base = 24 + 12 * st.octave + st.root                            // C1…C5, moved up to the root
+        let steps = sc.count * st.range + 1
+        let deg = min(steps - 1, max(0, Int(Double(earth) / 256.0 * Double(steps))))   // EARTH (0…255): where in the scale
+        var ds: [Int] = [0]
+        if chord {
+            switch st.chord {
+            case 1: ds = [0, 2, 4, 6]
+            case 2: ds = [0, 3, 4]
+            case 3: ds = [0, 4, sc.count]
+            case 4: ds = [0, 2, 4, 6, 8]
+            case 5: ds = [0, sc.count]
+            default: ds = [0, 2, 4]
+            }
+        }
+        var ns = ds.map { base + 12 * ((deg + $0) / sc.count) + sc[(deg + $0) % sc.count] }
+        if chord && st.spread > 0 && ns.count > 2 {                         // OPEN: the 2nd up an octave · WIDE: every other one
+            for i in stride(from: 1, to: ns.count, by: st.spread == 1 ? ns.count : 2) { ns[i] += 12 }
+        }
+        return ns.map { UInt8(clamping: min(127, max(0, $0))) }
+    }
+    private func names(_ ns: [UInt8]) -> String {
+        let nn = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        return ns.map { nn[Int($0) % 12] + "\(Int($0) / 12 - 1)" }.joined(separator: " ")
+    }
+
     private func off(_ key: [Int]) {
         token[key] = nil
-        sine?.noteOff(key)
         if let notes = held.removeValue(forKey: key) { for n in notes { send([0x80 | channel, n, 0]) } }
     }
 

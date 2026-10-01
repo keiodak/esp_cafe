@@ -360,8 +360,9 @@ final class Director: ObservableObject {
 
     func applyOther() {
         midi.settings = (0..<2).map { OtPad.settings(rig.otAxes, slot: $0) }
-        sines.level = OtPad.sineLevel(rig.otAxes[4].x)
-        sines.release = OtPad.sineRelease(rig.otAxes[4].y)
+        midi.sineDiv = OtPad.sineDiv(rig.otAxes[4].x)
+        sines.level = OtPad.sineLevel(rig.otAxes[4].y)
+        sines.release = 0.8
     }
     /// COCO+ · COCO+SINE
     func setOtPage(_ p: Int) {
@@ -1165,7 +1166,8 @@ private struct MainScreen: View {
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
-        case .other: return (rig.otAxes[i], i == 4 && rig.otPage == 0 ? "—" : OtPad.titles[i])   // (COCO+: no SINE)
+        case .other:                                              // (COCO+: no SINE · COCO+SINE: B's CHORD unused — the sines take A's)
+            return (rig.otAxes[i], (i == 4 && rig.otPage == 0) || (i == 6 && rig.otPage == 1) ? "—" : OtPad.titles[i])
         case .knob: return (rig.nzAxes[i], "")
         }
     }

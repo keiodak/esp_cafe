@@ -283,11 +283,13 @@ enum OtPad {
     static let icons = ["music.note.list", "music.quarternote.3"]
     /// the eight pads: the one SCALE · ROOT (both Cafes), A's three; the phone's SINE, B's three
     static let titles = ["SCALE · ROOT", "A OCTAVE · RANGE", "A CHORD · SPREAD", "A VELOCITY · LENGTH",
-                         "SINE LEVEL · RELEASE", "B OCTAVE · RANGE", "B CHORD · SPREAD", "B VELOCITY · LENGTH"]
+                         "SINE DIV · LEVEL", "B OCTAVE · RANGE", "B CHORD · SPREAD", "B VELOCITY · LENGTH"]
     static let starts: [(Double, Double)] = [(2.0 / 7.0, 0.0), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0),
-                                             (0.6, 0.35), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
-    static func sineLevel(_ x: Double) -> Double { x }
-    static func sineRelease(_ y: Double) -> Double { 0.05 + y * y * 3.95 }              // 0.05 … 4 s
+                                             (0.0, 0.6), (0.5, 1.0 / 3.0), (0.0, 0.0), (0.8, 0.0)]
+    /// SINE: X = DIV (a chord on every 1st / 2nd / 3rd / 4th / 6th / 8th FLIP) · Y = the chords' level
+    static let divs = [1, 2, 3, 4, 6, 8]
+    static func sineDiv(_ x: Double) -> Int { divs[min(divs.count - 1, Int(x * Double(divs.count - 1) + 0.5))] }
+    static func sineLevel(_ y: Double) -> Double { y }
     static let scaleNames = ["MAJOR", "MINOR", "PENTA", "MIN PENTA", "DORIAN", "MIXOLYD", "LYDIAN", "HARM MIN"]
     static let scales: [[Int]] = [[0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 7, 9], [0, 3, 5, 7, 10],
                                   [0, 2, 3, 5, 7, 9, 10], [0, 2, 4, 5, 7, 9, 10], [0, 2, 4, 6, 7, 9, 11], [0, 2, 3, 5, 7, 8, 11]]
@@ -303,7 +305,7 @@ enum OtPad {
     static func velocity(_ x: Double) -> Int { 30 + Int(x * 97 + 0.5) }
     static func lengthMs(_ y: Double) -> Int { y < 0.03 ? 0 : 30 + Int(y * y * 1970) }  // 0 = HOLD (as long as the gate is up)
     static func caption(_ i: Int, _ x: Double, _ y: Double) -> String {
-        if i == 4 { return "LEVEL \(Int(x * 100))% · REL " + String(format: "%.2f S", sineRelease(y)) }
+        if i == 4 { return "÷\(sineDiv(x)) · LEVEL \(Int(y * 100))%" }
         switch i % 4 {
         case 0: return "\(scaleNames[scale(x)]) · \(rootNames[root(y)])"
         case 1: return "C\(octave(x) + 1) · \(range(y)) OCT"
@@ -533,10 +535,10 @@ final class Rig: ObservableObject {
 
     // APP+CAFE+OTHER: the instrument's pads (kept), its page, LINK (B on A's scale)
     let otAxes: [PadAxis] = {
-        let v = (Rig.d.array(forKey: "rig.ot2") as? [Double]) ?? []
+        let v = (Rig.d.array(forKey: "rig.ot3") as? [Double]) ?? []
         return (0..<8).map { i in v.count == 16 ? PadAxis((v[2 * i], v[2 * i + 1])) : PadAxis(OtPad.starts[i]) }
     }()
-    func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot2") }
+    func saveOt() { Self.d.set(otAxes.flatMap { [$0.x, $0.y] }, forKey: "rig.ot3") }
     /// the layer: 0 COCO+ · 1 COCO+SINE (kept)
     @Published var otPage: Int = min(1, Rig.d.integer(forKey: "rig.otPage")) { didSet { Self.d.set(otPage, forKey: "rig.otPage") } }
 
