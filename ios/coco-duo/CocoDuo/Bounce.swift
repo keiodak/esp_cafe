@@ -293,9 +293,17 @@ struct BounceAlignChip: View {
     @ObservedObject var seq: BounceSeq
     var body: some View {
         HStack(spacing: PanelMetrics.chipSpacing) {
-            ChipButton(title: "ALIGN", filled: seq.align) { seq.align.toggle() }
+            ChipButton(title: "LINK", filled: seq.align) { seq.align.toggle() }
             Text("iOS / OP-1 wait for the Cafes (Bluetooth lag)")
                 .font(.hud(8)).foregroundStyle(PastelTheme.textSecondary).lineLimit(1)
         }
+    }
+}
+
+/// bottom left's right (BOUNCE): LINK — the phone's and the OP-1's notes wait ~35 ms, so they land with the Cafes'
+struct BounceLinkKey: View {
+    @ObservedObject var seq: BounceSeq
+    var body: some View {
+        BounceKey(title: "LINK", on: seq.align) { seq.align.toggle() }
     }
 }

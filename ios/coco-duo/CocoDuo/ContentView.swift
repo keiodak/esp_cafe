@@ -1716,7 +1716,7 @@ private struct HudBar: View {
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) }                     // BOUNCE: TEMPO or FLIP SYNC
                     else { BounceKey(title: "WIDE", on: rig.otWide) { rig.otWide.toggle(); d.applyOther() } }   // COCO+: the octave range wider
-            case 1: if rig.otPage == OtPad.bounce { BounceWaveKey(seq: d.bounce) }                           // BOUNCE: the phone's sound
+            case 1: if rig.otPage == OtPad.bounce { BounceLinkKey(seq: d.bounce) }                           // BOUNCE: LINK (iOS / OP-1 wait for the Cafes)
                     else { BounceKey(title: "\(rig.otPage + 1)", on: true) { d.setOtPage((rig.otPage + 1) % OtPad.bounce) } }   // COCO+: 1…5
             case 2: OtScaleKey(axis: rig.otAxes[0]) { d.nextOtScale() }            // the scale (the SCALE · ROOT pad's X)
             default: if rig.otPage == OtPad.bounce { key("hand.tap") { d.tapTempo(); d.bounce.sync() } }   // BOUNCE: TAP (the tempo, and the downbeat)
