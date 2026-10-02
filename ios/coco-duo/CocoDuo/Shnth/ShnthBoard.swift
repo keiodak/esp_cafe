@@ -1,6 +1,6 @@
 // ShnthBoard.swift — coco duo (k.odk)
 // SHNTH's screen (in place of the pads), as the Shnth app's, in coco duo's look. Top: the patch (its list, ‹ ›), the
-// preset, the LEDs, iPHONE · CAFE (JUSTINTS: its example). SHNTH | JUSTINTS is chosen beside the mode (BLE MODE);
+// preset, the LEDs (JUSTINTS: its example). SHNTH sounds on the Cafes only (the phone's engine runs silent, for the LEDs). SHNTH | JUSTINTS is chosen beside the mode (BLE MODE);
 // GEN is the top left corner's key.
 // SHNTH: MAJOR over minor, TAR, the antennae (TILT · CAM · OFF); at the foot the four bars as XY pads (finger area).
 // The Cafes on SHNTH play the patch with the same hands.
@@ -76,8 +76,6 @@ struct ShnthBoard: View {
                     }
                 }
                 .padding(.horizontal, 4)
-                ChipButton(title: "iPHONE", filled: sh.onPhone) { sh.onPhone.toggle() }.frame(width: 50)
-                ChipButton(title: "CAFE", filled: sh.onCafe) { sh.onCafe.toggle(); changed() }.frame(width: 40)
             }
         }
     }
