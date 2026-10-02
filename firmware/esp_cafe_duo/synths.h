@@ -4579,8 +4579,10 @@ static int32_t __attribute__((noinline)) zg_tick(int32_t in, int32_t *rout, bool
 // a record head on the tape and a play head in a loop, EARTH = FM of the speed ("C <id> <v>" as in BLE COCO).
 // SKIP = back to the loop start, FLIP = backwards, YELLOW = a pulse at every wrap. ~6 ms fade between the two.
 volatile bool cl_on = false;  // BOX's COCO: LINK ("F 88 3")
-volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO)
+volatile int ad_mode = 0;  // 0 = ARP (tap delay) · 1 = SPEECH (COCO) · 2 ZEITGEIST · 3 COCO (+ LINK) · 4 OTHER (v4.71)
+void other_coco();         // (esp_cafe_duo.ino: COCO with slopes, or BOUNCE's sine synth)
 void IRAM_ATTR arpdelay() {
+  if (ad_mode == 4) { fx_rs[1] = true; other_coco(); return; }   // v4.71: APP+CAFE+OTHER lives here now (COCO+ / BOUNCE)
   if (ad_mode == 1) { fx_rs[1] = true; co_noearth = true; co_wet = 384; coco_mod(); co_wet = 256; co_noearth = false; return; }   // PHONE_COCO / SPEECH: COCO_MOD itself
   if (ad_mode == 3) { fx_rs[1] = true; co_link = cl_on; co_wet = 384; coco_mod(); co_wet = 256; co_link = false; return; }   // BOX's COCO: a plain COCO (+ LINK)
   static uint32_t gen_seen = 0xFFFFFFFF;

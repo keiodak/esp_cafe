@@ -85,7 +85,7 @@ struct PresetManagerView: View {
                 if rig.preset.contains(Preset.arp) {
                     ArpCard(d: d, rig: rig)
                 }
-                if rig.preset.contains(Preset.other) {
+                if rig.preset.contains(Preset.arp) && rig.arpMode == 3 {
                     PanelCard(title: "APP+CAFE+OTHER", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
                         Op1Controls(d: d, midi: d.midi, rig: rig)
                     }

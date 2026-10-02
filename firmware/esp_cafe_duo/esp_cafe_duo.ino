@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.70   (2026-10-02: the phone's ASH — "F 83 <0..4095>", for Fourses's CAFE link)
+// #####   ESP CAFE DUO   v4.71   (2026-10-02: APP+CAFE takes OTHER in (F 97 4); preset 6 = iOS (the phone plays, the Cafe COCOs))
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -66,7 +66,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.70"
+#define FW_VERSION "4.71"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -886,7 +886,7 @@ void pc_line(char *s) {
                 }
                 else if (e == 84) sy_clk = (int32_t)(clock_hz() * 0.01f);       // BOUNCE: a tick -> a 10 ms pulse on ASH
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
-                else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
+                else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 4 ? 4 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
                 else if (e == 88 && k >= 3) {                                // BOX's COCO: 0 speed (500 = x1, x0.25..x4) · 1 FLIP · 2 SKIP · 3 LINK
                   if (val < 0) val = 0; if (val > 1000) val = 1000;
                   if (id == 0) co_spd = (int32_t)(256.0f * powf(2.0f, (val - 500) / 250.0f));

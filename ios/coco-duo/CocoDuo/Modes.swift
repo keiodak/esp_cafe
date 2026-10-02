@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "APP+CAFE+OTHER", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "iOS", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -39,11 +39,11 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "the Cafes play another instrument (OP-1F …) over Bluetooth MIDI · SKIP note · FLIP chord · EARTH pitch",
+        "the phone plays (FOURSES · SHNTH on the phone itself) · the Cafe: COCO with slopes",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
-        "the phone plays a sine arpeggio into the Cafe's stereo tap delay · SKIP = tap",
+        "ARP · PHONE_COCO · SUNDAY · OTHER (COCO+ / BOUNCE: the Cafes play an OP-1F over Bluetooth MIDI)",
         "Apple π · the original Cocoquantus coco · EARTH = record switch",
         "Apple π · prime-number delay / reverb · EARTH = low-pass · SKIP = room",
         "Apple π · very short delay · EARTH = head spread · ASH + YELLOW = stereo",
@@ -84,8 +84,9 @@ enum Preset {
     static let ble = 2
     /// HARMONY is gone (its place, 6, is APP+CAFE+OTHER): nothing is it any more
     static let harmony = -99
-    /// APP+CAFE+OTHER: the Cafes play another instrument (an OP-1F) through the phone; the Cafe itself is silent (a controller)
-    static let other = 6
+    /// iOS (v4.71, where APP+CAFE+OTHER was): the phone plays — FOURSES · SHNTH on the phone itself; the Cafe is COCO
+    /// with slopes. (APP+CAFE+OTHER is a layer of APP+CAFE now: arpMode 3)
+    static let ios = 6
     static let multi = 9
     static let arp = 10
     static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "SHNTH"]
@@ -573,6 +574,13 @@ final class Rig: ObservableObject {
     var pcSlot = 0
     /// ARP_DELAY's layer: 0 = ARP (arpeggio -> tap delay) · 1 = SPEECH (voice -> COCO)
     @Published var arpMode: Int = Rig.d.integer(forKey: "rig.arpMode") { didSet { Self.d.set(arpMode, forKey: "rig.arpMode") } }
+    /// APP+CAFE's OTHER layer (COCO+ / BOUNCE) — what was APP+CAFE+OTHER
+    func isOther(_ s: Int) -> Bool { preset[s] == Preset.arp && arpMode == 3 }
+    var ctxOther: Bool { ctxPreset == Preset.arp && arpMode == 3 }
+    /// iOS: 0 FOURSES · 1 SHNTH (the phone plays them)
+    @Published var iosMode: Int = Rig.d.integer(forKey: "rig.iosMode") { didSet { Self.d.set(iosMode, forKey: "rig.iosMode") } }
+    var iosFourses: Bool { ctxPreset == Preset.ios && iosMode == 0 }
+    var iosShnth: Bool { ctxPreset == Preset.ios && iosMode == 1 }
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
     @Published var sunLevel: Double = 0.9
@@ -621,9 +629,9 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
-        if ctxPreset == Preset.other { return .other }                  // (APP+CAFE+OTHER: the instrument's pads, A over B)
+        if ctxPreset == Preset.ios { return iosMode == 1 ? .shnth : .fourses }   // iOS: FOURSES · SHNTH on the phone
         if ctxPreset == Preset.multi { return .multi }
-        if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
+        if ctxPreset == Preset.arp { return arpMode == 3 ? .other : arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY / OTHER
         guard ctxPreset == Preset.ble else { return .knob }
         return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .shnth][min(max(ctxMode, 0), 8)]
     }

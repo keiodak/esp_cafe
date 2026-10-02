@@ -48,6 +48,8 @@ final class Director: ObservableObject {
     let shnth = ShnthPlayer()
     /// SHNTH's antennae (TILT · CAM · OFF)
     let ant = Antennae()
+    /// iOS · FOURSES: the Fourses on the phone
+    let phoneFr = PhoneFourses()
     private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
@@ -71,9 +73,10 @@ final class Director: ObservableObject {
         bounce.onNote = { [weak self] p, c, n, dec in self?.bounceNote(p, c, n, dec) }
         bounce.onTick = { [weak self] in                                      // BOUNCE: the Cafes' ASH = the clock
             guard let self else { return }
-            for u in self.units where u.isConnected && self.rig.preset[u.slot] == Preset.other { u.send("F 84") }
+            for u in self.units where u.isConnected && self.rig.isOther(u.slot) { u.send("F 84") }
         }
         applyOther()
+        phoneFr.onReady = { [weak self] in self?.frPhoneAll() }        // iOS · FOURSES: the circuit made -> the board to it
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -81,9 +84,9 @@ final class Director: ObservableObject {
             let on = self.units.filter { $0.isConnected && self.rig.preset[$0.slot] == Preset.arp }
             if let u = on.first { self.arp.earth = Double(u.earth) / 255 }
             self.frForwardEarth()                                     // FOURSES: EARTH A / EARTH B across
-            let other = self.units.contains { $0.isConnected && ($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.other }
+            let other = self.units.contains { $0.isConnected && (($0.preset >= 0 ? $0.preset : self.rig.preset[$0.slot]) == Preset.arp && self.rig.arpMode == 3) }
             if self.midi.active != other { self.midi.active = other; if !other { self.midi.panic() } }   // APP+CAFE+OTHER: the instrument is played
-            let bouncing = self.rig.ctxPreset == Preset.other && self.rig.otPage == OtPad.bounce   // BOUNCE: runs with or without a Cafe
+            let bouncing = self.rig.ctxOther && self.rig.otPage == OtPad.bounce   // BOUNCE: runs with or without a Cafe
             let sineOn = (other && OtPad.sinePages.contains(self.rig.otPage)) || bouncing   // the variations where the phone plays too
             self.midi.mode = self.rig.otPage
             self.midi.sineOn = sineOn
@@ -94,8 +97,8 @@ final class Director: ObservableObject {
             self.sines.wave = self.bounce.iosWave
             if bouncing && self.bounce.align {                         // LINK: the Cafes' lag measured every ~2 s
                 self.pingTick += 1
-                if self.pingTick % 66 == 0 { for u in self.units where u.isConnected && self.rig.preset[u.slot] == Preset.other { u.ping() } }
-                let lags = self.units.filter { $0.isConnected && $0.lagMs > 0 && self.rig.preset[$0.slot] == Preset.other }.map { $0.lagMs }
+                if self.pingTick % 66 == 0 { for u in self.units where u.isConnected && self.rig.isOther(u.slot) { u.ping() } }
+                let lags = self.units.filter { $0.isConnected && $0.lagMs > 0 && self.rig.isOther($0.slot) }.map { $0.lagMs }
                 self.bounce.cafeLag = lags.max() ?? 0
             }
             self.frFlickTick()                                        // FOURSES: ◌ its unsteady contact
@@ -220,13 +223,15 @@ final class Director: ObservableObject {
             }
         case Preset.harmony:
             rig.hdAll(slot: s).forEach(u.send)
-        case Preset.other:                                            // APP+CAFE+OTHER: COCO, or the sine synth in BOUNCE
-            u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)")
+        case Preset.ios:                                              // iOS: the Cafe is COCO with slopes (never BOUNCE's synth)
+            u.send("F 86 0")
         case Preset.multi:
             rig.fxAll(slot: s).forEach(u.send)
         case Preset.arp:
-            u.send("F 97 \(cafeAdMode)")                             // ARP: the tap delay · PHONE_COCO: COCO · BOX: ZEITGEIST / COCO
-            if rig.arpMode == 2 {
+            u.send("F 97 \(cafeAdMode)")                             // ARP: the tap delay · PHONE_COCO: COCO · BOX: ZEITGEIST / COCO · OTHER
+            if rig.arpMode == 3 {
+                u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)")        // OTHER: COCO, or the sine synth in BOUNCE
+            } else if rig.arpMode == 2 {
                 sunCafe(slot: s).forEach(u.send)
                 sunLinkSend(u)
                 applySun(); sun.play(true)
@@ -272,17 +277,32 @@ final class Director: ObservableObject {
         syncIfPair()
     }
 
+    /// iOS: FOURSES (0) or SHNTH (1), both on the phone
+    func setIosMode(_ m: Int) {
+        rig.iosMode = m == 1 ? 1 : 0
+        if rig.iosFourses { frPhoneAll() }
+        refresh()
+    }
+    private var frPhoneWas = false
+    /// iOS · FOURSES: everything the board holds, to the phone's circuit
+    func frPhoneAll() {
+        for h in 0..<4 { phoneFr.setPot(h, rig.frPots[h]); phoneFr.setRange(h, rig.frRanges[h]) }
+        phoneFr.setStarve(rig.frStarve)
+        phoneFr.setShapeLinks(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: false, slot: 0))
+        FrBoard.drift(icons: rig.frIcons, shapes: frLive, aspect: frAspect).volts.forEach { phoneFr.setDrift($0.key, $0.value) }
+    }
+
     func cycleMode() {
         if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
         else if rig.ctxPreset == Preset.arp {                                        // ARP -> COCO -> SPEECH -> ARP
             if rig.arpMode == 0 { rig.pcMode = 0; setArpMode(1) }                      //   -> SUNDAY -> ARP
             else if rig.arpMode == 1 && rig.pcMode == 0 { setPcMode(1) }
             else if rig.arpMode == 1 { setArpMode(2) }
+            else if rig.arpMode == 2 { setArpMode(3); setOtPage(rig.otVar) }           //   -> OTHER: COCO+ -> BOUNCE -> ARP
+            else if rig.otPage != OtPad.bounce { setOtPage(OtPad.bounce) }
             else { setArpMode(0) }
         }
-        else if rig.ctxPreset == Preset.other {                                      // APP+CAFE+OTHER: COCO+ <-> BOUNCE
-            setOtPage(rig.otPage == OtPad.bounce ? rig.otVar : OtPad.bounce)
-        }
+        else if rig.ctxPreset == Preset.ios { setIosMode(1 - rig.iosMode) }          // iOS: FOURSES <-> SHNTH
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -411,9 +431,13 @@ final class Director: ObservableObject {
     }
     /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
     func shnthTick() {
-        let onScreen = rig.ctxPreset == Preset.ble && rig.ctxMode == 8
-        if shnth.onPhone { shnth.onPhone = false }                      // SHNTH: the Cafes only — the phone's engine runs
-        if !shnth.onCafe { shnth.onCafe = true }                        // silent (its LEDs on the screen)
+        let onScreen = (rig.ctxPreset == Preset.ble && rig.ctxMode == 8) || rig.iosShnth
+        // SHNTH: on BLE the Cafes only (the phone's engine runs silent, for its LEDs); on iOS the phone plays it
+        if shnth.onPhone != rig.iosShnth { shnth.onPhone = rig.iosShnth }
+        if !shnth.onCafe { shnth.onCafe = true }
+        phoneFr.play(rig.iosFourses)                                    // iOS · FOURSES: the phone's circuit sounds
+        if rig.iosFourses && !frPhoneWas { frPhoneAll() }               // (just come to it: the board, all of it)
+        frPhoneWas = rig.iosFourses
         shnth.play(onScreen)
         guard !shnthCafes.isEmpty else { return }
         if shnth.cafeDirty { shnthSend() }
@@ -439,7 +463,7 @@ final class Director: ObservableObject {
     /// COCO+'s FREEZE: both Cafes' COCO frozen / running (the same as their BUTTON: "F 98")
     func otFreezeToggle() {
         rig.otFreeze.toggle()
-        for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 98") }
+        for u in units where u.isConnected && rig.isOther(u.slot) { u.send("F 98") }
     }
     /// the top right key: the next scale (moves the SCALE · ROOT pad's X)
     func nextOtScale() {
@@ -467,7 +491,7 @@ final class Director: ObservableObject {
         case 0: sines.pluck(n, velocity: 100, decay: dec)
         case 1: midi.playNote(n, velocity: 100, ms: Int(dec * 1000))
         default:
-            let on = units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.other }
+            let on = units.filter { $0.isConnected && rig.isOther($0.slot) }
             guard !on.isEmpty else { return }
             let u = on[bounceTurn % on.count]; bounceTurn += 1
             u.send("F 85 \(n) \(Int(dec * 1000))")
@@ -478,8 +502,8 @@ final class Director: ObservableObject {
         if p != rig.otPage { midi.panic() }                       // (nothing left sounding from the last variation)
         rig.otPage = min(max(p, 0), OtPad.pages.count - 1)
         if rig.otPage < OtPad.bounce { rig.otVar = rig.otPage }  // (COCO+'s variation, kept)
-        for u in units where u.isConnected && rig.preset[u.slot] == Preset.other { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // (BOUNCE: the Cafe a synth)
-        bounce.running = rig.ctxPreset == Preset.other && rig.otPage == OtPad.bounce   // (BOUNCE: at once, not on the next 30 Hz tick)
+        for u in units where u.isConnected && rig.isOther(u.slot) { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // (BOUNCE: the Cafe a synth)
+        bounce.running = rig.ctxOther && rig.otPage == OtPad.bounce   // (BOUNCE: at once, not on the next 30 Hz tick)
         if bounce.running { sines.play(true) }
         refresh()
     }
@@ -502,7 +526,7 @@ final class Director: ObservableObject {
     private var sunCVSent = [-1, -1]
     private var sunCoSent = [[-1, -1, -1], [-1, -1, -1]]
     /// what the Cafe is on APP+CAFE: 0 ARP · 1 PHONE_COCO · 2 ZEITGEIST · 3 COCO (BOX's two)
-    var cafeAdMode: Int { rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : rig.arpMode }
+    var cafeAdMode: Int { rig.arpMode == 3 ? 4 : rig.arpMode == 2 ? (rig.sunCafe == 1 ? 3 : 2) : rig.arpMode }
     /// BOX's Cafes: ZEITGEIST (0) or COCO (1)
     func setSunCafe(_ m: Int) {
         rig.sunCafe = m == 1 ? 1 : 0
@@ -615,7 +639,7 @@ final class Director: ObservableObject {
     // MARK: ARP_DELAY: ARP or PHONE_COCO — PHONE_COCO = COCO (the phone's samplers) or SPEECH, the Cafe on COCO in both
 
     func setArpMode(_ m: Int) {
-        rig.arpMode = min(max(m, 0), 2)
+        rig.arpMode = min(max(m, 0), 3)
         if rig.arpMode != 0 { if arp.playing { arp.stop(); rig.arpPlaying = false } }
         if rig.arpMode != 1 {
             pcoco.stop()
@@ -627,12 +651,14 @@ final class Director: ObservableObject {
             u.send("F 97 \(cafeAdMode)")
             if rig.arpMode == 1 { rig.coAll(slot: u.slot).forEach(u.send) }
             else if rig.arpMode == 2 { sunCafe(slot: u.slot).forEach(u.send); sunLinkSend(u) }
+            else if rig.arpMode == 3 { u.send("F 86 \(rig.otPage == OtPad.bounce ? 1 : 0)") }   // OTHER: COCO+ / BOUNCE
             else { rig.arpDelayAll().forEach(u.send) }
         }
         if rig.arpMode == 2 {
             applySun(); sun.play(true)
             if rig.fxHold { fxToggleHold() }                  // (HOLD has no place in BLIPPOO: never leave it on)
         }
+        if rig.arpMode == 3 { applyOther(); setOtPage(rig.otPage) }
         if rig.arpMode == 1 { setPcMode(rig.pcMode) } else { refresh() }
     }
     /// the Cafe's COCO recording on / off — the same as a short press of its BUTTON
@@ -929,11 +955,20 @@ final class Director: ObservableObject {
     func setHabitHold(_ on: Bool) { rig.habitHold = on; habits.forEach { $0.hold = on } }
     func setHabitEarth(_ on: Bool) { rig.habitEarth = on; habits.forEach { $0.useEarth = on } }
     // MARK: FOURSES
-    func setFrRange(_ r: Int) { rig.frRange = r; rig.frRanges = [r, r, r, r]; ctxUnits().forEach { $0.send("O 8 \(r * 500)") } }
+    func setFrRange(_ r: Int) {
+        rig.frRange = r; rig.frRanges = [r, r, r, r]
+        if rig.iosFourses { for h in 0..<4 { phoneFr.setRange(h, r) }; return }
+        ctxUnits().forEach { $0.send("O 8 \(r * 500)") }
+    }
     /// one horse's range switch
-    func setFrRange(_ h: Int, _ r: Int) { rig.frRanges[h] = r; ctxUnits().forEach { $0.send("O \(4 + h) \(r * 500)") } }
+    func setFrRange(_ h: Int, _ r: Int) {
+        rig.frRanges[h] = r
+        if rig.iosFourses { phoneFr.setRange(h, r); return }
+        ctxUnits().forEach { $0.send("O \(4 + h) \(r * 500)") }
+    }
     func setFrPot(_ h: Int, _ v: Double) {
         rig.frPots[h] = v
+        if rig.iosFourses { phoneFr.setPot(h, v); return }
         ctxUnits().forEach { $0.send("O \(h) \(Int((v * 1000).rounded()))") }
     }
     /// the board's shape (width / height of the field): what lies inside a shape depends on it
@@ -941,6 +976,11 @@ final class Director: ObservableObject {
     /// the wires the shapes make, as sent: only what changed goes
     private var frWireSent: [[[Int]: Int]] = [[:], [:]]           // (each Cafe: node pair -> strength)
     func frSyncShapes() {
+        if rig.iosFourses {                                             // iOS · FOURSES: the phone's circuit, not the Cafes
+            phoneFr.setShapeLinks(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: false, slot: 0))
+            FrBoard.drift(icons: rig.frIcons, shapes: frLive, aspect: frAspect).volts.forEach { phoneFr.setDrift($0.key, $0.value) }
+            return
+        }
         for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
             let sl = u.slot == 1 ? 1 : 0
             let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
@@ -1021,6 +1061,7 @@ final class Director: ObservableObject {
     /// STARVE: the Cafes' supply to the circuit (0.5 as it is; left starved: slower, smaller, sagging, sputtering; right fed)
     func setFrStarve(_ v: Double) {
         rig.frStarve = v
+        phoneFr.setStarve(v)
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.ble && rig.mode[u.slot] == 7 { u.send("O 22 \(Int((v * 1000).rounded()))") }
     }
     /// ◉ hung circles: each a little spring from where it was drawn, pulled by the phone's tilt, twitching (~30x a second)
@@ -1081,6 +1122,7 @@ final class Director: ObservableObject {
     var frSent: [String: Int] = [:]
     private var frOnly: [Int: Int] = [:]
     func frTouches(_ links: [Int: [Int: Int]], only: [Int: Int] = [:]) {
+        if rig.iosFourses { phoneFr.setFingerLinks(links); return }   // iOS · FOURSES: the phone's circuit
         frOnly = only                                                   // (a node a finger reaches through a shape that passes one Cafe)
         var now: [String: Int] = [:]
         for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, (v / 50) * 50 + 25)) } }   // (steps of 50: fewer lines)
@@ -1567,10 +1609,11 @@ private struct HudBar: View {
                     if rig.padSet == .multi {
                         key("wind", on: rig.fxDrift) { d.setFxDrift(!rig.fxDrift) }      // DRIFT: the pads wander
                     } else {
-                        key(rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
-                            : rig.ctxPreset == Preset.other ? (rig.otPage == OtPad.bounce ? "arrow.down.circle" : "music.note.list")   // APP+CAFE+OTHER: COCO+ · BOUNCE
+                        key(rig.ctxOther ? (rig.otPage == OtPad.bounce ? "arrow.down.circle" : "music.note.list")   // APP+CAFE's OTHER: COCO+ · BOUNCE
+                            : rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
+                            : rig.ctxPreset == Preset.ios ? (rig.iosMode == 1 ? "waveform.path.ecg" : "square.stack.3d.up")   // iOS: FOURSES · SHNTH
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
-                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.other) { d.cycleMode() }
+                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.ios) { d.cycleMode() }
                     }
                 }
                 contextKey(top ? 0 : 1)
