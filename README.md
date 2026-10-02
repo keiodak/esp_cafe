@@ -3,12 +3,16 @@
 Firmware for the ESP32 in the Ciat-Lonbarde Cafe, and **coco duo**, the iPhone app that plays one or two Cafes
 over Bluetooth.
 
+> **This is my personal working repository** — it changes often, and things come and go (some are parked in
+> `_parked_ios`). **Looking for a clean starting point to build your own firmware on?** Use
+> **[keiodak/cafe_ble](https://github.com/keiodak/cafe_ble)**: two presets, Bluetooth only when you ask for it,
+> explained.
+
 **New here? Start with [SETUP.md](SETUP.md)** (upload over USB once, then the app; updates go over Bluetooth).
 
 | folder | what it is |
 |---|---|
 | `firmware/esp_cafe_duo` | The firmware (Arduino IDE, ESP32 core 2.0.9, *ESP32 Dev Module*, library *NimBLE-Arduino*) |
-| `firmware/cafe_ble` | **A small starting point to build on**: two presets (COCO_MOD, ECHO) and Bluetooth only when BUTTON is held at power-on (otherwise exactly as the original). ~1200 lines; the comments at the top of `cafe_ble.ino` say what is where |
 | `ios/coco-duo` | The iPhone app (Xcode 16+, iOS 18+) |
 | `web/coco-pc.html` | A Chrome page (Web Bluetooth): connect, log, firmware update over BLE |
 
