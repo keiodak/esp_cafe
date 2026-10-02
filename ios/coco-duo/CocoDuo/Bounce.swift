@@ -33,7 +33,7 @@ final class BounceSeq: ObservableObject {
         return v.count == 3 && v.allSatisfy { $0.count == BounceSeq.cols } ? v : Array(repeating: Array(repeating: 0, count: BounceSeq.cols), count: 3)
     }() { didSet { Self.d.set(cells, forKey: "bn.cells") } }
     /// each panel's DIVIDE: it moves on every n-th tick
-    static let divs = [1, 2, 3, 4, 6, 8]
+    static let divs = [1, 2, 3, 4, 6, 8, 12, 16]
     @Published var div: [Int] = (BounceSeq.d.array(forKey: "bn.div") as? [Int]) ?? [1, 1, 1] { didSet { Self.d.set(div, forKey: "bn.div") } }
     /// ALIGN: the phone's and the OP-1's notes held back ~35 ms, so they land with the Cafes' (Bluetooth makes those late)
     @Published var align: Bool = (BounceSeq.d.object(forKey: "bn.align") as? Bool) ?? true { didSet { Self.d.set(align, forKey: "bn.align") } }
@@ -96,6 +96,11 @@ final class BounceSeq: ObservableObject {
     func nextDiv(panel p: Int) {
         let i = Self.divs.firstIndex(of: div[p]) ?? 0
         div[p] = Self.divs[(i + 1) % Self.divs.count]
+    }
+    /// SPEED − / +: the panel slower (a bigger DIVIDE) or faster (a smaller one, down to every tick)
+    func speed(panel p: Int, faster: Bool) {
+        let i = Self.divs.firstIndex(of: div[p]) ?? 0
+        div[p] = Self.divs[max(0, min(Self.divs.count - 1, i + (faster ? -1 : 1)))]
     }
     /// GRID: a cell on / off (row from the top)
     func toggle(panel p: Int, col c: Int, row r: Int) { cells[p][c] ^= 1 << (Self.rows - 1 - r) }
@@ -184,7 +189,11 @@ private struct BouncePanel: View {
                     .foregroundStyle(PastelTheme.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                ChipButton(title: "÷\(seq.div[p])", filled: seq.div[p] > 1) { seq.nextDiv(panel: p) }.frame(width: 34)   // DIVIDE
+                ChipButton(title: "−", filled: false) { seq.speed(panel: p, faster: false) }.frame(width: 24)   // SPEED −: slower
+                Text("÷\(seq.div[p])").font(.hud(PanelMetrics.labelFont, .semibold))                            // (its DIVIDE)
+                    .foregroundStyle(seq.div[p] > 1 ? PastelTheme.textPrimary : PastelTheme.textSecondary)
+                    .frame(width: 26)
+                ChipButton(title: "+", filled: false) { seq.speed(panel: p, faster: true) }.frame(width: 24)    // SPEED +: faster
                 ChipButton(title: "CLR", filled: false) { seq.clear(panel: p) }.frame(width: 34)
             }
             RangeSlider(low: $seq.lo[p], high: $seq.hi[p])
