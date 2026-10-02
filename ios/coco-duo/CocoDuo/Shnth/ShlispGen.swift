@@ -178,6 +178,13 @@ enum ShlispGen {
         }
     }
     private static func chance(_ p: Double) -> Bool { Double.random(in: 0..<1) < p }
+    /// the noisy words (noise, dust and what is made of them): drawn again, mostly — GEN keeps noise in small doses
+    static let noisy: Set<String> = ["smoke", "dust", "fog", "swamp", "haze", "wind"]
+    private static func calm(_ draw: () -> String) -> String {
+        var w = draw()
+        for _ in 0..<4 where noisy.contains(w) && chance(0.8) { w = draw() }
+        return w
+    }
 
     /// one preset at chaos c: each voice either one of the examples' templates (more often the lower c is) or
     /// grown from their grammar, words and numbers drawn wider and wider as c rises
@@ -194,7 +201,7 @@ enum ShlispGen {
                 if chance(1 - 2 * c) {
                     parts.append(orderVoice(&cx, bar: mine[v % 2], button: mine[v % 2], antenna: side))
                 } else {
-                    let w = chance(c) ? (sources + resonators + shapers).randomElement()! : (k.sideWords.randomElement() ?? "horn")
+                    let w = calm { chance(c) ? (sources + resonators + shapers).randomElement()! : (k.sideWords.randomElement() ?? "horn") }
                     parts.append(expr(&cx, w, depth: 0))
                 }
             }
@@ -235,7 +242,7 @@ enum ShlispGen {
             let learned = Double(subs.count) / Double(max(1, subs.count + nums))
             let pNest = learned * (1 - c) + 0.55 * c
             if depth < maxDepth && chance(pNest) {
-                let sw = chance(c) || subs.isEmpty ? Array(instances.keys).randomElement()! : subs.randomElement()!
+                let sw = calm { chance(c) || subs.isEmpty ? Array(instances.keys).randomElement()! : subs.randomElement()! }
                 args.append(expr(&cx, sw, depth: depth + 1))
             } else {
                 args.append("\(number(w, p, c))")
@@ -250,7 +257,7 @@ enum ShlispGen {
         let minor = name("minor", button), major = name("major", button)
         let corp = name("corp", antenna)
         func n(_ w: String, _ p: Int) -> Int { number(w, p, cx.c * 0.5) }
-        switch Int.random(in: 0..<7) {
+        switch [0, 0, 1, 1, 3, 4, 5, 2, 6].randomElement()! {                 // (the noise ones, 2 and 6, less often)
         case 0:                                                       // plain: (horn n d (bar)) — the bar is the volume
             let w = ["horn", "saw", "mount"].randomElement()!
             return "(\(cx.take(w)) \(n(w, 0)) \(n(w, 1)) (\(bar)))"

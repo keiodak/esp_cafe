@@ -116,9 +116,13 @@ final class ShnthPlayer: ObservableObject {
     }
     /// the code playing when it is not a patch from the list (GEN): its name (empty: the list's)
     @Published var customName = ""
+    /// … and its code (PATCH's panel shows it)
+    var customSource = ""
+    /// PATCH's panel (the corner key)
+    @Published var panelOpen = false
     /// GEN (the corner key): a new patch at random, here and on the Cafes
     func gen() {
-        if let src = ShlispGen.make(chaos: Double.random(in: 0...1), title: ""), play(source: src) == nil { customName = "GEN" }
+        if let src = ShlispGen.make(chaos: Double.random(in: 0...1), title: ""), play(source: src) == nil { customName = "GEN"; customSource = src }
     }
     func nextPatch() { select(patch: patch + 1) }
     func prevPatch() { select(patch: patch - 1) }

@@ -1586,6 +1586,7 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: DROP / STEP
+                else if rig.padSet == .shnth { ShnthPatchKey(sh: d.shnth) }                                    // SHNTH: PATCH's panel
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
@@ -1775,6 +1776,8 @@ private struct HudBar: View {
         case .shnth:
             switch n {
             case 0: textKey("GEN") { d.shnth.gen() }                              // GEN: a new patch, at random
+            case 2: ShnthTarKey(sh: d.shnth, ant: d.ant)                         // TAR (held)
+            case 3: AntSourceKey(ant: d.ant)                                     // the antennae: TILT · CAM · OFF
             default: blank
             }
         case .other:
