@@ -79,19 +79,6 @@ struct PresetManagerView: View {
                     }
                 }
                 }
-                if rig.preset.contains(Preset.ios) {                     // iOS: what the phone plays
-                    PanelCard(title: "iOS", note: rig.ctxPreset == Preset.ios ? Preset.tag(Preset.ios) : "choose iOS first") {
-                        HStack(spacing: PanelMetrics.chipSpacing) {
-                            ForEach(0..<Rig.iosNames.count, id: \.self) { k in
-                                ChipButton(title: Rig.iosNames[k], filled: rig.ctxPreset == Preset.ios && rig.iosMode == k, height: 22, font: 9.5) {
-                                    d.setIosMode(k)
-                                }
-                            }
-                        }
-                        .disabled(rig.ctxPreset != Preset.ios)
-                        .unlit(rig.ctxPreset != Preset.ios)
-                    }
-                }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
                 }
@@ -207,7 +194,7 @@ private struct DesignCard: View {
     var body: some View {
         PanelCard(title: "PRESET DESIGN", note: sel.map { String(format: "%02ld", $0 + 1) } ?? "", spacing: 2, fill: true) {
             // BLE, MULTI, ARP_DELAY: fixed on top; everything else scrolls under it (3 across)
-            grid([2, 9, 10, 6])
+            grid([2, 9, 10])          // (6, iOS: parked)
             Text("APPLE π").font(.hud(8, .semibold)).tracking(1.2).foregroundStyle(PastelTheme.textSecondary).padding(.top, 2)
             ScrollView {
                 grid(Self.appleOrder)

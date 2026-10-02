@@ -1,7 +1,2 @@
-// the Shbobo Shnth engine and the shlisp compiler (C, MIT — Copyright (c) 2021 peter blasser, github.com/pblasser/shbobo)
-#include "shnth_engine.h"
-#include "shlisp_compile.h"
-// the Fourses circuit (iOS · FOURSES, on the phone): the Fourses app's FoursesDSP
-#include "../Fourses/FoursesDSP.h"
-// justints (C, MIT — Copyright (c) 2021 peter blasser)
-#include "justints.h"
+// coco duo's bridging header. (iOS — SHNTH, JUSTINTS, FOURSES and their C — is parked in ../_parked_ios for now:
+// to bring it back, move it in again and include shnth_engine.h, shlisp_compile.h, justints.h, ../Fourses/FoursesDSP.h)

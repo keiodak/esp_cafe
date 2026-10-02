@@ -28,7 +28,7 @@ import Foundation
 
 enum Preset {
     /// the firmware's pool (esp_cafe_duo 3.21+): 0–10 ours, 11–35 Apple π's (ieat31415). "G <id>" loads any of them.
-    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "iOS", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
+    static let names = ["COCO_MOD", "ECHO", "BLE", "RESONATOR", "FORMANT", "SATURATOR", "—", "RUNGLER", "SELF_READ", "MULTI", "APP+CAFE",
                         "COCO_OG", "ECHO_MOD", "FLANGER", "KARPLUS", "SPRING", "GRAIN_VERB", "FDN_VERB", "HARMONIZER",
                         "EXT_SYNC", "WINDOW", "SPLICER", "SCRAMBLER", "DISSOLVE", "SAMPLER", "SAMPLER_4X", "GRANULAR",
                         "PHASING", "BYTEBEATS", "MEGABYTES", "ARCADE", "BYTE_FX", "WAVETABLE", "DRONE", "GROOVEBOX", "POLYRHYTHM"]
@@ -39,7 +39,7 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "the phone plays (FOURSES · SHNTH · JUSTINTS on the phone itself) · the Cafe: COCO with slopes",
+        "(iOS: parked for now — empty)",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
@@ -74,7 +74,7 @@ enum Preset {
     static let poolCount = 36
     static let maxPlaylist = 11
     /// the presets played from the phone over Bluetooth (their rows are tinted)
-    static let phonePlayed: Set<Int> = [2, 6, 9, 10]
+    static let phonePlayed: Set<Int> = [2, 9, 10]
     /// CHAR: the slider next to the tempo, one per preset ("X <0..1000> <preset>"); what it does on each
     static let charNames = ["BIT", "WEAR", "BIT", "BIT", "VOWEL", "DRIVE", "GRAIN", "BIT", "BIT", "BIT", "BIT"]
     /// the firmware's defaults (ch_v): echo = full wobble, formant = its original Q, harmony = GRAIN (rpls)
@@ -101,7 +101,9 @@ enum Preset {
         "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
-    static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
+    static let defaultPlaylist = [2, 9, 10, 0, 1, 3, 4, 5, 7, 8]
+    /// … and in PRESET DESIGN's slots: the 4th empty (iOS was there: parked for now)
+    static let defaultDesign = [2, 9, 10, -1, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
@@ -398,7 +400,7 @@ final class Rig: ObservableObject {
     }
     /// the playlist: up to 11 pool ids, in order (PRESET DESIGN edits it; it goes to the Cafes as "L …")
     @Published var playlist: [Int] = {
-        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount } ?? []
+        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int])?.filter { $0 >= 0 && $0 < Preset.poolCount && $0 != Preset.ios } ?? []   // (iOS: parked)
         let v = p.isEmpty ? Preset.defaultPlaylist : Array(p.prefix(Preset.maxPlaylist))
         Preset.order = v
         return v
@@ -413,9 +415,9 @@ final class Rig: ObservableObject {
     /// PRESET DESIGN's 11 slots (pool ids, -1 = empty); the playlist is these without the empties
     @Published var design: [Int] = {
         let v = (Rig.d.array(forKey: "rig.design") as? [Int]) ?? []
-        if v.count == Preset.maxPlaylist { return v }
-        let p = (Rig.d.array(forKey: "rig.playlist") as? [Int]) ?? Preset.defaultPlaylist
-        return Array((p + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
+        if v.count == Preset.maxPlaylist { return v.map { $0 == Preset.ios ? -1 : $0 } }   // (iOS parked: its slot empty)
+        guard let p = Rig.d.array(forKey: "rig.playlist") as? [Int] else { return Preset.defaultDesign }
+        return Array((p.filter { $0 != Preset.ios } + Array(repeating: -1, count: Preset.maxPlaylist)).prefix(Preset.maxPlaylist))
     }() {
         didSet { Self.d.set(design, forKey: "rig.design") }
     }
@@ -575,12 +577,6 @@ final class Rig: ObservableObject {
     /// APP+CAFE's OTHER layer (COCO+ / BOUNCE) — what was APP+CAFE+OTHER
     func isOther(_ s: Int) -> Bool { preset[s] == Preset.arp && arpMode == 3 }
     var ctxOther: Bool { ctxPreset == Preset.arp && arpMode == 3 }
-    /// iOS: 0 FOURSES · 1 SHNTH · 2 JUSTINTS (the phone plays them)
-    static let iosNames = ["FOURSES", "SHNTH", "JUSTINTS"]
-    @Published var iosMode: Int = min(2, max(0, Rig.d.integer(forKey: "rig.iosMode"))) { didSet { Self.d.set(iosMode, forKey: "rig.iosMode") } }
-    var iosFourses: Bool { ctxPreset == Preset.ios && iosMode == 0 }
-    var iosShnth: Bool { ctxPreset == Preset.ios && iosMode == 1 }
-    var iosJi: Bool { ctxPreset == Preset.ios && iosMode == 2 }
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
     @Published var sunLevel: Double = 0.9
@@ -629,7 +625,6 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
-        if ctxPreset == Preset.ios { return iosMode == 0 ? .fourses : .shnth }   // iOS: FOURSES · SHNTH / JUSTINTS (one screen kind) on the phone
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 3 ? .other : arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY / OTHER
         guard ctxPreset == Preset.ble else { return .knob }

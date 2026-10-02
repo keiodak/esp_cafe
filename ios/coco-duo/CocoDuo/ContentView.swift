@@ -44,16 +44,6 @@ final class Director: ObservableObject {
     let midi = MidiBridge()
     /// APP+CAFE+OTHER's COCO+SINE: the phone's sine chords
     let sines = SineChords()
-    /// SHNTH (BLE mode 8): the Shbobo Shnth's engine on the phone, and its patches for the Cafes
-    let shnth = ShnthPlayer()
-    /// SHNTH's antennae (TILT · CAM · OFF)
-    let ant = Antennae()
-    /// iOS · JUSTINTS: Peter Blasser's justints on the phone
-    let ji = JustintsPlayer()
-    /// iOS · FOURSES: the Fourses app itself (FoursesApp/), made the first time it is shown
-    private(set) var fa: FA.AppModel?
-    func faModel() -> FA.AppModel { if let m = fa { return m }; let m = FA.AppModel(units: hub.units); fa = m; return m }
-    private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
     /// BOUNCE: the Cafes take turns (A, B, A …)
@@ -94,7 +84,6 @@ final class Director: ObservableObject {
             self.midi.sineOn = sineOn
             self.sines.play(sineOn)
             self.bounce.running = bouncing
-            self.shnthTick()                                          // SHNTH: the phone's engine, the Cafes' controls
             self.bounce.bpm = self.rig.bpm
             self.sines.wave = self.bounce.iosWave
             if bouncing && self.bounce.align {                         // LINK: the Cafes' lag measured every ~2 s
@@ -203,7 +192,6 @@ final class Director: ObservableObject {
             case 1: rig.bbAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
-            case 8: shnth.cafeDirty = true                             // SHNTH: the patch goes out on the next tick
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
@@ -279,11 +267,6 @@ final class Director: ObservableObject {
         syncIfPair()
     }
 
-    /// iOS: FOURSES (0) · SHNTH (1) · JUSTINTS (2), all on the phone
-    func setIosMode(_ m: Int) {
-        rig.iosMode = min(2, max(0, m))
-        refresh()
-    }
 
     func cycleMode() {
         if rig.ctxPreset == Preset.ble { setMode((rig.ctxMode + 1) % Preset.modeNames.count) }
@@ -295,7 +278,6 @@ final class Director: ObservableObject {
             else if rig.otPage != OtPad.bounce { setOtPage(OtPad.bounce) }
             else { setArpMode(0) }
         }
-        else if rig.ctxPreset == Preset.ios { setIosMode((rig.iosMode + 1) % 3) }    // iOS: FOURSES -> SHNTH -> JUSTINTS
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -399,41 +381,6 @@ final class Director: ObservableObject {
         case .knob:
             break
         }
-    }
-
-    // MARK: SHNTH (BLE mode 8)
-
-    /// is any Cafe (or the screen) on SHNTH?
-    var shnthCafes: [CafeUnit] { units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 8 } }
-    /// the patch / preset to the Cafes on SHNTH ("A <offset> <hex>" pieces, then "AL <length> <preset> <channel>")
-    func shnthSend(to only: CafeUnit? = nil) {
-        let on = shnthCafes
-        guard shnth.onCafe, !on.isEmpty else { return }
-        let (img, pre) = shnth.cafeImage()
-        for u in (only.map { [$0] } ?? on) {
-            let ch = on.count == 2 ? (u.slot == 0 ? 1 : 2) : 0           // (two Cafes: A left, B right)
-            var o = 0
-            while o < img.count {
-                let e = min(o + 96, img.count)
-                u.send("A \(o) " + img[o..<e].map { String(format: "%02x", $0) }.joined())
-                o = e
-            }
-            u.send("AL \(img.count) \(pre) \(ch)")
-        }
-        shnth.cafeDirty = false
-    }
-    /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
-    func shnthTick() {
-        // iOS: SHNTH · JUSTINTS · FOURSES on the phone (no longer on the Cafes)
-        if !shnth.onPhone { shnth.onPhone = true }
-        if shnth.onCafe { shnth.onCafe = false }
-        shnth.play(rig.iosShnth)
-        ji.play(rig.iosJi)
-        if rig.iosFourses || fa != nil { faModel().setActive(rig.iosFourses) }   // FOURSES: the app's own circuit
-        guard !shnthCafes.isEmpty else { return }
-        if shnth.cafeDirty { shnthSend() }
-        let line = shnth.cafeInputLine()
-        if line != shnthLine { shnthLine = line; shnthCafes.forEach { $0.send(line) } }
     }
 
     // MARK: APP+CAFE+OTHER: the pads -> what each Cafe plays on the other instrument
@@ -1261,17 +1208,11 @@ private struct MainScreen: View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if rig.padSet == .shnth && rig.iosMode == 2 {
-            JustintsBoard(jp: d.ji, ant: d.ant)                                           // iOS · JUSTINTS
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if rig.padSet == .shnth {
-            ShnthBoard(sh: d.shnth, ant: d.ant) { d.shnth.cafeDirty = true }   // iOS · SHNTH: the Shnth's controls
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
             BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
-            FA.Embedded(model: d.faModel())                                               // iOS · FOURSES: the Fourses app itself
+            FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
@@ -1595,9 +1536,8 @@ private struct HudBar: View {
                     } else {
                         key(rig.ctxOther ? (rig.otPage == OtPad.bounce ? "arrow.down.circle" : "music.note.list")   // APP+CAFE's OTHER: COCO+ · BOUNCE
                             : rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
-                            : rig.ctxPreset == Preset.ios ? ["square.stack.3d.up", "waveform.path.ecg", "circle.hexagongrid"][min(2, max(0, rig.iosMode))]   // iOS: FOURSES · SHNTH · JUSTINTS
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
-                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.ios) { d.cycleMode() }
+                            enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp) { d.cycleMode() }
                     }
                 }
                 contextKey(top ? 0 : 1)
@@ -1613,8 +1553,6 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: DROP / STEP
-                else if rig.padSet == .shnth && rig.iosMode != 2 { ShnthPatchKey(sh: d.shnth) }                // SHNTH: PATCH's panel
-                else if rig.padSet == .shnth || rig.padSet == .fourses { Color.clear.frame(width: 50, height: 21) }   // (JUSTINTS · FOURSES: their own keys)
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
@@ -1634,7 +1572,6 @@ private struct HudBar: View {
             info = unit.hbUp > 0 ? String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown)  // comes: the Cafe's made / sent / MTU
                                  : "M\(unit.hbMade % 1000)S\(unit.hbSent % 1000)U\(unit.cafeMtu)"
         }
-        if p == Preset.ios { info = Rig.iosNames[min(2, max(0, rig.iosMode))] }
         if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
         if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
             info += (info.isEmpty ? "" : " ") + String(format: "%.0fBPM", unit.bpm > 0 ? unit.bpm : rig.bpm)
@@ -1798,20 +1735,7 @@ private struct HudBar: View {
             default: key("dice") { d.fxRandom(1) }
             }
         case .shnth:
-            if rig.iosMode == 2 {                                                // JUSTINTS
-                switch n {
-                case 0: textKey("GEN") { d.ji.loadText(JustintsGen.make([.order, .mix, .chaos].randomElement()!), as: "GEN") }
-                case 3: AntSourceKey(ant: d.ant)                                 // the antennae: TILT · CAM · OFF
-                default: blank
-                }
-            } else {
-                switch n {
-                case 0: textKey("GEN") { d.shnth.gen() }                          // GEN: a new patch, at random
-                case 2: ShnthTarKey(sh: d.shnth, ant: d.ant)                     // TAR (held)
-                case 3: AntSourceKey(ant: d.ant)                                 // the antennae: TILT · CAM · OFF
-                default: blank
-                }
-            }
+            blank
         case .other:
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) }                     // BOUNCE: TEMPO or FLIP SYNC
