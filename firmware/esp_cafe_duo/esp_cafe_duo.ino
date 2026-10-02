@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.71   (2026-10-02: APP+CAFE takes OTHER in (F 97 4); preset 6 = iOS (the phone plays, the Cafe COCOs))
+// #####   ESP CAFE DUO   v4.72   (2026-10-02: FOURSES / SHNTH (BLE 7 / 8) parked in firmware/_parked_ios; 6 out of the default list)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -55,7 +55,7 @@
 
 
 #include "synths.h"
-#include "shnth_glue.h"   // SHNTH (BLE mode 8): the Shbobo Shnth engine (MIT, Peter Blasser; a bit-exact C port)
+// (SHNTH, BLE mode 8: parked — firmware/_parked_ios/shnth_*)
 // v4.58: loop() runs on a 6 KB stack instead of Arduino's 8 KB — the 2 KB go to the heap, where the tape and
 // Bluetooth were 12 bytes short (its high-water mark is on the [st] line: "stk" = bytes never touched)
 SET_LOOP_TASK_STACK_SIZE(6 * 1024);
@@ -66,7 +66,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.71"
+#define FW_VERSION "4.72"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -315,7 +315,7 @@ static void pl_load() {
     if (pr.getBytes("pl", b, 11) == 11) for (int i = 0; i < 11 && b[i] < POOL_N; i++) pl_id[n++] = b[i];
     pr.end();
   }
-  if (n == 0) { for (int i = 0; i < 11; i++) pl_id[i] = i; n = 11; }
+  if (n == 0) { for (int i = 0; i < 11; i++) if (i != 6) pl_id[n++] = i; }   // (6, iOS: parked — not in the list)
   active_preset_count = n;
   for (int i = 0; i < n; i++) presets[i] = pool[pl_id[i]];
 }
@@ -790,7 +790,7 @@ void fx_update(int e) {
 }
 void fx_update_all() { for (int e = 0; e < FX_N; e++) fx_update(e); }
 
-void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bb_update(); hd_update(); fx_update_all(); fr_update(); }
+void all_update() { mo_update(); bj_update(); co_update(); dl_update(); nz_update(); sx_update(); bb_update(); hd_update(); fx_update_all(); }
 
 // ---- EARTH guard (k.odk) ----
 // EARTH comes in through the ESP32's second ADC (SAR ADC2), read by the digital controller into I2S.
@@ -825,7 +825,6 @@ void sy_note(int note, int ms) {
 void pc_line(char *s) {
   if (s[0] == 'U') { hb_armed = false; ota_cmd(s); return; }   // (an update: HABIT stops sending at once)
   if (ota_active) return;                   // updating: nothing else
-  if (s[0] == 'A' || s[0] == 'a') { sh_line(s); return; }   // SHNTH: a patch ("A"), the controls ("a")
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
     case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu dhold %d frz %d",
@@ -859,9 +858,7 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { int m = val < 0 ? 0 : (val > 8 ? 8 : (int)val); if (m == 7 && pc_mode != 7) tp_enter();
-                                     int was = pc_mode; pc_mode = m;
-                                     if (m == 8 && was != 8) sh_begin(); else if (m != 8 && was == 8) sh_end(); }   // (SHNTH: the tape lent / given back)
+                else if (id == 25) { pc_mode = val < 0 ? 0 : (val > 6 ? 6 : (int)val); }   // (7 FOURSES · 8 SHNTH: parked)
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -927,19 +924,6 @@ void pc_line(char *s) {
                 if (s[0] == 'N' && id == 16) nz_dist = val > 0;   // DIST
                 if (s[0] == 'V' && id >= 0 && id < 14) { hd_p[id] = (int16_t)val; hd_update(); }
               } break;
-    case 'O': { long id = -1, val = 0; sscanf(s + 1, "%ld %ld", &id, &val);   // FOURSES: "O <id> <0..1000>"
-                if (val < 0) val = 0; if (val > 1000) val = 1000;
-                if (id >= 0 && id < 10) { fr_p[id] = (int16_t)val; if (id == 8) for (int h = 0; h < 4; h++) fr_p[4 + h] = (int16_t)val; fr_update(); }
-                else if (id == 20) tp_linkin = val * 84 / 10;                              // LINK IN: the other Cafe's LINK OUT
-                else if (id == 21) tp_earth2 = val > 255 ? 255 : val;                      // the other Cafe's EARTH
-                else if (id == 22) tp_supply = val;                                        // STARVE: the supply
-                else if (id >= 30 && id < 46 && pc_mode == 7) TL->light[id - 30] = (int16_t)(val * 84 / 10);   // LIGHT: a shape's brightness
-                else if (id == 19) fr_reset = true;
-              } break;
-    case 'T': { long a = -1, b2 = -1, v = 0; if (sscanf(s + 1, "%ld %ld %ld", &a, &b2, &v) == 3) {   // FOURSES: a touch / a wire
-                  if (v < 0) v = 0; if (v > 1000) v = 1000; tp_link((int)a, (int)b2, (int)v); }
-                else if (a == -1) tp_clear();                                           // "T": every link off
-              } break;
     case 'K': { long b = atol(s + 1); if (b < 300) b = 300; if (b > 3000) b = 3000;
                 cafe_bpm = b / 10.0f; dl_update(); hd_update(); fx_update_all(); } break;
     case 'D': {                            // read the tape back (saving a file on the phone): D <start> <n> -> d <start> <2 chars per sample>
@@ -999,25 +983,6 @@ void pc_line(char *s) {
   }
 }
 // HABIT: the packets the audio made, out to the phone (as fast as the link takes them; the rest is dropped there)
-// FOURSES: LINK OUT to the phone (for the other Cafe's LINK IN), ~30x a second while it is joined to anything
-void tp_service() {
-  static uint32_t t = 0; static int last = -1;
-  if (pc_mode != 7 || !tp_on || !ble_conn || millis() - t < 33) return;
-  t = millis();
-  {                                                   // the four LEDs: each horse's time lit, 0…15, when it changes
-    static int lastl = -1;
-    uint32_t n = tp_ledn; if (!n) n = 1;
-    int l = 0;
-    for (int h = 0; h < 4; h++) { int b = (int)((uint32_t)tp_led[h] * 15 / n); if (b > 15) b = 15; l |= b << (4 * h); tp_led[h] = 0; }
-    tp_ledn = 0;
-    if (l != lastl) { lastl = l; char b[16]; snprintf(b, sizeof(b), "f %d", l); pc_out(b); }
-  }
-  if (!TW->af[tp_cur][73]) return;
-  int v = TW->V[73] * 10 / 84; if (v < 0) v = 0; if (v > 1000) v = 1000;
-  if (abs(v - last) < 3) return;
-  last = v;
-  char b[16]; snprintf(b, sizeof(b), "t %d", v); pc_out(b);
-}
 void hb_service() {
   static uint32_t mt = 0;                           // the MTU as the link has it now (the callback may not have told us)
   if (pc_mode == 6 && ble_conn && millis() - mt > 1000) {
@@ -1301,8 +1266,6 @@ void loop() {
   pc_service();   // lines from the phone (BLE)
   wv_finish();    // WAVE REC: the table made ready
   hb_service();   // HABIT: the input out to the phone
-  tp_service();   // FOURSES: LINK OUT
-  sh_fill();      // SHNTH: the engine runs ahead into its ring
   if (ash_app_t >= 0 && millis() - ash_app_ms > 1500) ash_app_t = -1;   // (the phone's ASH: gone quiet -> the preset's own)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
