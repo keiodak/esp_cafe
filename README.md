@@ -9,6 +9,9 @@ over Bluetooth.
 |---|---|
 | `firmware/esp_cafe_duo` | The firmware (Arduino IDE, ESP32 core 2.0.9, *ESP32 Dev Module*, library *NimBLE-Arduino*) |
 | `ios/coco-duo` | The iPhone app (Xcode 16+, iOS 18+) |
+| `web/coco-pc.html` | A Chrome page (Web Bluetooth): connect, log, firmware update over BLE |
+
+**How the Bluetooth was done:** [BLE.md](BLE.md) · **What changed from the original / Apple π:** [CHANGES.md](CHANGES.md)
 
 ## Presets
 
@@ -31,7 +34,7 @@ the playlist (also the Cafe's BUTTON menu). Ours:
 ## Firmware updates over Bluetooth
 
 After one USB upload: *Sketch → Export Compiled Binary*, send `esp_cafe_duo.ino.bin` to the phone, and in the app
-*PRESET MANAGER → UPDATE* (A / B / both).
+*PRESET MANAGER → UPDATE* (A / B / both) — or from `web/coco-pc.html` in Chrome (BLE → update).
 
 Text protocol: Nordic UART Service, one line per command — see the comments at the top of `esp_cafe_duo.ino`.
 
