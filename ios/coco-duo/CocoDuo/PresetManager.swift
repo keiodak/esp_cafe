@@ -15,7 +15,6 @@ struct PresetManagerView: View {
     @ObservedObject var a: CafeUnit
     @ObservedObject var b: CafeUnit
     @State private var design = false
-    @AppStorage("shnth.ji") private var shJi = false        // SHNTH | JUSTINTS (the same mode, 8)
 
     @State private var sel: Int? = nil          // PRESET DESIGN: the slot picked on the left
 
@@ -32,17 +31,9 @@ struct PresetManagerView: View {
                         ForEach(0..<2, id: \.self) { row in
                             HStack(spacing: PanelMetrics.chipSpacing) {
                                 ForEach(row * per..<min(row * per + per, Preset.modeNames.count), id: \.self) { m in
-                                    ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m && !(m == 8 && shJi),
+                                    ChipButton(title: Preset.modeNames[m], filled: rig.ctxPreset == Preset.ble && rig.ctxMode == m,
                                                height: 22, font: 9.5) {
-                                        if m == 8 { shJi = false }
                                         d.setMode(m)
-                                    }
-                                }
-                                if row == 1 {                                        // JUSTINTS: beside SHNTH (its screen, justints)
-                                    ChipButton(title: "JUSTINTS", filled: rig.ctxPreset == Preset.ble && rig.ctxMode == 8 && shJi,
-                                               height: 22, font: 9.5) {
-                                        shJi = true
-                                        d.setMode(8)
                                     }
                                 }
                             }

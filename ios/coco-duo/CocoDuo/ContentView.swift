@@ -46,8 +46,7 @@ final class Director: ObservableObject {
     let sines = SineChords()
     /// SHNTH (BLE mode 8): the Shbobo Shnth's engine on the phone, and its patches for the Cafes
     let shnth = ShnthPlayer()
-    /// JUSTINTS (in SHNTH's screen): Peter Blasser's justints on the phone · the antennae
-    let ji = JustintsPlayer()
+    /// SHNTH's antennae (TILT · CAM · OFF)
     let ant = Antennae()
     private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
@@ -413,11 +412,9 @@ final class Director: ObservableObject {
     /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
     func shnthTick() {
         let onScreen = rig.ctxPreset == Preset.ble && rig.ctxMode == 8
-        let jiOn = UserDefaults.standard.bool(forKey: "shnth.ji")       // (the screen's SHNTH | JUSTINTS)
         if shnth.onPhone { shnth.onPhone = false }                      // SHNTH: the Cafes only — the phone's engine runs
         if !shnth.onCafe { shnth.onCafe = true }                        // silent (its LEDs on the screen)
-        shnth.play(onScreen && !jiOn)
-        ji.play(onScreen && jiOn)
+        shnth.play(onScreen)
         guard !shnthCafes.isEmpty else { return }
         if shnth.cafeDirty { shnthSend() }
         let line = shnth.cafeInputLine()
@@ -1242,7 +1239,7 @@ private struct MainScreen: View {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .shnth {
-            ShnthBoard(sh: d.shnth, jp: d.ji, ant: d.ant) { d.shnth.cafeDirty = true }   // SHNTH | JUSTINTS
+            ShnthBoard(sh: d.shnth, ant: d.ant) { d.shnth.cafeDirty = true }   // SHNTH: the Shnth's controls
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
             BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
@@ -1777,10 +1774,7 @@ private struct HudBar: View {
             }
         case .shnth:
             switch n {
-            case 0: textKey("GEN") {                                              // GEN: a new one, at random
-                        if UserDefaults.standard.bool(forKey: "shnth.ji") { d.ji.loadText(JustintsGen.make([.order, .mix, .chaos].randomElement()!), as: "GEN") }
-                        else { d.shnth.gen() }
-                    }
+            case 0: textKey("GEN") { d.shnth.gen() }                              // GEN: a new patch, at random
             default: blank
             }
         case .other:
