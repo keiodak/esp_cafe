@@ -6,6 +6,7 @@
 // Inputs as the Shnth has them: four bars (bipolar flex: 0 at rest), two antennae (0 untouched), eight buttons + TAR.
 
 import AVFoundation
+import Combine
 import os
 
 final class ShnthPlayer: ObservableObject {
