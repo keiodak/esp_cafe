@@ -170,7 +170,7 @@ final class CafeUnit: ObservableObject {
         guard rx != nil, let k = s.first else { return }
         if k == "Q" && !out.isEmpty { waitingQ = false; return }
         let key = Self.key(s)
-        if "SLJKXMBYNVCFO".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
+        if "SLJKXMBYNVCFOa".contains(k), let i = out.firstIndex(where: { Self.key($0) == key }) { out[i] = s; return }
         out.append(s)
         pump()
     }

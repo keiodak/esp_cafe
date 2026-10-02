@@ -182,6 +182,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Cafe BLE";
+				SWIFT_OBJC_BRIDGING_HEADER = "CocoDuo/Shnth/CocoDuo-Bridging-Header.h";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Cafe BLE connects to your two Cafes over Bluetooth to control their tape loops.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "In camera mode, light and movement seen by the camera move the pointers on the eight XY pads. No image is ever stored.";
@@ -215,6 +216,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Cafe BLE";
+				SWIFT_OBJC_BRIDGING_HEADER = "CocoDuo/Shnth/CocoDuo-Bridging-Header.h";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Cafe BLE connects to your two Cafes over Bluetooth to control their tape loops.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "In camera mode, light and movement seen by the camera move the pointers on the eight XY pads. No image is ever stored.";

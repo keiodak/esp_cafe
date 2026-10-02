@@ -88,7 +88,7 @@ enum Preset {
     static let other = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "SHNTH"]
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -99,13 +99,14 @@ enum Preset {
         "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
         "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
         "crucFX's TARPTERGE (A) / ARPSERGE (B) · a finger joins what it covers, lightly or flat · DRAW: lines are wires",
+        "the Shbobo Shnth: its patches (shlisp) on the phone and the Cafes · four bars, two antennae, eight buttons + TAR"
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath", "square.stack.3d.up"]
+    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath", "square.stack.3d.up", "waveform.path.ecg"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -114,7 +115,7 @@ enum Preset {
 }
 
 /// what the 8 pads are right now
-enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, harmony, multi, arp, speech, pcoco, sun, other, knob }
+enum PadSet { case grain, coco, byte, delay, noise, sidrax, wave, habit, fourses, shnth, harmony, multi, arp, speech, pcoco, sun, other, knob }
 
 /// FOURSES (BLE mode 7): the top row = the four oscillators (RATE · SLOPE), the bottom = four touch points, each a
 /// finger across two neighbours (CONTACT · BODY) — "O <id> <0..1000>"
@@ -624,7 +625,7 @@ final class Rig: ObservableObject {
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses][min(max(ctxMode, 0), 7)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .shnth][min(max(ctxMode, 0), 8)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi || padSet == .other }

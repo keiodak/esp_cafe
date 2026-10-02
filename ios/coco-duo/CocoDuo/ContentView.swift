@@ -44,6 +44,9 @@ final class Director: ObservableObject {
     let midi = MidiBridge()
     /// APP+CAFE+OTHER's COCO+SINE: the phone's sine chords
     let sines = SineChords()
+    /// SHNTH (BLE mode 8): the Shbobo Shnth's engine on the phone, and its patches for the Cafes
+    let shnth = ShnthPlayer()
+    private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
     /// BOUNCE: the Cafes take turns (A, B, A …)
@@ -84,6 +87,7 @@ final class Director: ObservableObject {
             self.midi.sineOn = sineOn
             self.sines.play(sineOn)
             self.bounce.running = bouncing
+            self.shnthTick()                                          // SHNTH: the phone's engine, the Cafes' controls
             self.bounce.bpm = self.rig.bpm
             self.sines.wave = self.bounce.iosWave
             if bouncing && self.bounce.align {                         // LINK: the Cafes' lag measured every ~2 s
@@ -163,6 +167,7 @@ final class Director: ObservableObject {
         case .multi: return (0..<2).flatMap { rig.fxAxes[$0][rig.fxLocal[$0]] }
         case .arp: return rig.arpAxes
         case .speech: return rig.spAxes
+        case .shnth: return []
         case .other: return rig.otAxes
         case .pcoco: return rig.pcAxes
         case .sun: return rig.sunAxes
@@ -191,6 +196,7 @@ final class Director: ObservableObject {
             case 1: rig.bbAll(slot: s).forEach(u.send)
             case 2: rig.dlAll(slot: s).forEach(u.send)
             case 4: rig.sxAll().forEach(u.send); sxRoles()
+            case 8: shnth.cafeDirty = true                             // SHNTH: the patch goes out on the next tick
             case 5: rig.wvAll().forEach(u.send); sxRoles()
             case 7:
                 rig.frAll(slot: s).forEach(u.send); frSent = [:]
@@ -373,9 +379,42 @@ final class Director: ObservableObject {
         case .other:
             rig.saveOt()
             applyOther()
+        case .shnth:
+            break
         case .knob:
             break
         }
+    }
+
+    // MARK: SHNTH (BLE mode 8)
+
+    /// is any Cafe (or the screen) on SHNTH?
+    var shnthCafes: [CafeUnit] { units.filter { $0.isConnected && rig.preset[$0.slot] == Preset.ble && rig.mode[$0.slot] == 8 } }
+    /// the patch / preset to the Cafes on SHNTH ("A <offset> <hex>" pieces, then "AL <length> <preset> <channel>")
+    func shnthSend(to only: CafeUnit? = nil) {
+        let on = shnthCafes
+        guard shnth.onCafe, !on.isEmpty else { return }
+        let (img, pre) = shnth.cafeImage()
+        for u in (only.map { [$0] } ?? on) {
+            let ch = on.count == 2 ? (u.slot == 0 ? 1 : 2) : 0           // (two Cafes: A left, B right)
+            var o = 0
+            while o < img.count {
+                let e = min(o + 96, img.count)
+                u.send("A \(o) " + img[o..<e].map { String(format: "%02x", $0) }.joined())
+                o = e
+            }
+            u.send("AL \(img.count) \(pre) \(ch)")
+        }
+        shnth.cafeDirty = false
+    }
+    /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
+    func shnthTick() {
+        let onScreen = rig.ctxPreset == Preset.ble && rig.ctxMode == 8
+        shnth.play(onScreen && shnth.onPhone)
+        guard !shnthCafes.isEmpty else { return }
+        if shnth.cafeDirty { shnthSend() }
+        let line = shnth.cafeInputLine()
+        if line != shnthLine { shnthLine = line; shnthCafes.forEach { $0.send(line) } }
     }
 
     // MARK: APP+CAFE+OTHER: the pads -> what each Cafe plays on the other instrument
@@ -1195,6 +1234,9 @@ private struct MainScreen: View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rig.padSet == .shnth {
+            ShnthBoard(sh: d.shnth) { d.shnth.cafeDirty = true }                        // SHNTH: the Shnth's controls
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
             BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1240,6 +1282,7 @@ private struct MainScreen: View {
         case .speech: return (rig.spAxes[i], i < 4 ? SpPad.titles[i] : "—")       // (the Cafe is COCO_MOD: its knobs)
         case .pcoco: return (rig.pcAxes[i], i < 4 ? PcPad.titles[i] : "—")
         case .sun: return (rig.sunAxes[i], i >= 6 && rig.sunCafe == 1 ? "—" : SunPad.titles[i])   // (COCO: no ZEITGEIST pads)
+        case .shnth: return (rig.nzAxes[i], "")
         case .other:                                              // (COCO+: no SINE · COCO+SINE: B's CHORD unused — the sines take A's)
             return (rig.otAxes[i], OtPad.titles[i])                   // (COCO+1…5: one sheet, the same eight pads)
         case .knob: return (rig.nzAxes[i], "")
@@ -1725,6 +1768,8 @@ private struct HudBar: View {
             case 2: key("dice") { d.fxRandom(0) }
             default: key("dice") { d.fxRandom(1) }
             }
+        case .shnth:
+            blank
         case .other:
             switch n {
             case 0: if rig.otPage == OtPad.bounce { BounceClockKey(seq: d.bounce) }                     // BOUNCE: TEMPO or FLIP SYNC
@@ -1753,7 +1798,7 @@ private struct HudBar: View {
         "play.fill": "PLAY", "stop.fill": "STOP", "speaker": "MONO", "speaker.wave.2": "STEREO",
         "wave.3.forward": "FOLD",
         "tuningfork": "ALIGN", "hand.point.up.left": "MODE",
-        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "arrow.down.circle": "BOUNCE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
+        "pianokeys": "ARP", "recordingtape": "COCO", "music.note.list": "COCO+", "1.circle": "COCO+1", "2.circle": "COCO+2", "3.circle": "COCO+3", "4.circle": "COCO+4", "5.circle": "COCO+5", "waveform.path.ecg": "MODE", "arrow.down.circle": "BOUNCE", "sun.max": "BOX", "waveform.and.mic": "SPEECH", "text.bubble": "SAY",
         "circle.grid.3x3": "MODE", "infinity": "MODE", "number": "MODE", "repeat": "MODE", "scribble.variable": "MODE",
         "waveform.circle": "MODE", "clock.arrow.circlepath": "MODE", "square.stack.3d.up": "MODE",
     ]

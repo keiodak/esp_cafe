@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.68   (2026-10-01: the EARTH sent to the phone: slowed (~30 ms) and gated (stray volts = 0))
+// #####   ESP CAFE DUO   v4.69   (2026-10-02: SHNTH — BLE mode 8, the Shbobo Shnth engine; back: git tag before-shnth)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -55,6 +55,7 @@
 
 
 #include "synths.h"
+#include "shnth_glue.h"   // SHNTH (BLE mode 8): the Shbobo Shnth engine (MIT, Peter Blasser; a bit-exact C port)
 // v4.58: loop() runs on a 6 KB stack instead of Arduino's 8 KB — the 2 KB go to the heap, where the tape and
 // Bluetooth were 12 bytes short (its high-water mark is on the [st] line: "stk" = bytes never touched)
 SET_LOOP_TASK_STACK_SIZE(6 * 1024);
@@ -65,7 +66,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.68"
+#define FW_VERSION "4.69"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -824,6 +825,7 @@ void sy_note(int note, int ms) {
 void pc_line(char *s) {
   if (s[0] == 'U') { hb_armed = false; ota_cmd(s); return; }   // (an update: HABIT stops sending at once)
   if (ota_active) return;                   // updating: nothing else
+  if (s[0] == 'A' || s[0] == 'a') { sh_line(s); return; }   // SHNTH: a patch ("A"), the controls ("a")
   switch (s[0]) {
     case 'P': { char hb[48]; snprintf(hb, sizeof(hb), "HELLO coco-duo %s %s ota", FW_VERSION, ble_name); pc_out(hb); } break;
     case 'H': { char hb[240]; snprintf(hb, sizeof(hb), "H heap %u min %u ble %d conn %d mtu %d interval_ms %d earth %d clock_ms %lu a4 %lu fail %lu in1 %02lx adcpad %08lx pinfix %lu sarctl %08lx rdctl2 %08lx meas2 %08lx e2fix %lu dhold %d frz %d",
@@ -857,7 +859,9 @@ void pc_line(char *s) {
                 else if (id == 24) { mo_perc = val != 0; }
                 else if (id == 26) { mo_move = val != 0; }
                 else if (id == 27) { mo_fold_on = val != 0; }
-                else if (id == 25) { int m = val < 0 ? 0 : (val > 7 ? 7 : (int)val); if (m == 7 && pc_mode != 7) tp_enter(); pc_mode = m; }
+                else if (id == 25) { int m = val < 0 ? 0 : (val > 8 ? 8 : (int)val); if (m == 7 && pc_mode != 7) tp_enter();
+                                     int was = pc_mode; pc_mode = m;
+                                     if (m == 8 && was != 8) sh_begin(); else if (m != 8 && was == 8) sh_end(); }   // (SHNTH: the tape lent / given back)
               } break;
     case 'X': { long v = 0, pr = -1; int k = sscanf(s + 1, "%ld %ld", &v, &pr);    // CHAR: "X <0..1000> [preset 0..10]"
                 if (v < 0) v = 0; if (v > 1000) v = 1000;
@@ -1294,6 +1298,7 @@ void loop() {
   wv_finish();    // WAVE REC: the table made ready
   hb_service();   // HABIT: the input out to the phone
   tp_service();   // FOURSES: LINK OUT
+  sh_fill();      // SHNTH: the engine runs ahead into its ring
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
   // latch the switches for the status line

@@ -2770,7 +2770,9 @@ static int32_t __attribute__((noinline)) fr_tick(int32_t in, int32_t *rout, bool
   return l;
 }
 
+static void sh_tick_isr();   // SHNTH (BLE mode 8): the Shnth engine's ring played back (shnth_glue.h)
 void IRAM_ATTR coco_pc() {
+  if (pc_mode == 8) { sh_tick_isr(); return; }
   static uint32_t wpos = 0;
   static int32_t rg = 256;  // record gain ramp
   static uint32_t gen_seen = 0xFFFFFFFF;
