@@ -414,8 +414,8 @@ final class Director: ObservableObject {
     func shnthTick() {
         let onScreen = rig.ctxPreset == Preset.ble && rig.ctxMode == 8
         let jiOn = UserDefaults.standard.bool(forKey: "shnth.ji")       // (the screen's SHNTH | JUSTINTS)
-        shnth.onPhone = false                                           // SHNTH: the Cafes only — the phone's engine runs
-        shnth.onCafe = true                                             // silent (its LEDs on the screen)
+        if shnth.onPhone { shnth.onPhone = false }                      // SHNTH: the Cafes only — the phone's engine runs
+        if !shnth.onCafe { shnth.onCafe = true }                        // silent (its LEDs on the screen)
         shnth.play(onScreen && !jiOn)
         ji.play(onScreen && jiOn)
         guard !shnthCafes.isEmpty else { return }
