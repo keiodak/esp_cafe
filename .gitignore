@@ -3,3 +3,12 @@ xcuserdata/
 *.xcuserstate
 build/
 DerivedData/
+
+# kept on this computer only (the repository is coco duo: firmware/esp_cafe_duo + ios/coco-duo)
+firmware/esp_ble_min/
+firmware/esp_cafe_apple_pi/
+firmware/esp_cafe_ble/
+firmware/cafe_mono/
+ios/coco-pc/
+web/
+docs/
