@@ -301,7 +301,7 @@ extension FA.CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
         let contrast = min(max(stddev / 80.0, 0.0), 1.0) // 80は目安のスケーリング係数
 
         // ここから先で得た値は、最後に CameraFrame としてまとめて1回だけ通知する。
-        var frame = CameraFrame(brightness: average, contrast: contrast)
+        var frame = FA.CameraFrame(brightness: average, contrast: contrast)
 
         // RGB: 色差(Cb/Cr)プレーンの平均から、輝度と合わせてYCbCr→RGB変換(BT.601, フルレンジ)。
         if let cbCrBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1) {
