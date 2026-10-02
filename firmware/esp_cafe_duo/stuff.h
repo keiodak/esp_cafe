@@ -266,7 +266,22 @@ inline void write_ash_compressed(int raw_val) {
 // most presets use a generic "ashwriter" 
 // so this is where you can define which verions of ash that points to
 // just change "warm_ashwriter" to "clean_ashwriter" to swap them
-#define ASHWRITER(a) COMPRESSED_ASHWRITER(a)
+// v4.70 — the phone's ASH: an app linked to this Cafe (Fourses: its CAFE terminal) sets the ASH output itself —
+// "F 83 <0..4095>" (a CV, ~50 times a second), "F 83 -1" lets go (and after 1.5 s without one). It is written
+// straight to the DAC (no DC blocker: a voltage, not a sound), slewed between the steps that come over Bluetooth.
+volatile int32_t ash_app_t = -1;                       // the target 0…4095 (-1: the presets' own ASH)
+volatile uint32_t ash_app_ms = 0;
+static int32_t ash_app_v = 0;                          // (0…4095 << 8)
+static inline bool ash_app_write() {
+  int32_t t = ash_app_t;
+  if (t < 0) return false;
+  ash_app_v += ((t << 8) - ash_app_v) >> 9;           // (~16 ms at 32 kHz)
+  int32_t o = ash_app_v >> 12;                         // 0…255
+  if (o < 0) o = 0; if (o > 255) o = 255;
+  REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((o & 0xFF) << 19);
+  return true;
+}
+#define ASHWRITER(a) do { if (!ash_app_write()) COMPRESSED_ASHWRITER(a); } while (0)
 
 
 // ---------------------------------------------------------

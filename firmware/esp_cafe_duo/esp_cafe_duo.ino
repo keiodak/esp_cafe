@@ -1,5 +1,5 @@
 // ##### FIRMWARE VERSION ###########################
-// #####   ESP CAFE DUO   v4.69   (2026-10-02: SHNTH — BLE mode 8, the Shbobo Shnth engine; back: git tag before-shnth)
+// #####   ESP CAFE DUO   v4.70   (2026-10-02: the phone's ASH — "F 83 <0..4095>", for Fourses's CAFE link)
 // #####   (= FW_VERSION below; bump both together)
 // ###################################################
 
@@ -66,7 +66,7 @@ SET_LOOP_TASK_STACK_SIZE(6 * 1024);
 // USB serial speed. 921600 garbled on this Cafe, 115200 works.
 #define PC_BAUD 115200
 // firmware version: shown in "HELLO" and at boot (raise it to see that an update went in)
-#define FW_VERSION "4.69"
+#define FW_VERSION "4.70"
 
 // ==========================================
 // BLE LINK (k.odk, test) --- the same text protocol as USB, over the Nordic UART Service
@@ -880,6 +880,10 @@ void pc_line(char *s) {
                 else if (e == 98) co_rec_toggle = true;                   // PHONE_COCO: the Cafe's recording on / off (as its BUTTON)
                 else if (e == 86 && k >= 2) ot_syn = id != 0;                // APP+CAFE+OTHER: BOUNCE (the sine synth) or COCO
                 else if (e == 85 && k >= 3) sy_note((int)id, (int)val);      // BOUNCE: a note (midi note, decay ms)
+                else if (e == 83 && k >= 2) {                                // the phone's ASH (Fourses's CAFE): a CV, or -1 to let go
+                  if (id < 0) ash_app_t = -1;
+                  else { ash_app_t = id > 4095 ? 4095 : (int32_t)id; ash_app_ms = millis(); }
+                }
                 else if (e == 84) sy_clk = (int32_t)(clock_hz() * 0.01f);       // BOUNCE: a tick -> a 10 ms pulse on ASH
                 else if (e == 89 && k >= 3) zg_set((int)id, val);          // APP+CAFE · BLIPPOO: the ZEITGEIST
                 else if (e == 97 && k >= 2) ad_mode = id < 0 ? 0 : (id > 3 ? 3 : (int)id);   // APP+CAFE: 0 ARP (tap delay) · 1 PHONE_COCO (COCO_MOD) · 2 ZEITGEIST · 3 COCO (+ LINK)
@@ -1299,6 +1303,7 @@ void loop() {
   hb_service();   // HABIT: the input out to the phone
   tp_service();   // FOURSES: LINK OUT
   sh_fill();      // SHNTH: the engine runs ahead into its ring
+  if (ash_app_t >= 0 && millis() - ash_app_ms > 1500) ash_app_t = -1;   // (the phone's ASH: gone quiet -> the preset's own)
   if (ota_active) { ota_service(); delay(1); return; }   // firmware update: nothing else runs
 
   // latch the switches for the status line
