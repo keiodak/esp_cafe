@@ -72,6 +72,7 @@ final class ShnthPlayer: ObservableObject {
     /// compile a patch (and pick a preset in it)
     func select(patch p: Int, preset n: Int = 0) {
         guard !Self.patches.isEmpty else { return }
+        customName = ""
         let i = (p % Self.patches.count + Self.patches.count) % Self.patches.count
         var out = [UInt8](repeating: 0, count: 70000)
         var err = [CChar](repeating: 0, count: 256)
@@ -112,6 +113,12 @@ final class ShnthPlayer: ObservableObject {
         cafeDirty = true
         freeRetired()
         return nil
+    }
+    /// the code playing when it is not a patch from the list (GEN): its name (empty: the list's)
+    @Published var customName = ""
+    /// GEN (the corner key): a new patch at random, here and on the Cafes
+    func gen() {
+        if let src = ShlispGen.make(chaos: Double.random(in: 0...1), title: ""), play(source: src) == nil { customName = "GEN" }
     }
     func nextPatch() { select(patch: patch + 1) }
     func prevPatch() { select(patch: patch - 1) }

@@ -4,8 +4,6 @@
 //               the finger's AREA (UIKit's touch radius, as SIDRAX's plates) and how far from the middle, added.
 //   Antennae  — the two antennae from TILT (A forward, B sideways) · CAM (the back camera: a hand over its left half
 //               A, its right half B) · OFF; ZERO (and TAR) takes what is there now as rest.
-//   Library   — KEEP: the code you like, filed in Documents (SHNTH/*.txt · JUSTINTS/*.texte — Files, Finder);
-//               SHARE: AirDrop / Mail … (this one, or all kept).
 
 import SwiftUI
 import UIKit
@@ -238,87 +236,5 @@ struct AntennaPanel: View {
                 .frame(height: 7)
             }
         }
-    }
-}
-
-// MARK: - KEEP · SHARE
-
-final class Library: ObservableObject {
-    enum Kind: String { case shnth = "SHNTH", justints = "JUSTINTS"
-        var ext: String { self == .shnth ? "txt" : "texte" }
-    }
-    @Published private(set) var shnth: [String] = []
-    @Published private(set) var justints: [String] = []
-    private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    init() {
-        for k in [Kind.shnth, .justints] { try? FileManager.default.createDirectory(at: dir(k), withIntermediateDirectories: true) }
-        refresh()
-    }
-    func dir(_ k: Kind) -> URL { docs.appendingPathComponent(k.rawValue, isDirectory: true) }
-    func url(_ n: String, _ k: Kind) -> URL { dir(k).appendingPathComponent(n).appendingPathExtension(k.ext) }
-    func names(_ k: Kind) -> [String] { k == .shnth ? shnth : justints }
-    func refresh() {
-        func list(_ k: Kind) -> [String] {
-            let fs = (try? FileManager.default.contentsOfDirectory(at: dir(k), includingPropertiesForKeys: nil)) ?? []
-            return fs.filter { $0.pathExtension.lowercased() == k.ext }.map { $0.deletingPathExtension().lastPathComponent }
-                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        }
-        shnth = list(.shnth); justints = list(.justints)
-    }
-    @discardableResult
-    func keep(_ text: String, name: String, _ k: Kind) -> URL? {
-        let f = DateFormatter(); f.dateFormat = "MMdd-HHmmss"
-        var base = name.lowercased().replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-            .trimmingCharacters(in: .whitespaces)
-        if base.isEmpty { base = "patch" }
-        base += " " + f.string(from: Date())
-        var n = base, i = 2
-        while FileManager.default.fileExists(atPath: url(n, k).path) { n = "\(base) \(i)"; i += 1 }
-        let u = url(n, k)
-        do { try text.write(to: u, atomically: true, encoding: .utf8) } catch { return nil }
-        refresh()
-        return u
-    }
-    func read(_ n: String, _ k: Kind) -> String? {
-        let u = url(n, k)
-        return (try? String(contentsOf: u, encoding: .utf8)) ?? (try? String(contentsOf: u, encoding: .isoLatin1))
-    }
-    func all(_ k: Kind) -> [URL] { names(k).map { url($0, k) } }
-}
-
-struct ShShared: Identifiable { let id = UUID(); let urls: [URL] }
-
-struct ShShareSheet: UIViewControllerRepresentable {
-    let urls: [URL]
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: urls, applicationActivities: nil) }
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
-}
-
-/// KEEP and SHARE (THIS · ALL KEPT)
-struct KeepShare: View {
-    @ObservedObject var lib: Library
-    let kind: Library.Kind
-    let current: () -> (String, String)
-    @State private var flash = false
-    @State private var shared: ShShared?
-    var body: some View {
-        HStack(spacing: PanelMetrics.chipSpacing) {
-            ChipButton(title: flash ? "KEPT" : "KEEP", filled: flash) {
-                let (t, n) = current()
-                lib.keep(t, name: n, kind)
-                flash = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { flash = false }
-            }
-            .frame(width: 38)
-            Menu {
-                Button("THIS") { let (t, n) = current(); if let u = lib.keep(t, name: n, kind) { shared = ShShared(urls: [u]) } }
-                Button("ALL KEPT") { lib.refresh(); let us = lib.all(kind); if !us.isEmpty { shared = ShShared(urls: us) } }
-            } label: {
-                Text("SHARE").font(.hud(PanelMetrics.chipFont, .medium)).foregroundStyle(PastelTheme.hudBlack)
-                    .frame(width: 42, height: PanelMetrics.chipHeight)
-                    .overlay(Rectangle().strokeBorder(PastelTheme.hudBlack, lineWidth: 1))
-            }
-        }
-        .sheet(item: $shared) { s in ShShareSheet(urls: s.urls) }
     }
 }

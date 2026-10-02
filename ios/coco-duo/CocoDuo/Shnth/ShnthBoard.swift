@@ -1,6 +1,7 @@
 // ShnthBoard.swift — coco duo (k.odk)
-// SHNTH's screen (in place of the pads), as the Shnth app's, in coco duo's look. Top: SHNTH | JUSTINTS, the patch
-// (examples · kept), GEN (a new one, at random), KEEP · SHARE, and for SHNTH ◀ ▶, the preset, the LEDs, iPHONE · CAFE.
+// SHNTH's screen (in place of the pads), as the Shnth app's, in coco duo's look. Top: the patch (its list, ‹ ›), the
+// preset, the LEDs, iPHONE · CAFE (JUSTINTS: its example). SHNTH | JUSTINTS is chosen beside the mode (BLE MODE);
+// GEN is the top left corner's key.
 // SHNTH: MAJOR over minor, TAR, the antennae (TILT · CAM · OFF); at the foot the four bars as XY pads (finger area).
 // The Cafes on SHNTH play the patch with the same hands.
 // JUSTINTS: Peter Blasser's justints on the phone (its picture — tap its routing squares — and its keys), the four
@@ -13,12 +14,9 @@ struct ShnthBoard: View {
     @ObservedObject var sh: ShnthPlayer
     @ObservedObject var jp: JustintsPlayer
     @ObservedObject var ant: Antennae
-    @ObservedObject var lib: Library
     /// a change the Cafes must hear about (the Director sends it)
     let changed: () -> Void
     @AppStorage("shnth.ji") private var ji = false
-    @State private var custom = ""                    // the SHNTH code playing when it is not a patch from the list (GEN · KEPT)
-    @State private var customName = ""
 
     var body: some View {
         VStack(spacing: 6) {
@@ -47,51 +45,27 @@ struct ShnthBoard: View {
 
     private var top: some View {
         HStack(spacing: PanelMetrics.chipSpacing) {
-            ChipButton(title: "SHNTH", filled: !ji) { ji = false }.frame(width: 50)
-            ChipButton(title: "JUSTINTS", filled: ji) { ji = true }.frame(width: 62)
-            Spacer(minLength: 6)
             if ji {
                 Menu {
-                    Section("EXAMPLES") {
-                        ForEach(JustintsPlayer.examples.indices, id: \.self) { i in
-                            let n = JustintsPlayer.examples[i].name
-                            Button(n) { jp.load(n) }
-                        }
-                    }
-                    if !lib.justints.isEmpty {
-                        Section("KEPT") {
-                            ForEach(lib.justints, id: \.self) { n in Button(n) { if let t = lib.read(n, .justints) { jp.loadText(t, as: n) } } }
-                        }
+                    ForEach(JustintsPlayer.examples.indices, id: \.self) { i in
+                        let n = JustintsPlayer.examples[i].name
+                        Button(n) { jp.load(n) }
                     }
                 } label: { name(jp.example) }
-                ChipButton(title: "GEN", filled: false) {
-                    jp.loadText(JustintsGen.make([.order, .mix, .chaos].randomElement()!), as: "GEN")
-                }.frame(width: 34)
-                KeepShare(lib: lib, kind: .justints) { (jp.saveText(), jp.example) }
+                Spacer(minLength: 0)
             } else {
                 Menu {
-                    Section("EXAMPLES") {
-                        ForEach(ShnthPlayer.patches.indices, id: \.self) { i in
-                            Button(ShnthPlayer.patches[i].name) { customName = ""; sh.select(patch: i); changed() }
-                        }
+                    ForEach(ShnthPlayer.patches.indices, id: \.self) { i in
+                        Button(ShnthPlayer.patches[i].name) { sh.select(patch: i); changed() }
                     }
-                    if !lib.shnth.isEmpty {
-                        Section("KEPT") {
-                            ForEach(lib.shnth, id: \.self) { n in Button(n) { if let t = lib.read(n, .shnth) { playCustom(t, n) } } }
-                        }
-                    }
-                } label: { name(customName.isEmpty ? sh.patchName : customName) }
-                ChipButton(title: "◀", filled: false) { customName = ""; sh.prevPatch(); changed() }.frame(width: 24)
-                ChipButton(title: "▶", filled: false) { customName = ""; sh.nextPatch(); changed() }.frame(width: 24)
-                ChipButton(title: "GEN", filled: false) {                     // a new patch, at random (ShlispGen)
-                    if let src = ShlispGen.make(chaos: Double.random(in: 0...1), title: "") { playCustom(src, "GEN") }
-                }.frame(width: 34)
-                KeepShare(lib: lib, kind: .shnth) { customName.isEmpty ? (ShnthPlayer.patches.isEmpty ? "" : ShnthPlayer.patches[sh.patch].source, sh.patchName) : (custom, customName) }
+                } label: { name(sh.customName.isEmpty ? sh.patchName : sh.customName) }
+                StepKey(left: true) { sh.prevPatch(); changed() }
+                StepKey(left: false) { sh.nextPatch(); changed() }
                 Spacer(minLength: 6)
-                ChipButton(title: "−", filled: false) { sh.setPreset(sh.preset - 1); changed() }.frame(width: 22)
+                StepKey(left: true) { sh.setPreset(sh.preset - 1); changed() }
                 Text("\(sh.preset + 1)/\(max(1, sh.presetCount))")
                     .font(.hud(PanelMetrics.labelFont, .semibold)).foregroundStyle(PastelTheme.textPrimary).frame(width: 34)
-                ChipButton(title: "+", filled: false) { sh.setPreset(sh.preset + 1); changed() }.frame(width: 22)
+                StepKey(left: false) { sh.setPreset(sh.preset + 1); changed() }
                 TimelineView(.periodic(from: .now, by: 1.0 / 20)) { _ in
                     let leds = sh.ledsNow()
                     HStack(spacing: 3) {
@@ -101,6 +75,7 @@ struct ShnthBoard: View {
                         }
                     }
                 }
+                .padding(.horizontal, 4)
                 ChipButton(title: "iPHONE", filled: sh.onPhone) { sh.onPhone.toggle() }.frame(width: 50)
                 ChipButton(title: "CAFE", filled: sh.onCafe) { sh.onCafe.toggle(); changed() }.frame(width: 40)
             }
@@ -109,12 +84,8 @@ struct ShnthBoard: View {
 
     private func name(_ s: String) -> some View {
         Text(s.isEmpty ? "—" : s).font(.hud(PanelMetrics.labelFont, .semibold)).foregroundStyle(PastelTheme.textPrimary)
-            .lineLimit(1).minimumScaleFactor(0.6).frame(width: 110, height: PanelMetrics.chipHeight)
+            .lineLimit(1).minimumScaleFactor(0.6).frame(width: 120, height: PanelMetrics.chipHeight)
             .overlay(Rectangle().strokeBorder(PastelTheme.hudLine, lineWidth: 1))
-    }
-
-    private func playCustom(_ src: String, _ n: String) {
-        if sh.play(source: src) == nil { custom = src; customName = n; changed() }
     }
 
     // MARK: SHNTH
@@ -226,5 +197,20 @@ struct ShnthBoard: View {
                 ChipButton(title: "\(i + from)", filled: now == i + from) { jp.key(ks[i]) }
             }
         }
+    }
+}
+
+/// ‹ / ›: a chip with a fine chevron (the patch, the preset)
+private struct StepKey: View {
+    let left: Bool
+    let action: () -> Void
+    var body: some View {
+        Image(systemName: left ? "chevron.left" : "chevron.right")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(PastelTheme.textPrimary)
+            .frame(width: 20, height: PanelMetrics.chipHeight)
+            .background(ChipBackground(fill: nil))
+            .contentShape(Rectangle())
+            .onTapGesture { action() }
     }
 }
