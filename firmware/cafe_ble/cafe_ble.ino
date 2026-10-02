@@ -88,7 +88,7 @@ class CafeRxCB : public NimBLECharacteristicCallbacks {
 };
 // ---- BLE firmware update (k.odk) ----
 // "U <size> <crc32 hex>" on the text link starts it: audio stops, the tape memory is freed for a receive buffer,
-// then the page writes pieces to OTA_RX: [4 bytes offset, little endian][data]. loop() writes them to the other
+// then the phone (or a page) writes pieces to OTA_RX: [4 bytes offset, little endian][data]. loop() writes them to the other
 // app slot and answers "U A <bytes written>" every 4 KB. At the end the CRC is checked and the Cafe restarts.
 #define OTA_RING 16384
 static uint8_t *ota_rb = nullptr;
@@ -214,7 +214,6 @@ void ota_cmd(char *s) {
     detachInterrupt(2);
     ota_active = true;
     for (int i = 0; i < DCHUNKS; i++) { if (dchunk[i] && dchunk[i] != dchunk_rtc) free(dchunk[i]); dchunk[i] = nullptr; }
-    delaybuffa = delaybuffb = nullptr;
     ota_rb = (uint8_t *)malloc(OTA_RING);
     if (!ota_rb) ota_fail("no memory");
     if (!Update.begin(size, U_FLASH)) ota_fail(Update.errorString());
@@ -294,13 +293,12 @@ void setup() {
   }
 
   if (CLASSIC_NOISE_BOOT) { audio_frozen_state = true; lamp = true; FILLNOISE }
-  else { audio_frozen_state = false; lamp = false; for (int i = 0; i < DELAYSIZE; i++) dellius(i, 0, false); }
+  else { audio_frozen_state = false; lamp = false; for (int i = 0; i < DELAYSIZE; i++) dwrite(i, 0); }
 
   // pre-charge the ASH capacitor (so ASH doesn't need to wake up to send audio)
   REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | (64 << 19);
 
   active_preset_count = POOL_N;
-  for (int i = 0; i < POOL_N; i++) { pl_id[i] = i; presets[i] = pool[i]; }
   preset = 0; preset_counter = 0;
   DOUBLECLK
   PRESETTER(pool[preset])

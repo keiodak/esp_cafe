@@ -15,8 +15,6 @@
 void IRAM_ATTR coco_mod() {
 
 
- //INTABRUPT
- //REG(GPIO_STATUS_W1TC_REG)[0]=0xFFFFFFFF; 
 
  DACWRITER(pout)
  gyo=ADCREADER // Audio Input signal is read here
@@ -148,10 +146,6 @@ int myNumbers[] = {32000, 31578, 22444, 25111};
 int myPlacers[] = {0, 0, 0, 0};
 int tapsz=sizeof(myPlacers)>>2;
 
-// Alternate values:
-// int myNumbers[] = {12000, 11578, 14444, 15111,8900, 10278, 12004, 12111};
-// int myPlacers[] = {0, 0, 0, 0, 0, 0, 0, 0};
-// int tapsz=sizeof(myPlacers)>>2;
 
 
 // ==========================================
@@ -175,11 +169,7 @@ void IRAM_ATTR echo_og() {
   static uint32_t oph = 0;                          // organ phase (32 bit)
   static int32_t s_earth = 0, s_earth2 = 0, s_earth3 = 0;   // EARTH, 12 bit, three slews (Q8)
   static int initial_earth = 0, boot_timer = 0;
-  static bool knob_moved = false;
-  static int cal_min = 4095, cal_max = 0;
   static bool last_frozen = false;
-  static bool patched = false;                      // latched "a CV is really moving" state
-  static int unpatch_timer = 0;
   static int32_t rate_s = 256 << 8;                // slewed FM rate (Q16)
   static int32_t rg = 1024;                          // recording gain 0..1024 (freeze ramp)
   static int fm_mode = -1;                          // FLIP: PITCH -> RING -> off -> PITCH (first: RING without Bluetooth, PITCH with)
@@ -202,7 +192,7 @@ void IRAM_ATTR echo_og() {
     flip_int = FLIPPERAT ? 2000 : 0;  flip_latch = FLIPPERAT ? true : false;
     skip_int = SKIPPERAT ? 2000 : 0;  skip_latch = SKIPPERAT ? true : false;
     s_earth = s_earth2 = s_earth3 = earth_raw12 << 8;
-    boot_timer = 0; knob_moved = false; cal_min = 4095; cal_max = 0;
+    boot_timer = 0;
   }
 
   // --- BUTTON: freeze. the recording gain ramps (~23ms) so the loop point is smooth ---
@@ -232,7 +222,6 @@ void IRAM_ATTR echo_og() {
       // offset in samples, Q8: wow up to ~120 samples, flutter ~10
       int32_t off = ((tri * 120) >> 7) + ((ftr * 10) >> 7);   // Q8 (0 .. ~32000)
       off = (off * wob) >> 13;
-      off = (off * ((ch_v[1] * 1024) / 1000)) >> 10;   // CHAR = WEAR
       int oi = off >> 8, fr = off & 0xFF;
       // address (placer - off) holds the sound from (N - off) samples ago -> delay shortened by off
       int q0 = myPlacers[i] - oi;       if (q0 < 0) q0 += myNumbers[i];
@@ -292,7 +281,6 @@ void IRAM_ATTR echo_og() {
     int32_t m = 256 + ((fr * (168 + ((fr * 88) >> 8))) >> 8);           // 2^(fr/256), Q8 (±0.3 %)
     rate = ip >= 0 ? (m << ip) : (m >> -ip);
   }
-  (void)knob_moved; (void)cal_min; (void)cal_max; (void)patched; (void)unpatch_timer;
 
   // --- ORGAN ---
   rate_s += ((rate << 8) - rate_s) >> (fm_mode == 2 ? 1 : 8);   // PITCH: ~6 ms slew · AUDIO: follows at once

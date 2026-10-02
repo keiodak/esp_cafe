@@ -8,7 +8,7 @@ over Bluetooth.
 | folder | what it is |
 |---|---|
 | `firmware/esp_cafe_duo` | The firmware (Arduino IDE, ESP32 core 2.0.9, *ESP32 Dev Module*, library *NimBLE-Arduino*) |
-| `firmware/cafe_ble` | **A small starting point to build on**: two presets (COCO_MOD, ECHO) and Bluetooth only when BUTTON is held at power-on (otherwise exactly as the original). ~1600 lines; the comments at the top of `cafe_ble.ino` say what is where |
+| `firmware/cafe_ble` | **A small starting point to build on**: two presets (COCO_MOD, ECHO) and Bluetooth only when BUTTON is held at power-on (otherwise exactly as the original). ~1200 lines; the comments at the top of `cafe_ble.ino` say what is where |
 | `ios/coco-duo` | The iPhone app (Xcode 16+, iOS 18+) |
 | `web/coco-pc.html` | A Chrome page (Web Bluetooth): connect, log, firmware update over BLE |
 

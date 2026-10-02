@@ -1,227 +1,60 @@
+// stuff.h — cafe_ble: the Cafe's outputs, inputs, BUTTON, lamp and tape (from Apple π / the original firmware)
 #include "setup.h"
 #include <esp_heap_caps.h>
 
-
-#define ENNEAGRAM simpleHelpers
 #define SETUPPERS initDEL();
+#define PRESETTER(p) attachInterrupt(2, p, FALLING);      // a preset = the audio interrupt (one call per sample)
 
 // =========================================================
-// BUTTON SETUP
+// INPUTS: BUTTON, FLIP, SKIP, EARTH
 // =========================================================
-#define BUTTONEST REG(GPIO_IN1_REG)[0] & 0x1
-#define CLICKETTE(c) attachInterrupt(32, c, CHANGE);
-#define DOUBLECLK CLICKETTE(doubleclicker);
-#define LONGPRESS
-#define TRIPLECLK
-#define BUTTON_PRESSED (is_pressed && !preset_mode) //NEW FIRMWARE
-// ---------------------------------------------------------
+#define BUTTONEST REG(GPIO_IN1_REG)[0] & 0x1              // 0 = pressed
+#define FLIPPERAT REG(GPIO_IN1_REG)[0] & 0x8
+#define SKIPPERAT REG(GPIO_IN1_REG)[0] & 0x4
+#define DOUBLECLK attachInterrupt(32, doubleclicker, CHANGE);
 
-// =========================================================
-// CROSSFADE
-// =========================================================
-// Added as per Peter's crossfade update
-// Peter defaults the Crossbite to 8
-// 8 means about 1/512 of the loop
-// At base clockrate of 48kHz a countdown of 256 (2^8 = 256) is a 5.3 millisecond crossfade. 
-// Increasing this by one doubles the crossfade time or vice versa.
-// For seemless crossfades of lower pitch audio, the wave cycle can be > 30ms (for C1)
-// Setting Crossbite to 10 is a 21ms crossfade at base CPU speed
-// The CPU speed controls the crossfade time, so slower clock speeds will have slower fade times
-// If the CPU speed is set faster, then the crossfade time will be shorter 
-// but either way the number of samples is the same, so the fade has the same effect
-// Set to -1 for no crossfade, this cancels out the crossfade
-#define CROSSBITE 8  // Change this for longer/shorter crossfades
-#define CROSSFADE (1<<(CROSSBITE)) 
-int xfado = 0;  // Fade out for switching from delay to looping
-int yfado = 0;  // Fade in for switching from looping to delay
-
-// CROSSFADE to be called by presets to avoid clicks on loops. Added per Peter's crossfade update
-#define TRIGGER_CROSSFADE(is_freezing) \
-  if (is_freezing) { \
-      if (xfado == 0) xfado = CROSSFADE; \
-  } else { \
-      if (yfado == 0) yfado = CROSSFADE; \
-  }
-// ---------------------------------------------------------
-
-#define PRESETTER(p) attachInterrupt(2, p, FALLING);
+// EARTH, 0..255 (EARTHREAD) and 12 bit (earth_raw12). Without Bluetooth it comes from the original path (the SAR's
+// FIFO), fresh every sample (earth_fifo, called with every DAC write); with Bluetooth the radio takes ADC2 and EARTH
+// is read 2000x a second by earth_tick (cafe_ble.ino).
+volatile int earth_now = 0;
+volatile int earth_raw12 = 0;
+#define EARTHREAD (earth_now)
+static inline void earth_fifo() {
+  if (cafe_no_ble) { int r = (REG(I2S_FIFO_RD_REG)[0] & 0x7FF) << 1; earth_raw12 = r; earth_now = r >> 4; }
+}
+volatile int earth_last_state = 0;                        // EARTH as a switch (COCO_MOD: record on / off)
+const int TRIGGER_ON_THRESHOLD = 100;                     // (a 4 V midpoint, for a 2 V – 6 V LFO)
+const int TRIGGER_OFF_THRESHOLD = 85;
 
 // =========================================================
 // LAMP
 // =========================================================
-bool lamp; // declare the lamp variable for lampaflip
-
-// GLOBAL LAMP CONTROL (Stateful control that ties lamp control to preset mode change)
-// When BUTTONEST pressed, audio interrupt is locked out so that entering preset mode flashes lamp
+bool lamp;
+volatile bool preset_mode = false;                        // the BUTTON menu is open
+volatile bool os_blink_active = false;                    // the menu is blinking a number: presets leave the lamp alone
 #define LAMPLIGHT \
   if (BUTTONEST) { \
       if (lamp) REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); \
       else REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1); \
   }
-
-// Main Loop Override LED Control (Forces LED regardless of button state)
 #define LAMPLIGHT_OVERRIDE \
   if (lamp) REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); \
   else REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1);
-
-// DIRECT LAMP CONTROL
-// for UI use of lamp 
-// bypasses the stateful lamplight control
-#define LAMP_ON  do { if(!preset_mode && !os_blink_active && BUTTONEST) REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); } while(0) 
+#define LAMP_ON  do { if(!preset_mode && !os_blink_active && BUTTONEST) REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); } while(0)
 #define LAMP_OFF do { if(!preset_mode && !os_blink_active && BUTTONEST) REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1); } while(0)
 
-//ORIGINAL FIRMWARE
-// #define LAMPLIGHT \ //REPLACED ABOVE
-//  REG(GPIO_OUT_REG)[3]=((lamp?1:0)<<1);
-
-#define LAMPAFLIP \
-  lamp = !lamp; \
-  LAMPLIGHT
-// ---------------------------------------------------------
-
-
 // =========================================================
-// EARTH
+// OUTPUTS: main (the codec, over SPI3), ASH (the ESP32's DAC), YELLOW (ten GPIO pins)
 // =========================================================
-// k.odk: EARTH is read in loop() straight from ADC2 channel 0 (GPIO 4), 1000 times a second, and kept here.
-// (The original read it inside the audio interrupt through the I2S FIFO of the SAR ADC's digital controller;
-//  with Bluetooth running that path delivers nothing — EARTH read 0 in every preset.)
-volatile int earth_now = 0;        // 0..255
-volatile int earth_raw12 = 0;      // 0..4095 (for "H" / the USB test line)
-#define EARTHREAD (earth_now)
-#define EARTHREAD_FIFO ((REG(I2S_FIFO_RD_REG)[0] & 0x7FF) >> 3)   // the original way (unused)
+#define SPIWRITER(d) \
+  REG(SPI3_W8_REG) \
+  [0] = (d) << 16; \
+  REG(SPI3_CMD_REG) \
+  [0] = BIT(18);
+#define DACWRITER(p) earth_fifo(); SPIWRITER(0x9000 | (p))   // main out (and EARTH, without Bluetooth)
+#define ADCREADER ((REG(SPI3_W0_REG)[0]) >> 16) & 0xFFF;     // the input
 
-volatile int earth_last_state = 0; 
-
-//hysteresis thresholds for when earth is a switch
-// const int TRIGGER_ON_THRESHOLD = 160; // ~2.8V
-// const int TRIGGER_OFF_THRESHOLD = 60; // ~1.8V
-// Calibrated for a 4V midpoint (using a 2V-6V onboard LFO)
-const int TRIGGER_ON_THRESHOLD = 100;  // Triggers ON just above 4V was 115
-const int TRIGGER_OFF_THRESHOLD = 85; // Triggers OFF just below 4V was 100
-// ---------------------------------------------------------
-
-
-// =========================================================
-// ASH OUTPUT MENU
-// =========================================================
-// ---------------------------------------------------------
-// CLEAN ASH AUDIO OUTPUT (7-Bit Symmetrical, Half-Volume)
-// ---------------------------------------------------------
-inline void write_ash_clean(int raw_val) {
-    // DC Blocker (centers post-ADC to 2048)
-    static int32_t dc_tracker = 2048 << 12;
-    dc_tracker += ((raw_val << 12) - dc_tracker) >> 12; 
-    int32_t ac_centered = raw_val - (dc_tracker >> 12) + 2048;
-    
-    // TPDF Dither & Delta-Sigma Accumulation
-    int32_t dither = (rand() & 15) - (rand() & 15);
-    static int32_t error_accumulator = 0;
-    int32_t target = ac_centered + dither + error_accumulator;
-    
-    // Scale for 128 peak-to-peak
-    int32_t out_8bit = target >> 5;
-    
-    // Save discarded bits
-    error_accumulator = target - (out_8bit << 5);
-    
-    // Output
-    int32_t final_out = out_8bit; 
-    
-    if (final_out > 255) final_out = 255;
-    if (final_out < 0) final_out = 0;
-    
-    REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((final_out & 0xFF) << 19);
-}
-#define CLEAN_ASHWRITER(a) write_ash_clean(a)
-
-// ---------------------------------------------------------
-// WARM ASH AUDIO OUTPUT (8-Bit asymmetrically clipped, full-volume)
-// ---------------------------------------------------------
-inline void write_ash_warm(int raw_val) {
-    // DC Blocker
-    static int32_t dc_tracker = 2048 << 12;
-    dc_tracker += ((raw_val << 12) - dc_tracker) >> 12; 
-    int32_t ac_centered = raw_val - (dc_tracker >> 12) + 2048;
-    
-    // TPDF Dither & Delta-Sigma Accumulation
-    int32_t dither = (rand() & 7) - (rand() & 7);
-    static int32_t error_accumulator = 0;
-    int32_t target = ac_centered + dither + error_accumulator;
-    
-    // Scale for 255 peak-to-peak
-    int32_t out_8bit = target >> 4;
-    
-    // ave discarded bits
-    error_accumulator = target - (out_8bit << 4);
-    
-    // Shift down by 64 to force center to rest at LM3900 diode conductance level
-    int32_t final_out = out_8bit - 64; 
-    
-    // Asymmetrical Clipping
-    if (final_out > 255) final_out = 255;
-    if (final_out < 0) final_out = 0;
-    
-    REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((final_out & 0xFF) << 19);
-}
-#define WARM_ASHWRITER(a) write_ash_warm(a)
-
-// ---------------------------------------------------------
-// CLEANER WARM ASH AUDIO OUTPUT (8-Bit asymmetrically clipped, full-volume, no dithering)
-// ---------------------------------------------------------
-inline void write_ash_cleaner(int raw_val) {
-    // DC Blocker (centers post-ADC to 2048)
-    static int32_t dc_tracker = 2048 << 12;
-    dc_tracker += ((raw_val << 12) - dc_tracker) >> 12; 
-    int32_t ac_centered = raw_val - (dc_tracker >> 12) + 2048;
-    
-    // Scale for 128 peak-to-peak directly (no dither or error accumulation)
-    int32_t out_8bit = ac_centered >> 5;
-    
-    // Hard limit clipping bounds
-    int32_t final_out = out_8bit; 
-    if (final_out > 255) final_out = 255;
-    if (final_out < 0) final_out = 0;
-    
-    // Write directly to the hardware DAC
-    REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((final_out & 0xFF) << 19);
-}
-#define CLEANER_ASHWRITER(a) write_ash_cleaner(a)
-
-
-// ---------------------------------------------------------
-// COMPRESSED ASH AUDIO OUTPUT (8-Bit, Driven into Limiter, Symmetrical Clipping)
-// ---------------------------------------------------------
-// ---- CHAR: one slider per preset, set from the phone ("X <0..1000>", for the current preset) ----
-// 1 coco_mod GRIT · 2 echo WEAR (wobble depth) · 3 BLE GRIT · 4 resonator GRIT · 5 formant VOWEL Q · 6 saturator DRIVE
-// 7 harmony CLEAN <-> GRAIN · 8 rungler GRIT · 9 selfread GRIT · 10 MULTI GRIT · 11 ARP_DELAY GRIT
-// GRIT = sample-and-hold + fewer bits on main out and ASH (0 = untouched)
-extern int preset;
-volatile int16_t ch_v[11] = {0, 1000, 0, 0, 714, 0, 1000, 0, 0, 0, 0};
-static const uint8_t ch_grit[11] = {1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1};
-static inline int ch_now() { return (preset >= 0 && preset < 11) ? ch_v[preset] : 0; }
-static int __attribute__((noinline)) grit_do(int p, int *cnt, int *held) {
-  int g = ch_v[preset];
-  int hold = 1 + (g * g) / 66667;                   // 1 .. 16 samples
-  int bits = (g * 7) / 1000;                        // 0 .. 7 bits dropped
-  if (++*cnt >= hold) { *cnt = 0; *held = p & ~((1 << bits) - 1); }
-  return *held;
-}
-static inline int grit_m(int p) {
-  static int c = 0, h = 2048;
-  // Bluetooth OFF (BUTTON held at power-on): EARTH comes from the original ADC path, fresh every sample (as the
-  // original firmware) — read here because every preset writes the DAC once a sample. With Bluetooth the radio
-  // owns ADC2 and EARTH is read 2000x a second instead (earth_tick).
-  if (cafe_no_ble) { int r = (REG(I2S_FIFO_RD_REG)[0] & 0x7FF) << 1; earth_raw12 = r; earth_now = r >> 4; }
-  if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
-  return grit_do(p, &c, &h);
-}
-static inline int grit_a(int p) {
-  static int c = 0, h = 2048;
-  if (preset < 0 || preset >= 11 || !ch_grit[preset] || ch_v[preset] <= 0) return p;
-  return grit_do(p, &c, &h);
-}
-
+// ASH: AC only, ×2 into a limiter, 8 bits (Apple π's "compressed" ASH)
 inline void write_ash_compressed(int raw_val) {
     // DC Blocker  and extracting AC signal
     static int32_t dc_tracker = 2048 << 12;
@@ -245,72 +78,10 @@ inline void write_ash_compressed(int raw_val) {
     // Write to the hardware DAC
     REG(ESP32_RTCIO_PAD_DAC1)[0] = BIT(10) | BIT(17) | BIT(18) | ((out_8bit & 0xFF) << 19);
 }
-#define COMPRESSED_ASHWRITER(a) write_ash_compressed(grit_a(a))
+#define ASHWRITER(a) write_ash_compressed(a)
 
-//ORIGINAL FIRMWARE // REPLACED ABOVE
-// #define ASHWRITER(a) \
-//  REG(ESP32_RTCIO_PAD_DAC1)[0]= \
-//  BIT(10)|BIT(17)|BIT(18)|((a&0xFF)<<19);
-
-// ---------------------------------------------------------
-// SET DEFAULT ASH BELOW
-// ---------------------------------------------------------
-// most presets use a generic "ashwriter" 
-// so this is where you can define which verions of ash that points to
-// just change "warm_ashwriter" to "clean_ashwriter" to swap them
-#define ASHWRITER(a) COMPRESSED_ASHWRITER(a)
-
-
-// ---------------------------------------------------------
-// ---------------------------------------------------------
-
-#define INTABRUPT \
-  REG(GPIO_STATUS_W1TC_REG) \
-  [0] = 0xFFFFFFFF; \
-  REG(GPIO_STATUS1_W1TC_REG) \
-  [0] = 0xFFFFFFFF;
-#define SPIWRITER(d) \
-  REG(SPI3_W8_REG) \
-  [0] = (d) << 16; \
-  REG(SPI3_CMD_REG) \
-  [0] = BIT(18);
-#define DACWRITER(p) SPIWRITER(0x9000 | grit_m(p))
-#define ADCREADER ((REG(SPI3_W0_REG)[0]) >> 16) & 0xFFF;
-#define I2S_START
-#define I2SFINISH
-
-// =========================================================
-// YELLOW OUTPUT MENU
-// =========================================================
 #define YELLOW_MASK (BIT(12) | BIT(13) | BIT(14) | BIT(15) | BIT(16) | BIT(17) | BIT(21) | BIT(22) | BIT(26) | BIT(27))
-
-// ---------------------------------------------------------
-// YELLOW_BINARY (Original Cocoquantus Buffer Position Binary Code)
-// ---------------------------------------------------------
-// a binary counter in voltage of the buffer position
-// refer to the guide for crucFX SLM for more details
-#define YELLOW_BINARY(b) \
- REG(GPIO_OUT_REG)[0]=((uint32_t)(b)<<12);
-
-// ---------------------------------------------------------
-// YELLOW CLOCK PULSE
-// ---------------------------------------------------------
-// Creates square pulse from Yellow for clocking external equipment
-// Drives all 10 pins of the Yellow Ladder simultaneously
-#define YELLOW_PULSE(b) \
-  if (b > 2048) REG(GPIO_OUT_W1TS_REG) \
-                [0] = YELLOW_MASK; \
-  else REG(GPIO_OUT_W1TC_REG) \
-       [0] = YELLOW_MASK;
-
-// ---------------------------------------------------------
-// YELLOW AUDIO OUTPUT (BIT-CRUSHED)
-// ---------------------------------------------------------
-// yellow as a psuedo DAC
-// can be used as a complement to ash for a weird stereo image
-// since all pins are equal weight, map amplitude -> pin count
-// input 'b' is 0-1023. scale it to 0-10 steps for 10 pins
-
+// YELLOW as a rough DAC: 0..4095 -> how many of its ten pins are on (dithered)
 inline void write_yellow_audio(int raw_val) {
     static int32_t yellow_error = 0;
     
@@ -344,43 +115,19 @@ inline void write_yellow_audio(int raw_val) {
 }
 #define YELLOW_AUDIO(a) write_yellow_audio(a)
 
-// ---------------------------------------------------------
-// ---------------------------------------------------------
-
-#define FLIPPERAT REG(GPIO_IN1_REG)[0] & 0x8
-#define SKIPPERAT REG(GPIO_IN1_REG)[0] & 0x4
-
-#define DELAYSIZE (1 << 17) // Original buffer size is 131000
-
-#define FILLNOISE \
-  for (int i = 0; i < DELAYSIZE; i++) dellius(i, rand(), false);
-
-
-int tima;
-int timahi;
-int preset;
-//void (*presets[PRESETAMT])(); //updated to tie to the PRESETAMT in .ino
-// PLAYLIST MEMORY
-int active_preset_count = 1; 
-// the playlist (k.odk): up to 11 pool ids — what the BUTTON menu steps through and the phone lists.
-// "preset" is always a pool id (see pool[] in the .ino); the menu turns its count into one through pl_id.
-int pl_id[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-void (*presets[32])(); // hardware ceiling of 32 presets per playlist
-
 // =========================================================
-// BUTTON --- MODIFIED FIRMWARE
+// PRESETS AND THE BUTTON
 // =========================================================
-// Modified doubleclicker to allow for preset selection mode
-
-// --- PRESET SELECTION VARIABLES ---
-volatile bool preset_mode = false;
-volatile bool os_blink_active = false; // OS is blinking the preset number: presets keep their hands off the lamp
+int preset;                                               // the preset playing (pool[] in cafe_ble.ino)
+int active_preset_count = 1;
 volatile uint32_t press_time = 0;
 volatile uint32_t release_time = 0;
 volatile bool is_pressed = false;
 volatile int preset_counter = 0;
-volatile bool audio_frozen_state = false; // <-- ADD THIS LINE
+volatile bool audio_frozen_state = false;                 // BUTTON's short press: the tape held (lamp on)
 
+// BUTTON (Apple π): a short press = freeze on / off · a long press (0.8 s) opens the menu, short presses count,
+// another long press loads that preset. Times from timer group 0 (counting at 2.5 MHz).
 void IRAM_ATTR doubleclicker() {
   int buttnow = BUTTONEST; // 0 is pressed, 1 is released
 
@@ -413,9 +160,8 @@ void IRAM_ATTR doubleclicker() {
           if (preset_mode) {
             preset_counter = 0; 
           } else {
-            // Exiting mode: Apply the new preset.
-            //preset = preset_counter % PRESETAMT; 
-            preset = pl_id[preset_counter % active_preset_count];
+            // Exiting mode: the preset counted
+            preset = preset_counter % active_preset_count;
             // set audio_frozen_state so preset changing doesn't 
             // record over transferred buffers
             audio_frozen_state = true; 
@@ -434,75 +180,24 @@ void IRAM_ATTR doubleclicker() {
     }
   }
 }
-// ---------------------------------------------------------
 
 // =========================================================
-// BUFFER --- MODIFIED FIRMWARE
+// THE TAPE: 2^17 samples of 12 bits, two to three bytes. With Bluetooth there is no single free block that big,
+// so it is 128 pieces of 1024 samples (1.5 KB), the last one in RTC memory.
 // =========================================================
-// SETTING UP THE BUFFER
-// dellius packs 12 bits into two bytes
-uint8_t *delaybuffa;
-uint8_t *delaybuffb;
-// BLE build (k.odk): with the radio on there is no single free block big enough for 2 x 96 KB,
-// so the tape lives in 64 pieces of 2048 samples (3072 bytes). Sample pairs never straddle a piece.
-#define DCHUNK_BITS 10                     // 128 pieces of 1024 samples (1536 bytes): small enough for the heap's last gaps
+#define DELAYSIZE (1 << 17)
+#define DCHUNK_BITS 10
 #define DCHUNKS (DELAYSIZE >> DCHUNK_BITS)
 #define DCHUNK_BYTES (((1 << DCHUNK_BITS) * 3) >> 1)
 uint8_t *dchunk[DCHUNKS];
-RTC_NOINIT_ATTR static uint8_t dchunk_rtc[DCHUNK_BYTES];   // the last piece lives in RTC memory: 1.5 KB more heap for Bluetooth
-
-uint8_t *delptr;
-static int t;
-static int delayskp;
+RTC_NOINIT_ATTR static uint8_t dchunk_rtc[DCHUNK_BYTES];
+static int t;                                             // the head
+static int delayskp;                                      // COCO_MOD: the loop point (SKIP)
 static int lastskp;
-int adc_read;
-int gyo;
-volatile int pout;  //persistent_red // updated to volatile per Peter's FW
+int gyo;                                                  // the input, this sample
+volatile int pout;                                        // the main out, this sample
 
-// ORIGINAL FIRMWARE
-// optimizes memory use for 12 bit ADC
-int dellius(int ptr, int val, bool but) {
-  int zut, biz, forsh;
-  delptr = dchunk[(ptr >> DCHUNK_BITS) & (DCHUNKS - 1)];
-  ptr = (ptr & ((1 << DCHUNK_BITS) - 1)) * 3;
-  biz = ptr & 1;
-  forsh = biz << 2;
-
-  // unpack buffer audio
-  zut = delptr[(ptr >> 1) + biz] << 4;
-  zut |= (delptr[(ptr >> 1) + 1 - biz] & (0xF << (forsh))) >> (forsh);
-
-  // When button is pressed to loop, keeping recording during crossfade time
-  if ((!but) || (but && (xfado > 0))) {
-
-    // Linear Crossfade of the live signal and the buffer 
-    if (xfado > 0) {   
-        val = (val * xfado) >> CROSSBITE;   
-        val += (zut * (CROSSFADE - xfado)) >> CROSSBITE;      
-        xfado--;  
-    }
-
-    // Linear Crossfade of the buffer signal and the live signal when unfreezing
-        if (yfado > 0) {
-            val = (val * (CROSSFADE - yfado)) >> CROSSBITE;
-            val += (zut * yfado) >> CROSSBITE;
-            yfado--;
-        }
-
-    // re-pack the buffer to 12 bits by splitting the second byte of the 12bit read input across the end of each 8 bit buffer
-    delptr[(ptr >> 1) + biz] = (uint8_t)(val >> 4);
-    delptr[(ptr >> 1) + 1 - biz] &= (uint8_t)(0xF << (4 - forsh));
-    delptr[(ptr >> 1) + 1 - biz] |= (uint8_t)((val & 0xF) << forsh);
-  }
-  return zut;
-}
-// ---------------------------------------------------------
-
-// READ-ONLY tape access (k.odk)
-// dellius(p, 0, true) is NOT a pure read: while the freeze crossfade (xfado) runs it
-// writes a blend of 0 into the tape -> a single near-zero sample = a "bot" click later.
-// Use dread() whenever you only want to look.
-int dread(int ptr) {
+int IRAM_ATTR dread(int ptr) {                            // read a sample
   uint8_t *dp = dchunk[(ptr >> DCHUNK_BITS) & (DCHUNKS - 1)];
   ptr = (ptr & ((1 << DCHUNK_BITS) - 1)) * 3;
   int biz = ptr & 1;
@@ -511,9 +206,7 @@ int dread(int ptr) {
   zut |= (dp[(ptr >> 1) + 1 - biz] & (0xF << forsh)) >> forsh;
   return zut;
 }
-
-// RAW tape write (k.odk): packs a 12-bit value, no crossfade logic, never touches xfado/yfado
-void dwrite(int ptr, int val) {
+void IRAM_ATTR dwrite(int ptr, int val) {                 // write a sample (0..4095)
   if (val < 0) val = 0; if (val > 4095) val = 4095;
   uint8_t *dp = dchunk[(ptr >> DCHUNK_BITS) & (DCHUNKS - 1)];
   ptr = (ptr & ((1 << DCHUNK_BITS) - 1)) * 3;
@@ -523,37 +216,18 @@ void dwrite(int ptr, int val) {
   dp[(ptr >> 1) + 1 - biz] &= (uint8_t)(0xF << (4 - forsh));
   dp[(ptr >> 1) + 1 - biz] |= (uint8_t)((val & 0xF) << forsh);
 }
+#define FILLNOISE for (int i = 0; i < DELAYSIZE; i++) dwrite(i, rand() & 4095);
 
+// the tape, then the hardware: the ADC (initDIG, setup.h), the codec on SPI3, the pins
 void initDEL() {
-  Serial.println("    -> initDEL: Allocating delay buffers..."); //For Debugging
-  Serial.printf("    -> free %u, largest block %u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  bool dok = true;
-  for (int i = 0; i < DCHUNKS - 1; i++) { dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT); if (!dchunk[i]) dok = false; }
+  bool ok = true;
+  for (int i = 0; i < DCHUNKS - 1; i++) { dchunk[i] = (uint8_t *)heap_caps_malloc(DCHUNK_BYTES, MALLOC_CAP_8BIT); if (!dchunk[i]) ok = false; }
   dchunk[DCHUNKS - 1] = dchunk_rtc;
-  delaybuffa = dchunk[0]; delaybuffb = dchunk[DCHUNKS - 1];
-
-  // NEW FIRMWARE
-  // safety check
-  if (!dok) {
-    // buffer set up fails, flash the orange lamp rapidly 
-    Serial.printf("    -> FATAL: Malloc failed (free %u, largest %u)! Entering infinite loop.\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    while (1) {
-      REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1);
-      delay(50);
-      REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1);
-      delay(50);
-    }
+  if (!ok) {                                              // no memory for the tape: the lamp flickers for ever
+    Serial.printf("FATAL: no memory for the tape (free %u, largest %u)\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    while (1) { REG(GPIO_OUT1_W1TS_REG)[0] = BIT(1); delay(50); REG(GPIO_OUT1_W1TC_REG)[0] = BIT(1); delay(50); }
   }
-
-  Serial.printf("    -> Success! Buffer A at: %p | Buffer B at: %p\n", delaybuffa, delaybuffb); //For Debugging
-  /////END
-
-  delptr = delaybuffa;
   t = 0;
-  xfado = 0; // initialize crossfade timer. added per peter's crossfade
-  yfado = 0; // initialize crossfade timer. added per peter's crossfade
-
-  //esp_task_wdt_init(30, false);
 
   REG(ESP32_SENS_SAR_DAC_CTRL1)
   [0] = 0x0;
@@ -596,7 +270,6 @@ void initDEL() {
   //USR_MOSI, MISO_HIGHPART, and DOUTDIN
   REG(SPI3_PIN_REG)
   [0] = BIT(29);
-  //REG(SPI3_CTRL2_REG)[0]=BIT(17);
   REG(SPI3_CLOCK_REG)
   [0] = (1 << 18) | (3 << 12) | (1 << 6) | 3;
 
@@ -609,14 +282,12 @@ void initDEL() {
   SPRINTER(0);
   SPRINTER(0);
 
-  // SPIRTER(0b0111110110101100); //sw_reset
   SPRINTER(0x1201);  //adc_seq,9rep,1chan0
   SPRINTER(0x1800);  //gen_ctrl_reg
   SPRINTER(0x2001);  //adc_config,io0adc0
   SPRINTER(0x2802);  //dac_config,io1dac1
   SPRINTER(0x5a00);  //pd_ref_ctrl,9vref
 
-  // SPIRTER(0b0111110110101100); //sw_reset
   SPRINTER(0x1201);  //adc_seq,9rep,1chan0
   SPRINTER(0x1800);  //gen_ctrl_reg
   SPRINTER(0x2001);  //adc_config,io0adc0
@@ -632,11 +303,8 @@ void initDEL() {
   GPIO_FUNC_OUT_SEL_CFG_REG[15] = 256;
   GPIO_FUNC_OUT_SEL_CFG_REG[16] = 256;
   GPIO_FUNC_OUT_SEL_CFG_REG[17] = 256;
-  //GPIO_FUNC_OUT_SEL_CFG_REG[18]=256;
-  //GPIO_FUNC_OUT_SEL_CFG_REG[19]=256;
   GPIO_FUNC_OUT_SEL_CFG_REG[21] = 256;
   GPIO_FUNC_OUT_SEL_CFG_REG[22] = 256;
-  //GPIO_FUNC_OUT_SEL_CFG_REG[23]=256;
   GPIO_FUNC_OUT_SEL_CFG_REG[26] = 256;
   GPIO_FUNC_OUT_SEL_CFG_REG[27] = 256;
   REG(GPIO_ENABLE_REG)
@@ -654,4 +322,3 @@ void initDEL() {
   REG(IO_MUX_GPIO2_REG)
   [0] = BIT(9) | BIT(8);  //input enable
 }
-
