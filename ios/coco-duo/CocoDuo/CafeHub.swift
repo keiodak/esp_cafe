@@ -179,6 +179,7 @@ final class CafeUnit: ObservableObject {
         if s.first == "F" {                                // "F <effect> <id> <v>": effect and id are the key
             let parts = s.split(separator: " ", maxSplits: 3)
             if parts.count >= 4 { return s.prefix(parts[0].count + parts[1].count + parts[2].count + 2) }
+            if parts.count == 3 { return s.prefix(parts[0].count + parts[1].count + 1) }   // ("F 83 <v>" …: the newest only)
             return Substring(s)
         }
         if s.first == "T" {                                // "T <a> <b> <v>": the two nodes are the key

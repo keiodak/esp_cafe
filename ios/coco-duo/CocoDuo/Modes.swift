@@ -39,7 +39,7 @@ enum Preset {
         "resonator bank · on the Cafe",
         "vowel filter · EARTH moves the vowel",
         "8 kinds · BUTTON = next · FLIP / SKIP change it",
-        "the phone plays (FOURSES · SHNTH on the phone itself) · the Cafe: COCO with slopes",
+        "the phone plays (FOURSES · SHNTH · JUSTINTS on the phone itself) · the Cafe: COCO with slopes",
         "coco chopped by a shift register · FLIP = clock · SKIP = data",
         "the sound on the tape steers the head · load a file = its own path",
         "7 effects · FLIP = next · SKIP = random · EARTH modulates",
@@ -89,7 +89,7 @@ enum Preset {
     static let ios = 6
     static let multi = 9
     static let arp = 10
-    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT", "FOURSES", "SHNTH"]
+    static let modeNames = ["GRAIN", "BYTE", "DELAY", "NOISE", "SIDRAX", "WAVE", "HABIT"]   // (FOURSES · SHNTH: iOS now)
     /// the guide that runs along the status line, one per BLE mode
     static let modeGuides = [
         "grains of what comes in · SKIP starts the score again · FREEZE stops the tape",
@@ -99,15 +99,13 @@ enum Preset {
         "four plates, one note each · press on one Cafe, it rings out on the other",
         "a vector synth · four waves in the corners · the VECTOR pad mixes them · ORBIT moves it · FREEZE holds the last 2 s",
         "the phone keeps the last minutes of what comes in · WHERE reaches back · LENGTH at the top = the whole run",
-        "crucFX's TARPTERGE (A) / ARPSERGE (B) · a finger joins what it covers, lightly or flat · DRAW: lines are wires",
-        "the Shbobo Shnth: its patches (shlisp) on the phone and the Cafes · four bars, two antennae, eight buttons + TAR"
     ]
     /// the default playlist (up to 11 pool ids): BLE, MULTI, ARP_DELAY, HARMONY, then the Cafe's own ones
     static let defaultPlaylist = [2, 9, 10, 6, 0, 1, 3, 4, 5, 7, 8]
     /// the playlist now (Rig keeps it; it is also the Cafe's BUTTON menu) — the numbers shown are places in it
     static var order = defaultPlaylist
     static func number(_ n: Int) -> Int { (order.firstIndex(of: n) ?? -1) + 1 }
-    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath", "square.stack.3d.up", "waveform.path.ecg"]
+    static let modeIcons = ["circle.grid.3x3", "number", "repeat", "scribble.variable", "hand.point.up.left", "waveform.circle", "clock.arrow.circlepath"]
     /// "03_BLE"
     static func tag(_ n: Int) -> String {
         let k = number(n)
@@ -381,7 +379,7 @@ final class Rig: ObservableObject {
     @Published var preset: [Int] = (Rig.d.array(forKey: "rig.preset") as? [Int]) ?? [Preset.ble, Preset.ble] {
         didSet { Self.d.set(preset, forKey: "rig.preset") }
     }
-    @Published var mode: [Int] = (Rig.d.array(forKey: "rig.mode") as? [Int]) ?? [0, 0] {
+    @Published var mode: [Int] = ((Rig.d.array(forKey: "rig.mode") as? [Int]) ?? [0, 0]).map { $0 >= 0 && $0 < Preset.modeNames.count ? $0 : 0 } {
         didSet { Self.d.set(mode, forKey: "rig.mode") }
     }
     /// who the preset manager talks to: 0 = A, 1 = B, 2 = both
@@ -577,10 +575,12 @@ final class Rig: ObservableObject {
     /// APP+CAFE's OTHER layer (COCO+ / BOUNCE) — what was APP+CAFE+OTHER
     func isOther(_ s: Int) -> Bool { preset[s] == Preset.arp && arpMode == 3 }
     var ctxOther: Bool { ctxPreset == Preset.arp && arpMode == 3 }
-    /// iOS: 0 FOURSES · 1 SHNTH (the phone plays them)
-    @Published var iosMode: Int = Rig.d.integer(forKey: "rig.iosMode") { didSet { Self.d.set(iosMode, forKey: "rig.iosMode") } }
+    /// iOS: 0 FOURSES · 1 SHNTH · 2 JUSTINTS (the phone plays them)
+    static let iosNames = ["FOURSES", "SHNTH", "JUSTINTS"]
+    @Published var iosMode: Int = min(2, max(0, Rig.d.integer(forKey: "rig.iosMode"))) { didSet { Self.d.set(iosMode, forKey: "rig.iosMode") } }
     var iosFourses: Bool { ctxPreset == Preset.ios && iosMode == 0 }
     var iosShnth: Bool { ctxPreset == Preset.ios && iosMode == 1 }
+    var iosJi: Bool { ctxPreset == Preset.ios && iosMode == 2 }
     /// APP+CAFE's SUNDAY
     let sunAxes: [PadAxis] = SunPad.starts.map { PadAxis($0) }
     @Published var sunLevel: Double = 0.9
@@ -629,11 +629,11 @@ final class Rig: ObservableObject {
 
     var padSet: PadSet {
         if ctxPreset == Preset.harmony { return .harmony }
-        if ctxPreset == Preset.ios { return iosMode == 1 ? .shnth : .fourses }   // iOS: FOURSES · SHNTH on the phone
+        if ctxPreset == Preset.ios { return iosMode == 0 ? .fourses : .shnth }   // iOS: FOURSES · SHNTH / JUSTINTS (one screen kind) on the phone
         if ctxPreset == Preset.multi { return .multi }
         if ctxPreset == Preset.arp { return arpMode == 3 ? .other : arpMode == 2 ? .sun : arpMode == 1 ? (pcMode == 1 ? .speech : .pcoco) : .arp }   // ARP / PHONE_COCO / SUNDAY / OTHER
         guard ctxPreset == Preset.ble else { return .knob }
-        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit, .fourses, .shnth][min(max(ctxMode, 0), 8)]
+        return [PadSet.grain, .byte, .delay, .noise, .sidrax, .wave, .habit][min(max(ctxMode, 0), 6)]
     }
     /// pads laid out per Cafe (top row A, bottom row B)
     var perRow: Bool { padSet == .delay || padSet == .harmony || padSet == .multi || padSet == .other }

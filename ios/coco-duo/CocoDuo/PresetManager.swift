@@ -79,6 +79,19 @@ struct PresetManagerView: View {
                     }
                 }
                 }
+                if rig.preset.contains(Preset.ios) {                     // iOS: what the phone plays
+                    PanelCard(title: "iOS", note: rig.ctxPreset == Preset.ios ? Preset.tag(Preset.ios) : "choose iOS first") {
+                        HStack(spacing: PanelMetrics.chipSpacing) {
+                            ForEach(0..<Rig.iosNames.count, id: \.self) { k in
+                                ChipButton(title: Rig.iosNames[k], filled: rig.ctxPreset == Preset.ios && rig.iosMode == k, height: 22, font: 9.5) {
+                                    d.setIosMode(k)
+                                }
+                            }
+                        }
+                        .disabled(rig.ctxPreset != Preset.ios)
+                        .unlit(rig.ctxPreset != Preset.ios)
+                    }
+                }
                 if rig.preset.contains(Preset.multi) {
                     MultiCard(d: d, rig: rig)
                 }
@@ -86,7 +99,7 @@ struct PresetManagerView: View {
                     ArpCard(d: d, rig: rig)
                 }
                 if rig.preset.contains(Preset.arp) && rig.arpMode == 3 {
-                    PanelCard(title: "APP+CAFE+OTHER", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
+                    PanelCard(title: "COCO+ · BOUNCE", note: "Cafe -> OP-1F (Bluetooth MIDI)") {
                         Op1Controls(d: d, midi: d.midi, rig: rig)
                     }
                 }
@@ -420,6 +433,8 @@ private struct ArpCard: View {
                 ChipButton(title: "ARP", filled: rig.arpMode == 0) { d.setArpMode(0) }
                 ChipButton(title: "PHONE_COCO", filled: rig.arpMode == 1) { d.setArpMode(1) }
                 ChipButton(title: "BOX", filled: rig.arpMode == 2) { d.setArpMode(2) }
+                ChipButton(title: "COCO+", filled: rig.arpMode == 3 && rig.otPage != OtPad.bounce) { d.setArpMode(3); d.setOtPage(rig.otVar) }
+                ChipButton(title: "BOUNCE", filled: rig.arpMode == 3 && rig.otPage == OtPad.bounce) { d.setArpMode(3); d.setOtPage(OtPad.bounce) }
             }
             // both laid over each other: the card keeps one size whichever is shown
             ZStack(alignment: .topLeading) {

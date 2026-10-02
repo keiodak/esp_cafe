@@ -59,6 +59,15 @@ final class ShnthPlayer: ObservableObject {
     private var sr = 48000.0
     private var running = false
     private var gain: Float = 0
+    /// the output filter the hardware has after its DAC: the engine steps at ~17.6 kHz in 12 bits, and those steps'
+    /// images (a hiss / grit above ~9 kHz) are taken off by a 2-pole low-pass at 7 kHz
+    private var lp: (b0: Float, b1: Float, b2: Float, a1: Float, a2: Float) = (1, 0, 0, 0, 0)
+    private var lpL: (Float, Float) = (0, 0), lpR: (Float, Float) = (0, 0)
+    private func makeLowPass(_ fc: Double) {
+        let w = 2 * Double.pi * min(fc, sr * 0.45) / sr, q = 0.7071
+        let al = sin(w) / (2 * q), c = cos(w), a0 = 1 + al
+        lp = (Float((1 - c) / 2 / a0), Float((1 - c) / a0), Float((1 - c) / 2 / a0), Float(-2 * c / a0), Float((1 - al) / a0))
+    }
 
     init() {
         dl.initialize(repeating: 0, count: Int(SHNTH_DL_SAMPLES))
@@ -184,6 +193,7 @@ final class ShnthPlayer: ObservableObject {
             try? s.setActive(true)
             let hw = engine.outputNode.outputFormat(forBus: 0).sampleRate
             sr = hw > 1000 ? hw : (s.sampleRate > 0 ? s.sampleRate : 48000)
+            makeLowPass(7000)
             let fmt = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2)!
             let n = AVAudioSourceNode(format: fmt) { [unowned self] _, _, frames, abl -> OSStatus in
                 self.render(Int(frames), UnsafeMutableAudioBufferListPointer(abl))
@@ -216,10 +226,17 @@ final class ShnthPlayer: ObservableObject {
         while done < frames {
             let n = min(8192, frames - done)
             if engineImg != nil { shnth_render(eng, tmp, Int32(n), UInt32(sr)) }
+            let f = lp
             for i in 0..<n {
                 gain += (want - gain) * 0.002
-                l[done + i] = Float(engineImg != nil ? tmp[2 * i] : 0) / 32768 * gain
-                r[done + i] = Float(engineImg != nil ? tmp[2 * i + 1] : 0) / 32768 * gain
+                let xl = Float(engineImg != nil ? tmp[2 * i] : 0) / 32768 * gain
+                let xr = Float(engineImg != nil ? tmp[2 * i + 1] : 0) / 32768 * gain
+                let yl = f.b0 * xl + lpL.0                                  // (transposed direct form II)
+                lpL = (f.b1 * xl - f.a1 * yl + lpL.1, f.b2 * xl - f.a2 * yl)
+                let yr = f.b0 * xr + lpR.0
+                lpR = (f.b1 * xr - f.a1 * yr + lpR.1, f.b2 * xr - f.a2 * yr)
+                l[done + i] = yl
+                r[done + i] = yr
             }
             done += n
         }

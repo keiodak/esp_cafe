@@ -48,8 +48,11 @@ final class Director: ObservableObject {
     let shnth = ShnthPlayer()
     /// SHNTH's antennae (TILT · CAM · OFF)
     let ant = Antennae()
-    /// iOS · FOURSES: the Fourses on the phone
-    let phoneFr = PhoneFourses()
+    /// iOS · JUSTINTS: Peter Blasser's justints on the phone
+    let ji = JustintsPlayer()
+    /// iOS · FOURSES: the Fourses app itself (FoursesApp/), made the first time it is shown
+    private(set) var fa: FA.AppModel?
+    func faModel() -> FA.AppModel { if let m = fa { return m }; let m = FA.AppModel(units: hub.units); fa = m; return m }
     private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
@@ -76,7 +79,6 @@ final class Director: ObservableObject {
             for u in self.units where u.isConnected && self.rig.isOther(u.slot) { u.send("F 84") }
         }
         applyOther()
-        phoneFr.onReady = { [weak self] in self?.frPhoneAll() }        // iOS · FOURSES: the circuit made -> the board to it
         // ARP_DELAY: the EARTH of the Cafe on that preset reaches the arpeggiator ~30x a second
         earthTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -277,19 +279,10 @@ final class Director: ObservableObject {
         syncIfPair()
     }
 
-    /// iOS: FOURSES (0) or SHNTH (1), both on the phone
+    /// iOS: FOURSES (0) · SHNTH (1) · JUSTINTS (2), all on the phone
     func setIosMode(_ m: Int) {
-        rig.iosMode = m == 1 ? 1 : 0
-        if rig.iosFourses { frPhoneAll() }
+        rig.iosMode = min(2, max(0, m))
         refresh()
-    }
-    private var frPhoneWas = false
-    /// iOS · FOURSES: everything the board holds, to the phone's circuit
-    func frPhoneAll() {
-        for h in 0..<4 { phoneFr.setPot(h, rig.frPots[h]); phoneFr.setRange(h, rig.frRanges[h]) }
-        phoneFr.setStarve(rig.frStarve)
-        phoneFr.setShapeLinks(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: false, slot: 0))
-        FrBoard.drift(icons: rig.frIcons, shapes: frLive, aspect: frAspect).volts.forEach { phoneFr.setDrift($0.key, $0.value) }
     }
 
     func cycleMode() {
@@ -302,7 +295,7 @@ final class Director: ObservableObject {
             else if rig.otPage != OtPad.bounce { setOtPage(OtPad.bounce) }
             else { setArpMode(0) }
         }
-        else if rig.ctxPreset == Preset.ios { setIosMode(1 - rig.iosMode) }          // iOS: FOURSES <-> SHNTH
+        else if rig.ctxPreset == Preset.ios { setIosMode((rig.iosMode + 1) % 3) }    // iOS: FOURSES -> SHNTH -> JUSTINTS
     }
 
     func setTarget(_ t: Int) { rig.target = t; refresh() }
@@ -431,14 +424,12 @@ final class Director: ObservableObject {
     }
     /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
     func shnthTick() {
-        let onScreen = (rig.ctxPreset == Preset.ble && rig.ctxMode == 8) || rig.iosShnth
-        // SHNTH: on BLE the Cafes only (the phone's engine runs silent, for its LEDs); on iOS the phone plays it
-        if shnth.onPhone != rig.iosShnth { shnth.onPhone = rig.iosShnth }
-        if !shnth.onCafe { shnth.onCafe = true }
-        phoneFr.play(rig.iosFourses)                                    // iOS · FOURSES: the phone's circuit sounds
-        if rig.iosFourses && !frPhoneWas { frPhoneAll() }               // (just come to it: the board, all of it)
-        frPhoneWas = rig.iosFourses
-        shnth.play(onScreen)
+        // iOS: SHNTH · JUSTINTS · FOURSES on the phone (no longer on the Cafes)
+        if !shnth.onPhone { shnth.onPhone = true }
+        if shnth.onCafe { shnth.onCafe = false }
+        shnth.play(rig.iosShnth)
+        ji.play(rig.iosJi)
+        if rig.iosFourses || fa != nil { faModel().setActive(rig.iosFourses) }   // FOURSES: the app's own circuit
         guard !shnthCafes.isEmpty else { return }
         if shnth.cafeDirty { shnthSend() }
         let line = shnth.cafeInputLine()
@@ -957,18 +948,15 @@ final class Director: ObservableObject {
     // MARK: FOURSES
     func setFrRange(_ r: Int) {
         rig.frRange = r; rig.frRanges = [r, r, r, r]
-        if rig.iosFourses { for h in 0..<4 { phoneFr.setRange(h, r) }; return }
         ctxUnits().forEach { $0.send("O 8 \(r * 500)") }
     }
     /// one horse's range switch
     func setFrRange(_ h: Int, _ r: Int) {
         rig.frRanges[h] = r
-        if rig.iosFourses { phoneFr.setRange(h, r); return }
         ctxUnits().forEach { $0.send("O \(4 + h) \(r * 500)") }
     }
     func setFrPot(_ h: Int, _ v: Double) {
         rig.frPots[h] = v
-        if rig.iosFourses { phoneFr.setPot(h, v); return }
         ctxUnits().forEach { $0.send("O \(h) \(Int((v * 1000).rounded()))") }
     }
     /// the board's shape (width / height of the field): what lies inside a shape depends on it
@@ -976,11 +964,6 @@ final class Director: ObservableObject {
     /// the wires the shapes make, as sent: only what changed goes
     private var frWireSent: [[[Int]: Int]] = [[:], [:]]           // (each Cafe: node pair -> strength)
     func frSyncShapes() {
-        if rig.iosFourses {                                             // iOS · FOURSES: the phone's circuit, not the Cafes
-            phoneFr.setShapeLinks(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: false, slot: 0))
-            FrBoard.drift(icons: rig.frIcons, shapes: frLive, aspect: frAspect).volts.forEach { phoneFr.setDrift($0.key, $0.value) }
-            return
-        }
         for u in ctxUnits() {                                           // (each Cafe its own: a shape may pass only one)
             let sl = u.slot == 1 ? 1 : 0
             let now = Dictionary(FrBoard.links(icons: rig.frIcons, shapes: frLive, aspect: frAspect, light: frLightOn, slot: sl).map { ([$0[0], $0[1]], $0[2]) },
@@ -1061,7 +1044,6 @@ final class Director: ObservableObject {
     /// STARVE: the Cafes' supply to the circuit (0.5 as it is; left starved: slower, smaller, sagging, sputtering; right fed)
     func setFrStarve(_ v: Double) {
         rig.frStarve = v
-        phoneFr.setStarve(v)
         for u in units where u.isConnected && rig.preset[u.slot] == Preset.ble && rig.mode[u.slot] == 7 { u.send("O 22 \(Int((v * 1000).rounded()))") }
     }
     /// ◉ hung circles: each a little spring from where it was drawn, pulled by the phone's tilt, twitching (~30x a second)
@@ -1122,7 +1104,6 @@ final class Director: ObservableObject {
     var frSent: [String: Int] = [:]
     private var frOnly: [Int: Int] = [:]
     func frTouches(_ links: [Int: [Int: Int]], only: [Int: Int] = [:]) {
-        if rig.iosFourses { phoneFr.setFingerLinks(links); return }   // iOS · FOURSES: the phone's circuit
         frOnly = only                                                   // (a node a finger reaches through a shape that passes one Cafe)
         var now: [String: Int] = [:]
         for (f, m) in links { for (i, v) in m { now["\(min(f, i)) \(max(f, i))"] = max(1, min(999, (v / 50) * 50 + 25)) } }   // (steps of 50: fewer lines)
@@ -1280,14 +1261,17 @@ private struct MainScreen: View {
         if rig.padSet == .knob {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rig.padSet == .shnth && rig.iosMode == 2 {
+            JustintsBoard(jp: d.ji, ant: d.ant)                                           // iOS · JUSTINTS
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .shnth {
-            ShnthBoard(sh: d.shnth, ant: d.ant) { d.shnth.cafeDirty = true }   // SHNTH: the Shnth's controls
+            ShnthBoard(sh: d.shnth, ant: d.ant) { d.shnth.cafeDirty = true }   // iOS · SHNTH: the Shnth's controls
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
             BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .fourses {
-            FoursesBoard(d: d, rig: rig, cam: camera.state, camOn: camera.enabled)       // FOURSES: the board itself
+            FA.Embedded(model: d.faModel())                                               // iOS · FOURSES: the Fourses app itself
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
@@ -1611,7 +1595,7 @@ private struct HudBar: View {
                     } else {
                         key(rig.ctxOther ? (rig.otPage == OtPad.bounce ? "arrow.down.circle" : "music.note.list")   // APP+CAFE's OTHER: COCO+ · BOUNCE
                             : rig.ctxPreset == Preset.arp ? (rig.arpMode == 0 ? "pianokeys" : rig.arpMode == 2 ? "sun.max" : rig.pcMode == 1 ? "waveform.and.mic" : "recordingtape")
-                            : rig.ctxPreset == Preset.ios ? (rig.iosMode == 1 ? "waveform.path.ecg" : "square.stack.3d.up")   // iOS: FOURSES · SHNTH
+                            : rig.ctxPreset == Preset.ios ? ["square.stack.3d.up", "waveform.path.ecg", "circle.hexagongrid"][min(2, max(0, rig.iosMode))]   // iOS: FOURSES · SHNTH · JUSTINTS
                                                         : Preset.modeIcons[min(max(rig.ctxMode, 0), Preset.modeIcons.count - 1)], on: false,
                             enabled: rig.ctxPreset == Preset.ble || rig.ctxPreset == Preset.arp || rig.ctxPreset == Preset.ios) { d.cycleMode() }
                     }
@@ -1629,7 +1613,8 @@ private struct HudBar: View {
                 contextKey(top ? 2 : 3)
                 if top { key("waveform") { showWave = true } }
                 else if rig.padSet == .other && rig.otPage == OtPad.bounce { BounceModeKey(seq: d.bounce) }   // BOUNCE: DROP / STEP
-                else if rig.padSet == .shnth { ShnthPatchKey(sh: d.shnth) }                                    // SHNTH: PATCH's panel
+                else if rig.padSet == .shnth && rig.iosMode != 2 { ShnthPatchKey(sh: d.shnth) }                // SHNTH: PATCH's panel
+                else if rig.padSet == .shnth || rig.padSet == .fourses { Color.clear.frame(width: 50, height: 21) }   // (JUSTINTS · FOURSES: their own keys)
                 else { key("camera.aperture", on: camera.enabled) { camera.enabled.toggle() } }
             }
         }
@@ -1649,6 +1634,7 @@ private struct HudBar: View {
             info = unit.hbUp > 0 ? String(format: "↑%.1f↓%.1f", unit.hbUp, unit.hbDown)  // comes: the Cafe's made / sent / MTU
                                  : "M\(unit.hbMade % 1000)S\(unit.hbSent % 1000)U\(unit.cafeMtu)"
         }
+        if p == Preset.ios { info = Rig.iosNames[min(2, max(0, rig.iosMode))] }
         if p == Preset.multi { info = Fx.names[min(max(unit.isConnected && unit.fx >= 0 ? unit.fx : rig.fxLocal[unit.slot], 0), Fx.count - 1)] + (rig.fxLink ? " LINK" : "") }
         if (p == Preset.ble && m == 2) || p == Preset.harmony || p == Preset.arp {
             info += (info.isEmpty ? "" : " ") + String(format: "%.0fBPM", unit.bpm > 0 ? unit.bpm : rig.bpm)
@@ -1751,12 +1737,7 @@ private struct HudBar: View {
             default: textKey("CLEAR", on: false) { d.habitClear() }
             }
         case .fourses:
-            switch n {
-            case 0: textKey(FrPad.rangeNames[rig.frRange], on: rig.frRange < 2) { d.setFrRange((rig.frRange + 1) % 3) }   // AUDIO -> CV -> LOW
-            case 1: textKey(["PLAY", "DRAW", "EDIT"][rig.frMode], on: rig.frMode > 0) { rig.frMode = (rig.frMode + 1) % 3 }   // fingers · shapes · moving
-            case 2: textKey("RANDOM") { d.frRandom() }                                                 // the icons thrown anew
-            default: textKey("CLEAR") { d.frClearShapes() }                                            // every shape away
-            }
+            blank                                                                  // (the Fourses app has its own keys)
         case .wave:
             switch n {
             case 0: key("tuningfork", on: rig.sxAligned) { d.setSxAligned(!rig.sxAligned) }     // ALIGNED / FREE
@@ -1817,11 +1798,19 @@ private struct HudBar: View {
             default: key("dice") { d.fxRandom(1) }
             }
         case .shnth:
-            switch n {
-            case 0: textKey("GEN") { d.shnth.gen() }                              // GEN: a new patch, at random
-            case 2: ShnthTarKey(sh: d.shnth, ant: d.ant)                         // TAR (held)
-            case 3: AntSourceKey(ant: d.ant)                                     // the antennae: TILT · CAM · OFF
-            default: blank
+            if rig.iosMode == 2 {                                                // JUSTINTS
+                switch n {
+                case 0: textKey("GEN") { d.ji.loadText(JustintsGen.make([.order, .mix, .chaos].randomElement()!), as: "GEN") }
+                case 3: AntSourceKey(ant: d.ant)                                 // the antennae: TILT · CAM · OFF
+                default: blank
+                }
+            } else {
+                switch n {
+                case 0: textKey("GEN") { d.shnth.gen() }                          // GEN: a new patch, at random
+                case 2: ShnthTarKey(sh: d.shnth, ant: d.ant)                     // TAR (held)
+                case 3: AntSourceKey(ant: d.ant)                                 // the antennae: TILT · CAM · OFF
+                default: blank
+                }
             }
         case .other:
             switch n {

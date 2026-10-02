@@ -1,7 +1,7 @@
 // ShnthBoard.swift — coco duo (k.odk)
 // SHNTH's screen (in place of the pads), in coco duo's look: a thin line (the patch, its preset, the LEDs, the
 // antennae's meters), then MAJOR over the four bars (XY pads, finger area — large) over minor. SHNTH sounds on the
-// Cafes only (the phone's engine runs silent, for the LEDs).
+// phone (iOS preset).
 // The corner keys: GEN (top left's right) · TAR (top right's left) · the antennae's source TILT / CAM / OFF (bottom
 // right's left) · PATCH (bottom right's right): the panel — the patch, its preset, its code.
 
@@ -44,8 +44,12 @@ struct ShnthBoard: View {
         HStack(spacing: 8) {
             Text(sh.customName.isEmpty ? sh.patchName : sh.customName)
                 .font(.hud(PanelMetrics.labelFont, .semibold)).foregroundStyle(PastelTheme.textPrimary).lineLimit(1)
+            StepKey(left: true) { sh.prevPatch(); changed() }                    // ‹ › the patch
+            StepKey(left: false) { sh.nextPatch(); changed() }
+            StepKey(left: true) { sh.setPreset(sh.preset - 1); changed() }      // ‹ 1/n › its preset
             Text("\(sh.preset + 1)/\(max(1, sh.presetCount))")
                 .font(.hud(PanelMetrics.labelFont, .medium)).foregroundStyle(PastelTheme.textSecondary)
+            StepKey(left: false) { sh.setPreset(sh.preset + 1); changed() }
             if !sh.error.isEmpty {
                 Text(sh.error).font(.hud(8)).foregroundStyle(PastelTheme.hudOrange).lineLimit(1)
             }
@@ -61,7 +65,7 @@ struct ShnthBoard: View {
             }
             AntMeters(ant: ant).frame(width: 90)
         }
-        .frame(height: 12)
+        .frame(height: PanelMetrics.chipHeight)
     }
 
     /// a row of four: MAJOR (above the bars) or minor (below)
@@ -79,7 +83,7 @@ struct ShnthBoard: View {
 }
 
 /// the antennae's two meters, small (A over B)
-private struct AntMeters: View {
+struct AntMeters: View {
     @ObservedObject var ant: Antennae
     var body: some View {
         VStack(spacing: 2) {

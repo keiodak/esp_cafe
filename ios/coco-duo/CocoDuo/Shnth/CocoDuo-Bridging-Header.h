@@ -3,3 +3,5 @@
 #include "shlisp_compile.h"
 // the Fourses circuit (iOS · FOURSES, on the phone): the Fourses app's FoursesDSP
 #include "../Fourses/FoursesDSP.h"
+// justints (C, MIT — Copyright (c) 2021 peter blasser)
+#include "justints.h"
