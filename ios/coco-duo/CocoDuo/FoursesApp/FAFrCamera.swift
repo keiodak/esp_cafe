@@ -1,4 +1,4 @@
-// FrCamera.swift — Fourses (k.odk)
+// FAFrCamera.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // The camera: its live picture shows through the shapes, and each shape reads how bright it is inside (and what
 // moves there) as its own voltage — a light-dependent source joined to what the shape covers.

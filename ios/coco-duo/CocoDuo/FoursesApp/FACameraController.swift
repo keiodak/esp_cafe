@@ -1,4 +1,4 @@
-// CameraController.swift — the camera, cut into an 8 × 16 mosaic (from coco duo)
+// FACameraController.swift — the camera, cut into an 8 × 16 mosaic (from coco duo)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 import AVFoundation
 import CoreVideo

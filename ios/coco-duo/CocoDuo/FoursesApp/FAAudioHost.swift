@@ -1,4 +1,4 @@
-// AudioHost.swift — Fourses (k.odk)
+// FAAudioHost.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // The engine (C, FoursesDSP) in an AVAudioSourceNode. It runs at four times the output's rate and decimates.
 

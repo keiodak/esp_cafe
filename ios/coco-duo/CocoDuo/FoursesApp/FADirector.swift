@@ -1,4 +1,4 @@
-// Director.swift — Fourses (k.odk)
+// FADirector.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // Between the screen and the circuit: the shapes and the fingers become links, the pots and the rest are set,
 // shapes flicker and sway (each its own kind), the camera lights the shapes, the LEDs and each node's current

@@ -1,4 +1,4 @@
-// FoursesBoard.swift — Fourses (k.odk)
+// FAFoursesBoard.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // The board: TARPTERGE's and ARPSERGE's touch nodes (44 each, Blasser's glyphs), INTERSEXON's (eight sample & holds,
 // eight current cells) and the terminals lie on it as icons, over the whole screen.

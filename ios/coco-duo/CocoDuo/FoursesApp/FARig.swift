@@ -1,4 +1,4 @@
-// Rig.swift — Fourses (k.odk)
+// FARig.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // What the screen shows and the engine is set to; kept between launches.
 

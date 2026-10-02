@@ -1,4 +1,4 @@
-// CafeLink.swift — Fourses (k.odk)
+// FACafeLink.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // The cup: Fourses linked to Cafes, two: A and B. In coco duo these are coco duo's own Cafes A / B (its Bluetooth,
 // its link): the cup's panel shows them, LET GO / LINK each. While one is linked (and FOURSES is on the screen) the

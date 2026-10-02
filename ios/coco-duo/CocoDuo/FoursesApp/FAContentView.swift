@@ -1,4 +1,4 @@
-// ContentView.swift — Fourses (k.odk)
+// FAContentView.swift — Fourses (k.odk)
 // (in coco duo: the Fourses app as it is, inside FA — iOS · FOURSES)
 // The board over the whole screen; above it the eight horses (TARPTERGE, ARPSERGE), below it STARVE, the filters at
 // the end, the level and the board's keys; the panel (◌ ◉, presets, camera) rises over the board's foot.
