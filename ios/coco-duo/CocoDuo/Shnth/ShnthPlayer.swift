@@ -92,6 +92,27 @@ final class ShnthPlayer: ObservableObject {
         cafeDirty = true
         freeRetired()
     }
+    /// any shlisp text (GEN, KEPT): compile it and play it, here and on the Cafes (nil = it compiled; else the message)
+    @discardableResult
+    func play(source: String, preset n: Int = 0) -> String? {
+        var out = [UInt8](repeating: 0, count: 70000)
+        var err = [CChar](repeating: 0, count: 256)
+        let len = source.withCString { shlisp_compile($0, &out, Int32(out.count), &err, Int32(err.count)) }
+        guard len > 0 else { error = String(cString: err); return error }
+        error = ""
+        image = Array(out.prefix(Int(len)))
+        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(len))
+        buf.update(from: image, count: Int(len))
+        presetCount = image.count >= 2 ? Int(image[1]) + 1 : 1
+        preset = min(max(n, 0), presetCount - 1)
+        os_unfair_lock_lock(&lock)
+        if let old = pendingImg { retired.append(old) }
+        pendingImg = buf; pendingLen = Int(len); pendingPreset = preset
+        os_unfair_lock_unlock(&lock)
+        cafeDirty = true
+        freeRetired()
+        return nil
+    }
     func nextPatch() { select(patch: patch + 1) }
     func prevPatch() { select(patch: patch - 1) }
     func setPreset(_ n: Int) {

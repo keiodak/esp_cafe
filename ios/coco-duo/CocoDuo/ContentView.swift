@@ -46,6 +46,10 @@ final class Director: ObservableObject {
     let sines = SineChords()
     /// SHNTH (BLE mode 8): the Shbobo Shnth's engine on the phone, and its patches for the Cafes
     let shnth = ShnthPlayer()
+    /// JUSTINTS (in SHNTH's screen): Peter Blasser's justints on the phone · the antennae · KEEP's files
+    let ji = JustintsPlayer()
+    let ant = Antennae()
+    let lib = Library()
     private var shnthLine = ""
     /// APP+CAFE+OTHER's BOUNCE: the three panels of falling balls
     let bounce = BounceSeq()
@@ -410,7 +414,9 @@ final class Director: ObservableObject {
     /// ~30x a second: the phone's engine on / off, the controls to the Cafes when they change
     func shnthTick() {
         let onScreen = rig.ctxPreset == Preset.ble && rig.ctxMode == 8
-        shnth.play(onScreen && shnth.onPhone)
+        let jiOn = UserDefaults.standard.bool(forKey: "shnth.ji")       // (the screen's SHNTH | JUSTINTS)
+        shnth.play(onScreen && shnth.onPhone && !jiOn)
+        ji.play(onScreen && jiOn)
         guard !shnthCafes.isEmpty else { return }
         if shnth.cafeDirty { shnthSend() }
         let line = shnth.cafeInputLine()
@@ -1235,7 +1241,7 @@ private struct MainScreen: View {
             KnobPlacard(d: d, rig: rig, a: hub.units[0], b: hub.units[1])
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .shnth {
-            ShnthBoard(sh: d.shnth) { d.shnth.cafeDirty = true }                        // SHNTH: the Shnth's controls
+            ShnthBoard(sh: d.shnth, jp: d.ji, ant: d.ant, lib: d.lib) { d.shnth.cafeDirty = true }   // SHNTH | JUSTINTS
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rig.padSet == .other && rig.otPage == OtPad.bounce {
             BounceBoard(seq: d.bounce)                                                    // BOUNCE: the three panels
